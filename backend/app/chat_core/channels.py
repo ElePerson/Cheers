@@ -1,0 +1,137 @@
+"""频道与成员 REST 路由."""
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.chat_core.schemas import (
+    ChannelCreate,
+    ChannelInResponse,
+    MemberAdd,
+    MemberInResponse,
+)
+from app.db.models import BotAccount, Channel, ChannelMembership, Workspace
+from app.db.session import get_session
+from app.guide.constants import GUIDE_BOT_ID
+
+router = APIRouter(prefix="/api/channels", tags=["channels"])
+
+
+@router.get("")
+async def list_channels(session: AsyncSession = Depends(get_session)) -> dict:
+    """获取频道列表."""
+    result = await session.execute(select(Channel).order_by(Channel.created_at))
+    channels = result.scalars().all()
+    return {
+        "status": "success",
+        "data": [ChannelInResponse.model_validate(c).model_dump() for c in channels],
+    }
+
+
+@router.post("")
+async def create_channel(
+    body: ChannelCreate,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """创建频道."""
+    result = await session.execute(select(Workspace).where(Workspace.workspace_id == body.workspace_id))
+    ws = result.scalar_one_or_none()
+    if not ws:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    ch = Channel(
+        workspace_id=body.workspace_id,
+        name=body.name,
+        type=body.type,
+        purpose=body.purpose,
+    )
+    session.add(ch)
+    await session.flush()
+    # 自动将引导 Bot 加入新项目，使所有项目内都能 @引导
+    r = await session.execute(
+        select(BotAccount).where(BotAccount.bot_id == GUIDE_BOT_ID)
+    )
+    if r.scalar_one_or_none():
+        session.add(
+            ChannelMembership(
+                channel_id=ch.channel_id,
+                member_id=GUIDE_BOT_ID,
+                member_type="bot",
+            )
+        )
+        await session.flush()
+    return {"status": "success", "data": ChannelInResponse.model_validate(ch).model_dump()}
+
+
+@router.get("/{channel_id}/members")
+async def list_members(
+    channel_id: str,
+    with_username: bool = False,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """获取频道成员列表。with_username=true 时返回 Bot 的 username 供 @ 选择用。"""
+    result = await session.execute(
+        select(ChannelMembership).where(ChannelMembership.channel_id == channel_id)
+    )
+    members = result.scalars().all()
+    if not with_username:
+        return {
+            "status": "success",
+            "data": [MemberInResponse.model_validate(m).model_dump() for m in members],
+        }
+    out = []
+    for m in members:
+        username = None
+        if m.member_type == "bot":
+            r = await session.execute(
+                select(BotAccount).where(BotAccount.bot_id == m.member_id)
+            )
+            bot = r.scalar_one_or_none()
+            if bot:
+                username = bot.username
+        out.append({
+            "channel_id": m.channel_id,
+            "member_id": m.member_id,
+            "member_type": m.member_type,
+            "username": username,
+        })
+    return {"status": "success", "data": out}
+
+
+@router.post("/{channel_id}/members")
+async def add_member(
+    channel_id: str,
+    body: MemberAdd,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """添加频道成员."""
+    result = await session.execute(select(Channel).where(Channel.channel_id == channel_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="channel not found")
+    m = ChannelMembership(
+        channel_id=channel_id,
+        member_id=body.member_id,
+        member_type=body.member_type,
+    )
+    session.add(m)
+    await session.flush()
+    return {"status": "success", "data": MemberInResponse.model_validate(m).model_dump()}
+
+
+@router.delete("/{channel_id}/members/{member_id}")
+async def remove_member(
+    channel_id: str,
+    member_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """移除频道成员."""
+    result = await session.execute(
+        select(ChannelMembership).where(
+            ChannelMembership.channel_id == channel_id,
+            ChannelMembership.member_id == member_id,
+        )
+    )
+    m = result.scalar_one_or_none()
+    if not m:
+        raise HTTPException(status_code=404, detail="membership not found")
+    await session.delete(m)
+    await session.flush()
+    return {"status": "success"}

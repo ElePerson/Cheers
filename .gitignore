@@ -1,0 +1,51 @@
+# 环境与密钥
+.env
+.env.local
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# 运行时与数据（设计书约定排除）
+data/
+tmp/
+.tmp/
+*.db
+*.db-wal
+*.db-shm
+
+# 前端
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# 测试与覆盖率
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# 构建与日志
+*.log
+dist/
+build/
+*.egg-info/
+*.egg
+
+# 文档生成物（保留设计 docx，不提交生成物）
+# docs/*.docx 可保留在仓库，按团队约定

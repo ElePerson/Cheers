@@ -1,0 +1,106 @@
+"""ChatCore 请求/响应模型."""
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class ChannelCreate(BaseModel):
+    """创建频道."""
+    workspace_id: str
+    name: str
+    type: str = "public"
+    purpose: str | None = None
+
+
+class ChannelInResponse(BaseModel):
+    """频道响应."""
+    model_config = ConfigDict(from_attributes=True)
+    channel_id: str
+    workspace_id: str
+    name: str
+    type: str
+    purpose: str | None = None
+
+
+class MemberAdd(BaseModel):
+    """添加成员."""
+    member_id: str
+    member_type: str  # user | bot
+
+
+class MemberInResponse(BaseModel):
+    """成员响应."""
+    model_config = ConfigDict(from_attributes=True)
+    channel_id: str
+    member_id: str
+    member_type: str
+
+
+class MemberWithUsernameInResponse(BaseModel):
+    """成员响应（含 Bot 的 username，便于 @ 选择列表）."""
+    channel_id: str
+    member_id: str
+    member_type: str
+    username: str | None = None  # bot 时为 @ 用的名字
+
+
+class MessageCreate(BaseModel):
+    """发送消息."""
+    content: str
+    sender_id: str
+    sender_type: str = "user"  # user | bot
+    file_ids: list[str] = []
+    mention_bot_ids: list[str] = []
+
+
+class MessageInResponse(BaseModel):
+    """消息响应."""
+    model_config = ConfigDict(from_attributes=True)
+    msg_id: str
+    channel_id: str
+    sender_id: str
+    sender_type: str
+    content: str
+    file_ids: list[str] | None = None
+    mention_bot_ids: list[str] | None = None
+    created_at: datetime | None = None
+
+
+class BotCreate(BaseModel):
+    """创建 Bot（注册 OpenClaw 等）."""
+    bot_id: str | None = None  # 不填则自动生成 UUID
+    username: str  # @ 用的名字，唯一
+    display_name: str | None = None
+    openclaw_endpoint: str  # http(s) 或 guide://、mock://
+    status: str = "online"
+
+
+class BotInResponse(BaseModel):
+    """Bot 响应."""
+    model_config = ConfigDict(from_attributes=True)
+    bot_id: str
+    username: str
+    display_name: str | None = None
+    openclaw_endpoint: str
+    status: str
+    created_at: datetime | None = None
+
+
+class BotRegisterRequest(BaseModel):
+    """外部 OpenClaw 提交的注册申请（无需鉴权）."""
+    username: str  # @ 用的名字
+    display_name: str | None = None
+    openclaw_endpoint: str  # http(s) 地址
+
+
+class BotRegistrationRequestInResponse(BaseModel):
+    """注册申请单条响应."""
+    model_config = ConfigDict(from_attributes=True)
+    request_id: str
+    username: str
+    display_name: str | None = None
+    openclaw_endpoint: str
+    status: str  # pending | approved | rejected
+    requested_at: datetime | None = None
+    decided_at: datetime | None = None
+    created_bot_id: str | None = None

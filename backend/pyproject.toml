@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentnexus-backend"
+version = "0.1.0"
+description = "AgentNexus 智枢协作平台 - 后端"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115.0,<1.0",
+    "uvicorn[standard]>=0.32.0",
+    "websockets>=14.0",
+    "sqlalchemy>=2.0.0",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "aiosqlite>=0.20.0",
+    "redis>=5.2.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "mammoth>=1.8.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.28.0",
+    "flake8>=7.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["flake8", "pytest-cov"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["../tests"]
+pythonpath = ["."]
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E501"]
