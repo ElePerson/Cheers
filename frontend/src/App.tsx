@@ -377,12 +377,14 @@ function ClarifyInlineBlock({
   msgId,
   schema,
   status,
+  replyContent,
   onContinue,
   onSkip,
 }: {
   msgId: string;
   schema: ClarifySchema;
   status: "form" | "waiting" | "answered";
+  replyContent?: string;
   onContinue: (answers: ClarifyAnswers) => void;
   onSkip: () => void;
 }) {
@@ -423,6 +425,7 @@ function ClarifyInlineBlock({
   }
 
   if (status === "answered") {
+    const displayReply = replyContent?.replace(/^@引导\s*澄清回答[：:]\s*/i, "").trim() || "";
     return (
       <div className="my-1 rounded border border-gray-200 bg-gray-50 overflow-hidden">
         <button
@@ -435,8 +438,14 @@ function ClarifyInlineBlock({
           <span>{open ? "收起" : "展开"}</span>
         </button>
         {open && (
-          <div className="p-2 text-xs text-gray-600 border-t border-gray-200">
-            已澄清并已收到引导回复
+          <div className="p-2 text-xs text-gray-600 border-t border-gray-200 space-y-2">
+            <p>已澄清并已收到引导回复</p>
+            {displayReply && (
+              <div className="rounded border border-gray-200 bg-gray-100 p-2">
+                <p className="text-gray-500 mb-1">澄清回答</p>
+                <pre className="whitespace-pre-wrap text-gray-700 font-sans text-xs">{displayReply}</pre>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1012,6 +1021,15 @@ export default function App() {
               ) : (
                 <>
                   {messages.map((m, idx) => {
+                    const prevMsg = messages[idx - 1];
+                    const isClarifyReplyBubble =
+                      m.sender_type === "user" &&
+                      prevMsg?.sender_type === "bot" &&
+                      !!parseGuidePayload(prevMsg.content).clarify &&
+                      isClarifyReplyUserMessage(m.content);
+                    if (isClarifyReplyBubble) {
+                      return <div key={m.msg_id} className="sr-only" aria-hidden="true" />;
+                    }
                     const { text, form, clarify } = parseGuidePayload(m.content);
                     const nextMsg = messages[idx + 1];
                     const clarifyAnswered =
@@ -1026,6 +1044,12 @@ export default function App() {
                             ? "answered"
                             : "form"
                         : null;
+                    const replyContent =
+                      clarifyStatus === "answered" &&
+                      nextMsg?.sender_type === "user" &&
+                      isClarifyReplyUserMessage(nextMsg.content)
+                        ? nextMsg.content
+                        : undefined;
                     return (
                       <div key={m.msg_id} className={`p-2 rounded ${m.sender_type === "bot" ? "bg-green-50 border-l-2 border-green-400" : "bg-white"}`}>
                         <span className="text-xs text-gray-500 flex items-center gap-2">
@@ -1061,6 +1085,7 @@ export default function App() {
                             msgId={m.msg_id}
                             schema={clarify!}
                             status={clarifyStatus}
+                            replyContent={replyContent}
                             onContinue={(answers) => handleClarifyContinue(m.msg_id, clarify!, answers)}
                             onSkip={() => handleClarifySkip(m.msg_id)}
                           />
