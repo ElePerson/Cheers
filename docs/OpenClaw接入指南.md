@@ -70,7 +70,7 @@ curl -X POST "http://10.1.9.130:8000/api/bots/register-request" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "openclaw66",
-    "openclaw_endpoint": "http://10.1.10.66:8181",
+    "openclaw_endpoint": "http://10.1.10.66:18789",
     "display_name": "Epicwise-MOM"
   }'
 ```

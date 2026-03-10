@@ -1,52 +1,62 @@
-"""通过 HTTP 调用真实 OpenClaw 或兼容接口的适配器。"""
+"""通过 HTTP 调用 OpenClaw Gateway /hooks/agent 的适配器."""
 import logging
 
 import httpx
 
 from app.adapters.base import AgentPayload, AgentResponse, OpenClawAdapter
+from app.config import settings
 
 logger = logging.getLogger("app.adapters.http_openclaw")
 
-# 请求/响应约定：POST {openclaw_endpoint}/execute，body 为 Payload 的 JSON，响应 JSON 含 content、success、error_message
-EXECUTE_PATH = "/execute"
+HOOK_AGENT_PATH = "/hooks/agent"
 TIMEOUT = 120.0
 
 
 class HttpOpenClawAdapter(OpenClawAdapter):
-    """向 openclaw_endpoint 发起 HTTP POST，发送 AgentPayload，解析为 AgentResponse。"""
+    """将 AgentNexus 的 AgentPayload 转发到 OpenClaw /hooks/agent."""
 
     def __init__(self, base_url: str, timeout: float = TIMEOUT) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
-    def _execute_url(self) -> str:
-        return f"{self.base_url}{EXECUTE_PATH}"
+    def _hook_url(self) -> str:
+        return f"{self.base_url}{HOOK_AGENT_PATH}"
 
     async def execute(self, payload: AgentPayload) -> AgentResponse:
+        text = payload.trigger_message.get("text", "")
+        user_id = payload.trigger_message.get("user") or payload.trigger_message.get("sender_id") or "unknown"
+        session_key = f"{settings.openclaw_session_prefix}{user_id}"
+
+        hook_token = settings.openclaw_hook_token.strip()
+        if not hook_token:
+            logger.warning("http_openclaw: openclaw_hook_token 未配置，将不带认证头调用，可能被拒绝")
+
         body = {
-            "task_id": payload.task_id,
-            "channel_id": payload.channel_id,
-            "trigger_message": payload.trigger_message,
-            "memory_context": payload.memory_context,
-            "attachments": payload.attachments,
-            "process_config": payload.process_config,
+            "message": text,
+            "agentId": settings.openclaw_agent_id,
+            "sessionKey": session_key,
+            "wakeMode": "now",
+            "deliver": False,
         }
-        url = self._execute_url()
-        logger.info("http_openclaw: POST %s", url)
+        url = self._hook_url()
+        headers = {
+            "Content-Type": "application/json",
+        }
+        if hook_token:
+            headers["Authorization"] = f"Bearer {hook_token}"
+
+        logger.info("http_openclaw: POST %s sessionKey=%s", url, session_key)
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                r = await client.post(url, json=body)
+                r = await client.post(url, json=body, headers=headers)
                 logger.info("http_openclaw: response status=%d", r.status_code)
                 r.raise_for_status()
-                data = r.json()
-                content = data.get("content", "") or ""
-                success = data.get("success", True)
-                error_message = data.get("error_message")
+                # /hooks/agent 为异步接收，200 仅表示任务已接受
                 return AgentResponse(
-                    content=content,
+                    content="OpenClaw 已接收请求，正在处理…",
                     task_id=payload.task_id,
-                    success=success,
-                    error_message=error_message,
+                    success=True,
+                    error_message=None,
                 )
         except httpx.HTTPError as e:
             logger.warning("http_openclaw: request failed url=%s error=%s", url, e)
