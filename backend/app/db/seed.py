@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.auth.routes import hash_password
 from app.db.models import (
     BotAccount,
     Channel,
@@ -23,6 +24,7 @@ GUIDE_BOT_ID = "bot-guide-001"
 MOCK_BOT_ID = "bot-mock-001"
 COORDINATOR_BOT_ID = "bot-coordinator-001"
 DEV_USER_ID = "a0000000-0000-0000-0000-000000000001"
+ADMIN_USER_ID = "admin-0000-0000-0000-000000000001"
 
 
 async def seed(session: AsyncSession) -> bool:
@@ -86,8 +88,23 @@ async def seed(session: AsyncSession) -> bool:
             User(
                 user_id=DEV_USER_ID,
                 username="dev",
+                password_hash=hash_password("dev"),
                 display_name="开发测试用户",
                 role="member",
+            )
+        )
+        did_write = True
+
+    # 系统管理员（admin/admin）
+    r = await session.execute(select(User).where(User.user_id == ADMIN_USER_ID))
+    if r.scalar_one_or_none() is None:
+        session.add(
+            User(
+                user_id=ADMIN_USER_ID,
+                username="admin",
+                password_hash=hash_password("admin"),
+                display_name="系统管理员",
+                role="system_admin",
             )
         )
         did_write = True

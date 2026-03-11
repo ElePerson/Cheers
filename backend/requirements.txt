@@ -33,3 +33,6 @@ greenlet>=3.0.0
 
 # 代码质量
 flake8>=7.0.0
+
+# 密码哈希
+passlib[bcrypt]>=1.7.4

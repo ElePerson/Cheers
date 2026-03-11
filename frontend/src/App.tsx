@@ -520,6 +520,39 @@ function ClarifyInlineBlock({
 }
 
 export default function App() {
+  // 用户认证状态
+  type CurrentUser = { user_id: string; username: string; display_name: string; role: string } | null;
+
+  // 从 localStorage 恢复登录状态
+  const getStoredUser = (): CurrentUser => {
+    try {
+      const stored = localStorage.getItem("currentUser");
+      if (!stored) return null;
+      const data = JSON.parse(stored);
+      // 检查是否在1小时内
+      if (data.loginTime && Date.now() - data.loginTime < 3600000) {
+        return data.user;
+      }
+    } catch {}
+    return null;
+  };
+
+  const [currentUser, setCurrentUser] = useState<CurrentUser>(getStoredUser);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [registerMode, setRegisterMode] = useState(false);
+
+  // 当前用户ID（用于API调用）
+  const currentUserId = currentUser?.user_id || DEV_USER_ID;
+
+  // 初始化时检查登录状态
+  useEffect(() => {
+    if (!currentUser) {
+      setLoginModalOpen(true);
+    }
+  }, []);
+
   const [channels, setChannels] = useState<Channel[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -545,6 +578,58 @@ export default function App() {
   const [addBotOpen, setAddBotOpen] = useState(false);
   const [allBots, setAllBots] = useState<BotItem[]>([]);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // 登录/注册处理函数
+  const handleLogin = async (username: string, password: string) => {
+    setLoginLoading(true);
+    setLoginError("");
+    try {
+      const res = await fetch(`${API}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "登录失败");
+      const user = { user_id: data.user_id, username: data.username, display_name: data.display_name || data.username, role: data.role };
+      setCurrentUser(user);
+      // 保存到 localStorage（1小时有效）
+      localStorage.setItem("currentUser", JSON.stringify({ user, loginTime: Date.now() }));
+      setLoginModalOpen(false);
+    } catch (e: any) {
+      setLoginError(e.message);
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleRegister = async (username: string, password: string, displayName: string) => {
+    setLoginLoading(true);
+    setLoginError("");
+    try {
+      const res = await fetch(`${API}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, display_name: displayName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "注册失败");
+      const user = { user_id: data.user_id, username: data.username, display_name: data.display_name || data.username, role: data.role };
+      setCurrentUser(user);
+      localStorage.setItem("currentUser", JSON.stringify({ user, loginTime: Date.now() }));
+      setLoginModalOpen(false);
+    } catch (e: any) {
+      setLoginError(e.message);
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem("currentUser");
+    setLoginModalOpen(true);
+  };
 
   function introSummary(intro: string | undefined): string {
     if (!intro) return "";
@@ -673,7 +758,7 @@ export default function App() {
     if (!selectedId || !content.trim()) return;
     const body = {
       content: content.trim(),
-      sender_id: DEV_USER_ID,
+      sender_id: currentUserId,
       sender_type: "user",
       file_ids: [] as string[],
     };
@@ -694,7 +779,7 @@ export default function App() {
     if (!selectedId || !input.trim()) return;
     const body = {
       content: input.trim(),
-      sender_id: DEV_USER_ID,
+      sender_id: currentUserId,
       sender_type: "user",
       file_ids: pendingFileIds,
     };
@@ -753,7 +838,7 @@ export default function App() {
       return;
     }
     fetch(
-      `${API}/files/upload?channel_id=${encodeURIComponent(selectedId)}&uploader_id=${encodeURIComponent(DEV_USER_ID)}&filename=${encodeURIComponent(file.name)}`,
+      `${API}/files/upload?channel_id=${encodeURIComponent(selectedId)}&uploader_id=${encodeURIComponent(currentUserId)}&filename=${encodeURIComponent(file.name)}`,
       { method: "POST", body: file }
     )
       .then((r) => r.json())
@@ -898,9 +983,68 @@ export default function App() {
   };
 
   return (
+    <>
+      {loginModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setLoginModalOpen(false)}>
+          <div className="bg-white rounded-lg p-6 w-80 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-xl font-semibold mb-4">{registerMode ? "注册" : "登录"}</h2>
+            {loginError && <div className="mb-3 text-sm text-red-500 bg-red-50 p-2 rounded">{loginError}</div>}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const fd = new FormData(e.currentTarget);
+                const username = fd.get("username") as string;
+                const password = fd.get("password") as string;
+                if (registerMode) {
+                  const displayName = fd.get("display_name") as string;
+                  handleRegister(username, password, displayName);
+                } else {
+                  handleLogin(username, password);
+                }
+              }}
+            >
+              {registerMode && (
+                <input name="display_name" placeholder="显示名称" required className="w-full mb-3 px-3 py-2 border rounded" />
+              )}
+              <input name="username" placeholder="用户名" required className="w-full mb-3 px-3 py-2 border rounded" />
+              <input name="password" type="password" placeholder="密码" required className="w-full mb-4 px-3 py-2 border rounded" />
+              <button type="submit" disabled={loginLoading} className="w-full bg-blue-500 text-white py-2 rounded hover:bg-blue-600 disabled:opacity-50">
+                {loginLoading ? "处理中..." : registerMode ? "注册" : "登录"}
+              </button>
+            </form>
+            <div className="mt-4 text-center text-sm">
+              {registerMode ? (
+                <>
+                  已有账号？{" "}
+                  <button onClick={() => setRegisterMode(false)} className="text-blue-500 hover:underline">登录</button>
+                </>
+              ) : (
+                <>
+                  没有账号？{" "}
+                  <button onClick={() => setRegisterMode(true)} className="text-blue-500 hover:underline">注册</button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     <div className="flex h-screen bg-gray-100">
       <aside className="w-64 bg-white border-r flex flex-col">
-        <div className="p-3 border-b text-sm text-gray-600">当前用户: dev</div>
+        <div className="p-3 border-b text-sm text-gray-600 flex items-center justify-between">
+          <span>
+            {currentUser ? (
+              <span className="font-medium">{currentUser.display_name}</span>
+            ) : (
+              "未登录"
+            )}
+          </span>
+          {currentUser ? (
+            <button onClick={handleLogout} className="text-xs text-red-500 hover:text-red-700">退出</button>
+          ) : (
+            <button onClick={() => setLoginModalOpen(true)} className="text-xs text-blue-500 hover:text-blue-700">登录</button>
+          )}
+        </div>
         <div className="p-2 font-medium text-gray-700">频道</div>
         <ul className="overflow-auto flex-1">
           {channels.map((c) => (
@@ -1311,5 +1455,6 @@ export default function App() {
         )}
       </main>
     </div>
+    </>
   );
 }
