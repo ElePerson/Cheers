@@ -83,6 +83,7 @@ class RegisterRequest(BaseModel):
     display_name: Optional[str] = None
 
 
+
 class LoginRequest(BaseModel):
     username: str
     password: str

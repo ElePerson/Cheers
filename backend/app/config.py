@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
+    # OpenClaw Hook 集成（/hooks/agent）
+    openclaw_hook_token: str = "7k9P8s7X2q5R9t8Y7u6I8o9P0l8K7j6H8g7F6d"  # Authorization: Bearer <token>
+    openclaw_agent_id: str = "main"
+    openclaw_session_prefix: str = "nexus:"
+
     # 数据目录（相对项目根或绝对路径）
     data_dir: str = "data"
 
