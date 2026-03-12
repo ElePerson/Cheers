@@ -13,7 +13,7 @@ from app.db.session import async_session_factory, get_session
 router = APIRouter(prefix="/api/auth", tags=["认证"])
 
 # 密码加密上下文
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 # 角色定义
 ROLE_SYSTEM_ADMIN = "system_admin"
