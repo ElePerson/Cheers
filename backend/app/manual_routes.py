@@ -56,6 +56,41 @@ def _escape_html(text: str) -> str:
     )
 
 
+@router.get("/manual", response_class=HTMLResponse)
+async def manual_index() -> HTMLResponse:
+    """说明书首页：只展示面向用户/管理员的帮助文档入口，不暴露设计说明书。"""
+    help_items: list[tuple[str, str, str]] = [
+        ("使用说明书", "/manual/使用说明书", "总索引，按角色分流到其它说明书。"),
+        ("普通用户使用说明", "/manual/普通用户使用说明", "日常在项目里聊天、@ Bot、上传文件的使用指南。"),
+        ("系统管理说明书", "/manual/系统管理说明书", "系统管理员：工作空间与项目、成员管理、OpenClaw 接入与审核、Orchestrator 配置。"),
+        ("OpenClaw接入指南", "/manual/OpenClaw接入指南", "OpenClaw 开发者：发现 AgentNexus、提交注册申请、常见错误排查。"),
+        ("OpenClaw接入AgentNexus指南", "/manual/OpenClaw接入AgentNexus指南", "结合 AgentNexus 视角的 OpenClaw 接入流程与 hook 配置说明。"),
+        ("安装部署说明", "/manual/安装部署说明", "部署与运维：环境要求、Docker / 本地安装、数据库迁移、种子数据。"),
+        ("技术排查Q&A", "/manual/技术排查Q&A", "故障现象 → 原因 → 处理步骤，包含日志说明与接口排查。"),
+    ]
+    body_parts = [
+        "<h1>AgentNexus 使用与管理说明</h1>",
+        "<p>以下为面向终端用户、系统管理员、OpenClaw 开发者的帮助文档入口。</p>",
+        "<ul>",
+    ]
+    for title, href, desc in help_items:
+        body_parts.append(f'<li><a href="{href}">{title}</a> - {desc}</li>')
+    body_parts.append("</ul>")
+    style = (
+        "body{font-family:system-ui,sans-serif;max-width:800px;"
+        "margin:1rem auto;padding:0 1rem;} "
+        "a{color:#2563eb;} ul{line-height:1.6;}"
+    )
+    html = (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'/>"
+        "<title>AgentNexus 说明书索引</title>"
+        f"<style>{style}</style></head><body>"
+        + "".join(body_parts)
+        + "</body></html>"
+    )
+    return HTMLResponse(html)
+
+
 @router.get("/manual/{name:path}", response_class=HTMLResponse)
 async def get_manual(name: str) -> HTMLResponse:
     """返回说明书 HTML 页，支持锚点（如 /manual/系统管理说明书#四如何让-openclaw-接入注册-bot-并加入项目）。"""
