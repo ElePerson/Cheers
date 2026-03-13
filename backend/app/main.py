@@ -16,6 +16,8 @@ from app.chat_core import tasks_api as chat_core_tasks
 from app.chat_core import workspaces as chat_core_workspaces
 from app.chat_core.ws_manager import ws_manager
 from app.admin.routes import router as admin_router
+from app.admin.models import router as admin_models_router
+from app.admin.templates import router as admin_templates_router
 from app.auth.routes import router as auth_router
 from app.file_processor import routes as file_routes
 from app.logging_config import setup_logging
@@ -99,6 +101,8 @@ app.include_router(chat_core_context.router)
 app.include_router(chat_core_tasks.router)
 app.include_router(chat_core_mcp.router)
 app.include_router(admin_router)
+app.include_router(admin_models_router)
+app.include_router(admin_templates_router)
 app.include_router(file_routes.router)
 app.include_router(manual_router)
 app.include_router(public_router)
