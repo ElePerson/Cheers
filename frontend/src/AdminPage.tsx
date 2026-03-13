@@ -13,6 +13,8 @@ type BotItem = {
   username: string;
   display_name?: string;
   openclaw_endpoint: string;
+  openclaw_session?: string;
+  openclaw_token?: string;
   status: string;
   intro?: string;
   prompt_template?: string;
@@ -97,6 +99,8 @@ export default function AdminPage() {
   const [botUsername, setBotUsername] = useState("");
   const [botDisplayName, setBotDisplayName] = useState("");
   const [botEndpoint, setBotEndpoint] = useState("");
+  const [botSession, setBotSession] = useState("");
+  const [botToken, setBotToken] = useState("");
   const [botStatus, setBotStatus] = useState("online");
   const [botIntro, setBotIntro] = useState("");
   const [botPromptTemplate, setBotPromptTemplate] = useState("");
@@ -558,6 +562,8 @@ export default function AdminPage() {
       username: botUsername.trim(),
       display_name: botDisplayName.trim(),
       openclaw_endpoint: botEndpoint.trim(),
+      openclaw_session: botSession.trim(),
+      openclaw_token: botToken.trim(),
       status: botStatus,
       intro: botIntro.trim(),
       prompt_template: botPromptTemplate.trim(),
@@ -565,7 +571,7 @@ export default function AdminPage() {
     fetch(`${API}/bots/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json())
       .then((d) => {
-        if (d.status === "success") { toast.success("已更新"); setBotEditingId(null); loadBots(); setBotUsername(""); setBotDisplayName(""); setBotEndpoint(""); setBotStatus("online"); setBotIntro(""); setBotPromptTemplate(""); }
+        if (d.status === "success") { toast.success("已更新"); setBotEditingId(null); loadBots(); setBotUsername(""); setBotDisplayName(""); setBotEndpoint(""); setBotSession(""); setBotToken(""); setBotStatus("online"); setBotIntro(""); setBotPromptTemplate(""); }
         else toast.error(d.detail || "更新失败");
       })
       .catch((e) => toast.error("请求失败: " + String(e)));
@@ -910,7 +916,7 @@ export default function AdminPage() {
                           </td>
                           <td className="px-3 py-2 max-w-[150px] truncate text-gray-500" title={b.intro || ""}>{introSummary(b.intro)}</td>
                           <td className="px-3 py-2">
-                            <button type="button" onClick={() => { setBotEditingId(b.bot_id); setBotUsername(b.username); setBotDisplayName(b.display_name || ""); setBotEndpoint(b.openclaw_endpoint); setBotStatus(b.status); setBotIntro(b.intro || ""); setBotPromptTemplate(b.prompt_template || ""); }} className="mr-2 text-[#1264A3] text-xs font-medium hover:underline">编辑</button>
+                            <button type="button" onClick={() => { setBotEditingId(b.bot_id); setBotUsername(b.username); setBotDisplayName(b.display_name || ""); setBotEndpoint(b.openclaw_endpoint); setBotSession(b.openclaw_session || ""); setBotToken(b.openclaw_token || ""); setBotStatus(b.status); setBotIntro(b.intro || ""); setBotPromptTemplate(b.prompt_template || ""); }} className="mr-2 text-[#1264A3] text-xs font-medium hover:underline">编辑</button>
                             <button type="button" onClick={() => deleteBot(b.bot_id)} className="text-red-500 text-xs font-medium hover:underline">删除</button>
                           </td>
                         </tr>
@@ -924,12 +930,14 @@ export default function AdminPage() {
                   <h4 className="font-semibold text-gray-800">编辑 Bot</h4>
                   <div><label className="block text-xs text-gray-500 mb-1">@ 名字</label><input type="text" value={botUsername} onChange={(e) => setBotUsername(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-1.5 w-full focus:outline-none focus:border-[#1264A3]" /></div>
                   <div><label className="block text-xs text-gray-500 mb-1">显示名称</label><input type="text" value={botDisplayName} onChange={(e) => setBotDisplayName(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-1.5 w-full focus:outline-none focus:border-[#1264A3]" /></div>
-                  <div><label className="block text-xs text-gray-500 mb-1">openclaw_endpoint</label><input type="text" value={botEndpoint} onChange={(e) => setBotEndpoint(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-1.5 w-full focus:outline-none focus:border-[#1264A3]" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">openclaw_endpoint</label><input type="text" value={botEndpoint} onChange={(e) => setBotEndpoint(e.target.value)} placeholder="ws://host:port 或 http://host:port" className="border border-gray-300 rounded-lg px-3 py-1.5 w-full focus:outline-none focus:border-[#1264A3]" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">openclaw_session <span className="text-gray-400 font-normal">（WS 必填）</span></label><input type="text" value={botSession} onChange={(e) => setBotSession(e.target.value)} placeholder="例如 my-session-key" className="border border-gray-300 rounded-lg px-3 py-1.5 w-full focus:outline-none focus:border-[#1264A3]" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">openclaw_token <span className="text-gray-400 font-normal">（WS 鉴权，可选）</span></label><input type="password" value={botToken} onChange={(e) => setBotToken(e.target.value)} placeholder="留空则不带 token" className="border border-gray-300 rounded-lg px-3 py-1.5 w-full focus:outline-none focus:border-[#1264A3]" /></div>
                   <div><label className="block text-xs text-gray-500 mb-1">自我介绍 (JSON)</label><textarea value={botIntro} onChange={(e) => setBotIntro(e.target.value)} placeholder='{"capabilities":["能力1"],"description":"描述"}' className="border border-gray-300 rounded-lg px-3 py-2 w-full h-20 focus:outline-none focus:border-[#1264A3] text-sm" /></div>
                   <div><label className="block text-xs text-gray-500 mb-1">提示词模板（可选）</label><textarea value={botPromptTemplate} onChange={(e) => setBotPromptTemplate(e.target.value)} placeholder="你是一个专业的助手。用户问题：{{}} 请用中文回答。" className="border border-gray-300 rounded-lg px-3 py-2 w-full h-20 focus:outline-none focus:border-[#1264A3] text-sm" /><p className="text-xs text-gray-400 mt-1">使用 {"{{}}"} 作为用户消息的占位符</p></div>
                   <div className="flex gap-2">
                     <button type="button" onClick={() => updateBot(botEditingId)} className="px-4 py-1.5 bg-[#4A154B] text-white rounded-lg text-sm font-medium hover:bg-[#3d1040]">保存</button>
-                    <button type="button" onClick={() => { setBotEditingId(null); setBotUsername(""); setBotDisplayName(""); setBotEndpoint(""); setBotStatus("online"); setBotIntro(""); setBotPromptTemplate(""); }} className="px-4 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300">取消</button>
+                    <button type="button" onClick={() => { setBotEditingId(null); setBotUsername(""); setBotDisplayName(""); setBotEndpoint(""); setBotSession(""); setBotToken(""); setBotStatus("online"); setBotIntro(""); setBotPromptTemplate(""); }} className="px-4 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300">取消</button>
                   </div>
                 </div>
               )}

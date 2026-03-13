@@ -764,8 +764,10 @@ export default function App() {
   const [pendingClarifyReplyMsgId, setPendingClarifyReplyMsgId] = useState<string | null>(null);
 
   type ChannelBot = { member_id: string; username: string; avatar_url?: string; display_name?: string };
+  type ChannelUser = { member_id: string; username: string; avatar_url?: string; display_name?: string };
   type BotItem = { bot_id: string; username: string; display_name?: string; intro?: string; avatar_url?: string };
   const [channelBots, setChannelBots] = useState<ChannelBot[]>([]);
+  const [channelUsers, setChannelUsers] = useState<ChannelUser[]>([]);
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
   const [mentionDropdownPlacement, setMentionDropdownPlacement] = useState<"top" | "bottom">("bottom");
@@ -867,7 +869,11 @@ export default function App() {
             .filter((m: { member_type: string; username?: string }) => m.member_type === "bot" && m.username)
             .map((m: { member_id: string; username: string; avatar_url?: string; display_name?: string }) => ({ member_id: m.member_id, username: m.username, avatar_url: m.avatar_url, display_name: m.display_name }));
           setChannelBots(bots);
-        } else setChannelBots([]);
+          const users: ChannelUser[] = d.data
+            .filter((m: { member_type: string; username?: string }) => m.member_type === "user" && m.username)
+            .map((m: { member_id: string; username: string; avatar_url?: string; display_name?: string }) => ({ member_id: m.member_id, username: m.username, avatar_url: m.avatar_url, display_name: m.display_name }));
+          setChannelUsers(users);
+        } else { setChannelBots([]); setChannelUsers([]); }
       })
       .catch(() => {
         setChannelBots([]);
@@ -920,6 +926,22 @@ export default function App() {
   useEffect(() => {
     if (showMentionDropdown && selectedId) {
       fetch(`${API}/bots`).then((r) => r.json()).then((d) => setAllBots(d.data || [])).catch(() => setAllBots([]));
+      fetch(`${API}/channels/${selectedId}/members?with_username=1`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (!d.data) return;
+          setChannelBots(
+            d.data
+              .filter((m: { member_type: string; username?: string }) => m.member_type === "bot" && m.username)
+              .map((m: { member_id: string; username: string; avatar_url?: string; display_name?: string }) => ({ member_id: m.member_id, username: m.username, avatar_url: m.avatar_url, display_name: m.display_name }))
+          );
+          setChannelUsers(
+            d.data
+              .filter((m: { member_type: string; username?: string }) => m.member_type === "user" && m.username)
+              .map((m: { member_id: string; username: string; avatar_url?: string; display_name?: string }) => ({ member_id: m.member_id, username: m.username, avatar_url: m.avatar_url, display_name: m.display_name }))
+          );
+        })
+        .catch(console.error);
     }
   }, [showMentionDropdown, selectedId]);
 
@@ -951,6 +973,10 @@ export default function App() {
                   .filter((m: { member_type: string; username?: string }) => m.member_type === "bot" && m.username)
                   .map((m: { member_id: string; username: string; avatar_url?: string; display_name?: string }) => ({ member_id: m.member_id, username: m.username, avatar_url: m.avatar_url, display_name: m.display_name }));
                 setChannelBots(bots);
+                const users: ChannelUser[] = res.data
+                  .filter((m: { member_type: string; username?: string }) => m.member_type === "user" && m.username)
+                  .map((m: { member_id: string; username: string; avatar_url?: string; display_name?: string }) => ({ member_id: m.member_id, username: m.username, avatar_url: m.avatar_url, display_name: m.display_name }));
+                setChannelUsers(users);
               }
             });
         }
@@ -995,9 +1021,17 @@ export default function App() {
     });
     const d = await res.json();
     setMessages((prev) => {
-      if (!d.data) return prev;
-      if (prev.some((m) => m.msg_id === d.data.msg_id)) return prev;
-      return [...prev, d.data];
+      let next = prev;
+      if (d.data && !prev.some((m) => m.msg_id === d.data.msg_id)) {
+        next = [...next, d.data];
+      }
+      const botMsgs: Message[] = d.bot_messages || [];
+      for (const bm of botMsgs) {
+        if (bm && bm.msg_id && !next.some((m) => m.msg_id === bm.msg_id)) {
+          next = [...next, bm];
+        }
+      }
+      return next;
     });
   };
 
@@ -1017,9 +1051,17 @@ export default function App() {
       .then((r) => r.json())
       .then((d) => {
         setMessages((prev) => {
-          if (!d.data) return prev;
-          if (prev.some((m) => m.msg_id === d.data.msg_id)) return prev;
-          return [...prev, d.data];
+          let next = prev;
+          if (d.data && !prev.some((m) => m.msg_id === d.data.msg_id)) {
+            next = [...next, d.data];
+          }
+          const botMsgs: Message[] = d.bot_messages || [];
+          for (const bm of botMsgs) {
+            if (bm && bm.msg_id && !next.some((m) => m.msg_id === bm.msg_id)) {
+              next = [...next, bm];
+            }
+          }
+          return next;
         });
         setInput("");
         setPendingFileIds([]);
@@ -1906,8 +1948,9 @@ export default function App() {
                   ))}
                 </div>
               )}
+              <div className="relative">
               <div className="border border-gray-300 rounded-lg overflow-hidden focus-within:border-gray-400 focus-within:shadow-sm transition-all">
-                <div className="relative">
+                <div>
                   <textarea
                     ref={inputRef}
                     value={input}
@@ -1950,50 +1993,6 @@ export default function App() {
                     className="w-full px-3 pt-2.5 pb-2 min-h-[44px] max-h-48 resize-none outline-none text-sm text-gray-900 placeholder-gray-400"
                     rows={1}
                   />
-                  {showMentionDropdown && (() => {
-                    const matched = channelBots.filter((b) =>
-                      b.username.toLowerCase().includes(mentionFilter.toLowerCase())
-                    );
-                    if (matched.length === 0) return null;
-                    const placementClass =
-                      mentionDropdownPlacement === "top"
-                        ? "bottom-full mb-1"
-                        : "top-full mt-1";
-                    return (
-                    <ul
-                      className={`absolute left-0 right-0 ${placementClass} bg-white border rounded shadow-lg z-20 max-h-40 overflow-auto`}
-                      role="listbox"
-                    >
-                      {matched.map((b) => (
-                          <li
-                            key={b.member_id}
-                            role="option"
-                            className="px-3 py-2 hover:bg-[#F8F8F8] cursor-pointer text-sm flex items-center gap-2"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              const el = inputRef.current;
-                              if (!el) return;
-                              const v = el.value;
-                              const pos = el.selectionStart ?? v.length;
-                              const lastAt = v.lastIndexOf("@", pos - 1);
-                              const newVal = v.slice(0, lastAt) + "@" + b.username + " " + v.slice(pos);
-                              setInput(newVal);
-                              setShowMentionDropdown(false);
-                              setTimeout(() => {
-                                el.focus();
-                                el.setSelectionRange(lastAt + b.username.length + 2, lastAt + b.username.length + 2);
-                              }, 0);
-                            }}
-                          >
-                            <div className="w-6 h-6 rounded bg-[#2EB67D] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                              {b.username.slice(0, 1).toUpperCase()}
-                            </div>
-                            <span className="font-medium text-gray-800">@{b.username}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    );
-                  })()}
                 </div>
                 {/* Input toolbar */}
                 <div className="flex items-center justify-between px-2 py-1.5 border-t border-gray-200">
@@ -2029,6 +2028,56 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+              </div>
+              {showMentionDropdown && (() => {
+                const allItems = [
+                  ...channelBots.map((b) => ({ ...b, kind: "bot" as const })),
+                  ...channelUsers.map((u) => ({ ...u, kind: "user" as const })),
+                ];
+                const matched = allItems.filter((item) =>
+                  item.username.toLowerCase().includes(mentionFilter.toLowerCase()) ||
+                  (item.display_name ?? "").toLowerCase().includes(mentionFilter.toLowerCase())
+                );
+                if (matched.length === 0) return null;
+                const placementClass = mentionDropdownPlacement === "top" ? "bottom-full mb-1" : "top-full mt-1";
+                return (
+                  <ul className={`absolute left-0 right-0 ${placementClass} bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-48 overflow-auto`} role="listbox">
+                    {matched.map((item) => (
+                      <li
+                        key={item.member_id}
+                        role="option"
+                        className="px-3 py-2 hover:bg-[#F8F8F8] cursor-pointer text-sm flex items-center gap-2"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          const el = inputRef.current;
+                          if (!el) return;
+                          const v = el.value;
+                          const pos = el.selectionStart ?? v.length;
+                          const lastAt = v.lastIndexOf("@", pos - 1);
+                          const newVal = v.slice(0, lastAt) + "@" + item.username + " " + v.slice(pos);
+                          setInput(newVal);
+                          setShowMentionDropdown(false);
+                          setTimeout(() => {
+                            el.focus();
+                            el.setSelectionRange(lastAt + item.username.length + 2, lastAt + item.username.length + 2);
+                          }, 0);
+                        }}
+                      >
+                        <div className={`w-6 h-6 rounded flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${item.kind === "bot" ? "bg-[#2EB67D]" : "bg-[#1264A3]"}`}>
+                          {item.username.slice(0, 1).toUpperCase()}
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="font-medium text-gray-800">@{item.username}</span>
+                          {item.display_name && <span className="text-xs text-gray-400 truncate">{item.display_name}</span>}
+                        </div>
+                        <span className={`ml-auto text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${item.kind === "bot" ? "bg-green-50 text-green-700" : "bg-blue-50 text-blue-700"}`}>
+                          {item.kind === "bot" ? "Bot" : "用户"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              })()}
               </div>
             </div>
           </>
