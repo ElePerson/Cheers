@@ -1,6 +1,18 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 
+function getToken(): string | null {
+  try {
+    const stored = localStorage.getItem('currentUser');
+    if (!stored) return null;
+    const data = JSON.parse(stored);
+    if (data.loginTime && Date.now() - data.loginTime < 86400000) {
+      return data.token ?? data.user?.user_id ?? null;
+    }
+  } catch {}
+  return null;
+}
+
 export type TodoItem = {
   todo_id: string;
   channel_id: string;
@@ -36,7 +48,7 @@ export default function TodoPanel({ channelId, onClose }: TodoPanelProps) {
   const loadTodos = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = getToken();
       const res = await fetch(`/api/v1/channels/${channelId}/todos`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -54,7 +66,7 @@ export default function TodoPanel({ channelId, onClose }: TodoPanelProps) {
   useEffect(() => {
     if (!channelId) return;
     loadTodos();
-    const token = localStorage.getItem('token');
+    const token = getToken();
     fetch(`/api/v1/channels/${channelId}/members?with_username=1`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -72,7 +84,7 @@ export default function TodoPanel({ channelId, onClose }: TodoPanelProps) {
       assignee_id = id;
       assignee_type = type;
     }
-    const token = localStorage.getItem('token');
+    const token = getToken();
     try {
       const res = await fetch(`/api/v1/channels/${channelId}/todos`, {
         method: 'POST',
@@ -93,7 +105,7 @@ export default function TodoPanel({ channelId, onClose }: TodoPanelProps) {
 
   const handleToggle = async (todo: TodoItem) => {
     const newStatus = todo.status === 'completed' ? 'pending' : 'completed';
-    const token = localStorage.getItem('token');
+    const token = getToken();
     try {
       const res = await fetch(`/api/v1/channels/${channelId}/todos/${todo.todo_id}`, {
         method: 'PUT',
@@ -107,7 +119,7 @@ export default function TodoPanel({ channelId, onClose }: TodoPanelProps) {
   };
 
   const handleDelete = async (todoId: string) => {
-    const token = localStorage.getItem('token');
+    const token = getToken();
     try {
       const res = await fetch(`/api/v1/channels/${channelId}/todos/${todoId}`, {
         method: 'DELETE',
