@@ -697,10 +697,10 @@ def _make_tools(ctx: dict) -> list:
         )
         matches = result.scalars().all()
         if not matches:
-            return f"错误：找不到包含"{content_keyword}"的待办事项。"
+            return f"错误：找不到包含'{content_keyword}'的待办事项。"
         if len(matches) > 1:
-            preview = "、".join(f'"{t.content}"' for t in matches[:5])
-            return f"错误：关键词"{content_keyword}"匹配到多条（{preview}），请提供更精确的关键词。"
+            preview = "、".join(f"'{t.content}'" for t in matches[:5])
+            return f"错误：关键词'{content_keyword}'匹配到多条（{preview}），请提供更精确的关键词。"
         todo = matches[0]
         if new_content is not None:
             todo.content = new_content
@@ -728,7 +728,7 @@ def _make_tools(ctx: dict) -> list:
                     else:
                         return f"错误：找不到名为 {username} 的用户或Bot。"
         await db_session.commit()
-        return f"成功更新待办事项："{todo.content}""
+        return f"成功更新待办事项：'{todo.content}'"
 
     @tool
     async def delete_todo(content_keyword: str) -> str:
@@ -750,15 +750,15 @@ def _make_tools(ctx: dict) -> list:
         )
         matches = result.scalars().all()
         if not matches:
-            return f"错误：找不到包含"{content_keyword}"的待办事项。"
+            return f"错误：找不到包含'{content_keyword}'的待办事项。"
         if len(matches) > 1:
-            preview = "、".join(f'"{t.content}"' for t in matches[:5])
-            return f"错误：关键词"{content_keyword}"匹配到多条（{preview}），请提供更精确的关键词。"
+            preview = "、".join(f"'{t.content}'" for t in matches[:5])
+            return f"错误：关键词'{content_keyword}'匹配到多条（{preview}），请提供更精确的关键词。"
         todo = matches[0]
         content = todo.content
         await db_session.delete(todo)
         await db_session.commit()
-        return f"成功删除待办事项："{content}""
+        return f"成功删除待办事项：'{content}'"
 
     return [update_anchor, update_progress, update_decision, call_bot, call_user, create_file, generate_image, edit_image, read_file, create_todo, list_todos, update_todo, delete_todo]
 
