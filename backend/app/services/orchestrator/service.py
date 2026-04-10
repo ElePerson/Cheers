@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import AgentTask, BotAccount, Channel, ChannelMembership, Message
+from app.db.models import AgentTask, BotAccount, Channel, ChannelMembership, Message, User
 from app.services.adapters.base import AgentPayload, AgentResponse, OpenClawAdapter
 from app.services.admin.settings_store import get_assist_settings
 from app.services.file_processor.service import FileFlowError, FilePipelineService
@@ -218,6 +218,23 @@ async def run_orchestrator(
         from app.services.memory.files_index import schedule_files_index_update
         schedule_files_index_update(channel_id, attachments)
 
+    # 查出发送者的昵称，注入到 trigger_message 供模板变量 {{sender_name}} 使用
+    sender_name = ""
+    if trigger_msg.sender_type == "user":
+        user_row = await session.execute(
+            select(User.display_name, User.username).where(User.user_id == trigger_msg.sender_id)
+        )
+        user_info = user_row.first()
+        if user_info:
+            sender_name = user_info[0] or user_info[1] or ""
+    elif trigger_msg.sender_type == "bot":
+        bot_row = await session.execute(
+            select(BotAccount.display_name, BotAccount.username).where(BotAccount.bot_id == trigger_msg.sender_id)
+        )
+        bot_info = bot_row.first()
+        if bot_info:
+            sender_name = bot_info[0] or bot_info[1] or ""
+
     created: list[Message] = []
     already_broadcast: set[str] = set()
     root_task_id = str(uuid.uuid4())
@@ -241,6 +258,13 @@ async def run_orchestrator(
         data = MessageInResponse.model_validate(msg).model_dump()
         if msg.created_at:
             data["created_at"] = msg.created_at.isoformat()
+        # 查出 bot 的 display_name
+        bot_row = await session.execute(
+            select(BotAccount.display_name, BotAccount.username).where(BotAccount.bot_id == sender_id)
+        )
+        bot_info = bot_row.first()
+        if bot_info:
+            data["sender_name"] = bot_info[0] or bot_info[1] or ""
         await ws_manager.broadcast_to_channel(channel_id, {"type": "message", "data": data})
         if stream_event:
             await stream_event("message", data)
@@ -331,6 +355,7 @@ async def run_orchestrator(
                 channel_id=channel_id,
                 trigger_message={
                     "user": trigger_msg.sender_id,
+                    "sender_name": sender_name,
                     "text": trigger_content,
                     "timestamp": trigger_msg.created_at.isoformat() if trigger_msg.created_at else "",
                     "msg_id": trigger_msg.msg_id,
@@ -386,6 +411,7 @@ async def run_orchestrator(
                         channel_id=channel_id,
                         trigger_message={
                             "user": trigger_msg.sender_id,
+                            "sender_name": sender_name,
                             "text": sug_templated_text,
                             "timestamp": trigger_msg.created_at.isoformat() if trigger_msg.created_at else "",
                         },
@@ -441,6 +467,7 @@ async def run_orchestrator(
             channel_id=channel_id,
             trigger_message={
                 "user": trigger_msg.sender_id,
+                "sender_name": sender_name,
                 "text": templated_text,
                 "timestamp": trigger_msg.created_at.isoformat() if trigger_msg.created_at else "",
                 "msg_id": trigger_msg.msg_id,

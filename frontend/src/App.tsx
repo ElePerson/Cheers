@@ -30,6 +30,7 @@ type Message = {
   msg_id: string;
   sender_id: string;
   sender_type: string;
+  sender_name?: string;
   content: string;
   created_at?: string;
   _streaming?: boolean;
@@ -4922,7 +4923,7 @@ export default function App() {
                     (b) => b.member_id === pair.answer.sender_id,
                   );
                   const botLabel =
-                    senderBot?.display_name || senderBot?.username || "Bot";
+                    pair.answer.sender_name || senderBot?.display_name || senderBot?.username || "Bot";
                   return (
                     <label
                       key={pair.question.msg_id}
@@ -5405,6 +5406,7 @@ export default function App() {
                               )
                             : undefined;
                         const botLabel =
+                          m.sender_name ||
                           senderBot?.display_name ||
                           senderBot?.username ||
                           "Bot";
@@ -5416,6 +5418,7 @@ export default function App() {
                               )
                             : undefined;
                         const userLabel =
+                          m.sender_name ||
                           senderUser?.display_name ||
                           senderUser?.username ||
                           "用户";
