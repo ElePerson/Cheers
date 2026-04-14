@@ -238,7 +238,7 @@ export default function ChannelMembersModal({
   // 加载所有提示词模板
   const loadTemplates = async () => {
     try {
-      const res = await fetch(`${API}/admin/templates`, { headers: authHeaders });
+      const res = await fetch(`${API}/templates`, { headers: authHeaders });
       const data = await res.json();
       if (data.status === "success") {
         setAllTemplates(data.data || []);

@@ -31,6 +31,7 @@ type PromptTemplate = {
   user_template: string;
   variables: string[];
   is_builtin: boolean;
+  created_by?: string | null;
   created_at?: string;
 };
 

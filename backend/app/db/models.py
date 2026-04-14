@@ -47,6 +47,9 @@ class PromptTemplate(Base):
     user_template: Mapped[str] = mapped_column(Text, nullable=False, default="{{message}}")  # 用户消息模板
     variables: Mapped[list] = mapped_column(JSON, nullable=True, default=list)  # 变量列表，如 ["message"]
     is_builtin: Mapped[bool] = mapped_column(default=False)  # 是否内置模板（不可删除）
+    created_by: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.user_id"), nullable=True, default=None
+    )  # 模板创建者，为空表示系统/管理员创建
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
