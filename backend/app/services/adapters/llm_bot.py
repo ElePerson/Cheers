@@ -184,21 +184,30 @@ class LLMBotAdapter(OpenClawAdapter):
                 "todos": payload.memory_context.get("todos", ""),
             })
         trigger_meta = payload.trigger_message or {}
-        context_vars["sender_name"] = trigger_meta.get("sender_name") or ""
+        context_vars["sender_name"] = (
+            trigger_meta.get("sender_name")
+            or pconfig.get("_sender_name")
+            or ""
+        )
+
+        # 子 bot 调用（call_bot）时跳过 system prompt，父 bot 的 message 已包含任务描述
+        skip_system_prompt = bool(pconfig.get("_skip_system_prompt"))
 
         # Vision 路径：模型支持且有图片时，构建多模态消息
         supports_vision = (self.model.config or {}).get("supports_vision", True)
         if supports_vision and self._has_image_attachments(all_attachments):
             templated_text = self._apply_user_template(user_text, context_vars)
             vision_content = self._build_vision_user_content(templated_text, all_attachments)
-            messages = [
-                {"role": "system", "content": self._get_system_prompt()},
-                {"role": "user", "content": vision_content},
-            ]
+            messages = [{"role": "user", "content": vision_content}]
+            if not skip_system_prompt:
+                messages.insert(0, {"role": "system", "content": self._get_system_prompt()})
         else:
             if image_attachments:
                 user_text += "\n\n（注：该 Bot 未启用图片识别，已忽略图片附件。如需识别图片，请在模型配置中开启 supports_vision。）"
-            messages = self._build_messages(user_text, context_vars)
+            if skip_system_prompt:
+                messages = [{"role": "user", "content": self._apply_user_template(user_text, context_vars)}]
+            else:
+                messages = self._build_messages(user_text, context_vars)
 
         body: dict[str, Any] = {
             "model": api_config["model_name"],
@@ -223,6 +232,24 @@ class LLMBotAdapter(OpenClawAdapter):
             task_id,
             len(payload.attachments or []),
         )
+        if logger.isEnabledFor(logging.DEBUG):
+            for idx, msg in enumerate(messages):
+                role = msg.get("role", "?")
+                content = msg.get("content", "")
+                # 多模态消息的 content 可能是列表，只摘要显示
+                if isinstance(content, list):
+                    parts_summary = ", ".join(
+                        p.get("type", "?") for p in content if isinstance(p, dict)
+                    )
+                    logger.debug(
+                        "llm_bot: messages[%d] role=%s content=[%s] (%d parts)",
+                        idx, role, parts_summary, len(content),
+                    )
+                else:
+                    logger.debug(
+                        "llm_bot: messages[%d] role=%s content(%d chars):\n%s",
+                        idx, role, len(content), content,
+                    )
 
         stream_token_cb: Callable[[str], Awaitable[None]] | None = (payload.process_config or {}).get("_stream_token")
         timeout = float(api_config.get("timeout", 600))
