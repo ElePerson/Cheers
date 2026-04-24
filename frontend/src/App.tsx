@@ -3250,7 +3250,7 @@ export default function App() {
                             <div
                               key={m.msg_id}
                               id={`msg-${m.msg_id}`}
-                              className="mx-3 my-1.5"
+                              className="mx-3 my-1.5 max-w-[70%]"
                             >
                               <button
                                 type="button"
@@ -3359,7 +3359,7 @@ export default function App() {
                           <div
                             key={m.msg_id}
                             id={`msg-${m.msg_id}`}
-                            className="mx-3 my-1.5 rounded-xl border border-[#1264A3]/30 bg-gray-100 shadow-sm overflow-hidden"
+                            className="mx-3 my-1.5 max-w-[70%] rounded-xl border border-[#1264A3]/30 bg-gray-100 shadow-sm overflow-hidden"
                           >
                             {/* Thread header */}
                             <div className="flex items-center justify-between px-3 py-2 bg-[#1264A3]/5 border-b border-[#1264A3]/10">
