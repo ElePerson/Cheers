@@ -24,6 +24,13 @@ import { QaSummaryModal } from "./components/QaSummaryModal";
 import { ImageGenModal } from "./components/ImageGenModal";
 import { Sidebar } from "./components/Sidebar";
 import { HelpModal } from "./components/HelpModal";
+import {
+  SettingsModal,
+  applyAccent,
+  applyDensity,
+  getStoredAccent,
+  getStoredDensity,
+} from "./components/SettingsModal";
 import { DragOverlay } from "./components/DragOverlay";
 import { ImageLightbox } from "./components/ImageLightbox";
 import { ChannelHeader } from "./components/ChannelHeader";
@@ -61,7 +68,13 @@ const API_DOCS_URL = "/docs";
 
 
 export default function App() {
-  const { toggleTheme, isDark } = useTheme();
+  const { isDark, setTheme } = useTheme();
+
+  // Apply stored appearance prefs (density + accent) on mount
+  useEffect(() => {
+    applyDensity(getStoredDensity());
+    applyAccent(getStoredAccent());
+  }, []);
 
   const { currentUser, authToken, currentUserId, authFetch, setAuth, setCurrentUser, logout: clearAuth } =
     useAuth(DEV_USER_ID);
@@ -113,6 +126,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [memoryPanelOpen, setMemoryPanelOpen] = useState(false);
   const [memoryPageOpen, setMemoryPageOpen] = useState(false);
   const [contextData, setContextData] = useState<ContextData>({});
@@ -1443,7 +1457,6 @@ export default function App() {
           onLeftResize={onLeftResize}
           currentUser={currentUser}
           authToken={authToken}
-          onLogout={handleLogout}
           onLoginClick={() => setLoginModalOpen(true)}
           workspaces={workspaces}
           setWorkspaces={setWorkspaces}
@@ -1454,23 +1467,31 @@ export default function App() {
           selectedId={selectedId}
           setSelectedId={setSelectedId}
           setSidebarOpen={setSidebarOpen}
-          onOpenKeychain={() => setKeychainModalOpen(true)}
-          onOpenUserProfile={() => setUserProfileOpen(true)}
           onOpenCreateWorkspace={() => setCreateWsOpen(true)}
           onOpenInviteWsMember={() => setInviteWsMemberOpen(true)}
           onOpenCreateChannel={() => setCreateChannelOpen(true)}
-          onOpenQuickConnect={() => setQcOpen(true)}
-          onOpenNotifications={() => setNotifPanelOpen(true)}
-          onOpenFriends={() => setFriendsPanelOpen(true)}
-          onOpenHelp={() => setHelpOpen(true)}
-          isDark={isDark}
-          toggleTheme={toggleTheme}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
 
         <HelpModal
           open={helpOpen}
           onClose={() => setHelpOpen(false)}
           apiDocsUrl={API_DOCS_URL}
+        />
+
+        <SettingsModal
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          isDark={isDark}
+          setTheme={setTheme}
+          currentUser={currentUser}
+          onOpenUserProfile={() => setUserProfileOpen(true)}
+          onOpenKeychain={() => setKeychainModalOpen(true)}
+          onOpenNotifications={() => setNotifPanelOpen(true)}
+          onOpenFriends={() => setFriendsPanelOpen(true)}
+          onOpenQuickConnect={() => setQcOpen(true)}
+          onOpenHelp={() => setHelpOpen(true)}
+          onLogout={handleLogout}
         />
 
         <OpenClawQcModal
@@ -1812,6 +1833,37 @@ export default function App() {
                   onOpenManageMembers={() => setManageMembersOpen(true)}
                   currentUser={currentUser}
                   onOpenChannelProfile={() => setChannelProfileOpen(true)}
+                  threads={threadRoots
+                    .map((r) => {
+                      const replies = threadRepliesOf(r.msg_id);
+                      if (replies.length === 0) return null;
+                      const title =
+                        (r.content || "").replace(/\s+/g, " ").trim().slice(0, 60) ||
+                        "(无标题)";
+                      const last = replies[replies.length - 1];
+                      return {
+                        rootId: r.msg_id,
+                        title,
+                        count: replies.length,
+                        lastTime: last?.created_at
+                          ? formatTs(last.created_at)
+                          : undefined,
+                      };
+                    })
+                    .filter((x): x is NonNullable<typeof x> => x !== null)}
+                  onJumpToMessage={(id) => {
+                    const el = document.getElementById(`msg-${id}`);
+                    if (!el) return;
+                    el.scrollIntoView({ block: "center", behavior: "smooth" });
+                    const orig = el.style.transition;
+                    el.style.transition = "background 200ms";
+                    const prev = el.style.background;
+                    el.style.background = "var(--accent-muted)";
+                    setTimeout(() => {
+                      el.style.background = prev;
+                      el.style.transition = orig;
+                    }, 1200);
+                  }}
                 />
 
                 <div
@@ -3077,24 +3129,10 @@ export default function App() {
                         .replace(/\n/g, " ")
                         .slice(0, 80);
                       return (
-                        <div className="flex items-center gap-2 px-3 py-2 mb-1 bg-gray-50 border border-gray-200 rounded-xl text-[13px]">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 16 16"
-                            fill="currentColor"
-                            className="w-3.5 h-3.5 text-[#1264A3] flex-shrink-0"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M1.22 6.53a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 1.06L3.56 5.25H10a5.75 5.75 0 0 1 0 11.5H6a.75.75 0 0 1 0-1.5h4a4.25 4.25 0 0 0 0-8.5H3.56l1.72 1.72a.75.75 0 1 1-1.06 1.06l-3-3Z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          <span className="text-gray-500">回复</span>
-                          <span className="font-semibold text-gray-700">
-                            {refLabel}
-                          </span>
-                          <span className="text-gray-400 truncate flex-1">
+                        <div className="an-reply-quote mb-1" style={{ maxWidth: "none" }}>
+                          <span className="an-rq-arrow">↪</span>
+                          <span className="an-rq-name">{refLabel}</span>
+                          <span className="an-rq-snip">
                             {refPreview}
                             {(
                               parseGuidePayload(replyingTo.content).text ||
@@ -3106,7 +3144,9 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => setReplyingTo(null)}
-                            className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600"
+                            className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full hover:bg-[var(--surface-hover)]"
+                            style={{ color: "var(--fg-3)" }}
+                            title="取消回复"
                           >
                             <svg
                               xmlns="http://www.w3.org/2000/svg"
@@ -3276,7 +3316,11 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={openKeychainPopup}
-                                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${keychainPopupOpen ? "bg-blue-50 text-blue-600" : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"}`}
+                                className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
+                                style={{
+                                  color: keychainPopupOpen ? "var(--accent)" : "var(--fg-3)",
+                                  background: keychainPopupOpen ? "var(--accent-muted)" : "transparent",
+                                }}
                                 title="插入密钥链"
                               >
                                 <svg
@@ -3293,21 +3337,15 @@ export default function App() {
                                 </svg>
                               </button>
                               {keychainPopupOpen && (
-                                <div className="absolute bottom-10 left-0 z-50 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[200px] max-h-64 overflow-y-auto">
-                                  <p className="px-3 py-1.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide">
-                                    插入密钥
-                                  </p>
+                                <div className="an-menu absolute" style={{ bottom: 40, left: 0, minWidth: 220, maxHeight: 256, overflowY: "auto" }}>
+                                  <div className="an-menu-head">插入密钥</div>
                                   {keychainPopupLoading ? (
-                                    <div className="px-3 py-3 text-xs text-gray-400 text-center">
-                                      加载中…
-                                    </div>
+                                    <div className="an-menu-empty">加载中…</div>
                                   ) : keychainPopupItems.length === 0 ? (
-                                    <div className="px-3 py-3 text-xs text-gray-400 text-center">
+                                    <div className="an-menu-empty">
                                       暂无密钥
                                       <br />
-                                      <span className="text-gray-300">
-                                        点击侧边栏钥匙图标添加
-                                      </span>
+                                      <span style={{ opacity: 0.7 }}>点击侧边栏钥匙图标添加</span>
                                     </div>
                                   ) : (
                                     keychainPopupItems.map((item) => (
@@ -3315,23 +3353,23 @@ export default function App() {
                                         key={item.key_id}
                                         type="button"
                                         onClick={() => insertSecret(item.name)}
-                                        className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50"
+                                        className="an-menu-item"
                                       >
-                                        <svg
-                                          xmlns="http://www.w3.org/2000/svg"
-                                          viewBox="0 0 16 16"
-                                          fill="currentColor"
-                                          className="w-3.5 h-3.5 text-gray-400 flex-shrink-0"
-                                        >
-                                          <path
-                                            fillRule="evenodd"
-                                            d="M6.5 5.5a4 4 0 1 1 2.88 3.838.75.75 0 0 0-.88.72V11h1.25a.75.75 0 0 1 0 1.5H8.5v1.25a.75.75 0 0 1-1.5 0v-3.44a5.5 5.5 0 1 1 5.5-5.31.75.75 0 0 1-1.499.05A4.001 4.001 0 0 0 6.5 5.5Zm.5 0a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1Z"
-                                            clipRule="evenodd"
-                                          />
-                                        </svg>
-                                        <span className="font-mono truncate">
-                                          {item.name}
+                                        <span className="an-mi-ico">
+                                          <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            viewBox="0 0 16 16"
+                                            fill="currentColor"
+                                            className="w-3.5 h-3.5"
+                                          >
+                                            <path
+                                              fillRule="evenodd"
+                                              d="M6.5 5.5a4 4 0 1 1 2.88 3.838.75.75 0 0 0-.88.72V11h1.25a.75.75 0 0 1 0 1.5H8.5v1.25a.75.75 0 0 1-1.5 0v-3.44a5.5 5.5 0 1 1 5.5-5.31.75.75 0 0 1-1.499.05A4.001 4.001 0 0 0 6.5 5.5Zm.5 0a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1Z"
+                                              clipRule="evenodd"
+                                            />
+                                          </svg>
                                         </span>
+                                        <span className="font-mono truncate">{item.name}</span>
                                       </button>
                                     ))
                                   )}
@@ -3357,28 +3395,30 @@ export default function App() {
                               </svg>
                             </button>
                             {uploadMenuOpen && (
-                              <div className="absolute bottom-10 left-0 z-50 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[160px]">
+                              <div className="an-menu absolute" style={{ bottom: 40, left: 0, minWidth: 180 }}>
                                 <button
                                   type="button"
-                                  className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50 rounded-lg"
+                                  className="an-menu-item"
                                   onClick={() => {
                                     setUploadMenuOpen(false);
                                     fileImgInputRef.current?.click();
                                   }}
                                 >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 16 16"
-                                    fill="currentColor"
-                                    className="w-4 h-4 text-gray-400 flex-shrink-0"
-                                  >
-                                    <path
-                                      fillRule="evenodd"
-                                      d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a3 3 0 0 0 4.241 4.243h.001l.497-.5a.75.75 0 0 1 1.064 1.057l-.498.501-.002.002a4.5 4.5 0 0 1-6.364-6.364l7-7a4.5 4.5 0 0 1 6.368 6.36l-3.455 3.553A2.625 2.625 0 1 1 9.52 9.52l3.45-3.451a.75.75 0 1 1 1.061 1.06l-3.45 3.451a1.125 1.125 0 0 0 1.587 1.595l3.454-3.553a3 3 0 0 0 0-4.242Z"
-                                      clipRule="evenodd"
-                                    />
-                                  </svg>
-                                  上传文件和图片
+                                  <span className="an-mi-ico">
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      viewBox="0 0 16 16"
+                                      fill="currentColor"
+                                      className="w-4 h-4"
+                                    >
+                                      <path
+                                        fillRule="evenodd"
+                                        d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a3 3 0 0 0 4.241 4.243h.001l.497-.5a.75.75 0 0 1 1.064 1.057l-.498.501-.002.002a4.5 4.5 0 0 1-6.364-6.364l7-7a4.5 4.5 0 0 1 6.368 6.36l-3.455 3.553A2.625 2.625 0 1 1 9.52 9.52l3.45-3.451a.75.75 0 1 1 1.061 1.06l-3.45 3.451a1.125 1.125 0 0 0 1.587 1.595l3.454-3.553a3 3 0 0 0 0-4.242Z"
+                                        clipRule="evenodd"
+                                      />
+                                    </svg>
+                                  </span>
+                                  <span>上传文件和图片</span>
                                 </button>
                               </div>
                             )}
@@ -3451,14 +3491,19 @@ export default function App() {
                             : "top-full mt-1";
                         return (
                           <ul
-                            className={`absolute left-0 right-0 ${placementClass} bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-48 overflow-auto`}
+                            className={`an-menu absolute left-0 right-0 ${placementClass}`}
+                            style={{ maxHeight: 240, overflowY: "auto" }}
                             role="listbox"
                           >
+                            <li className="an-menu-head" style={{ listStyle: "none" }}>
+                              @提及 · {matched.length} 项
+                            </li>
                             {matched.map((item) => (
                               <li
                                 key={item.member_id}
                                 role="option"
-                                className="px-3 py-2 hover:bg-[#F8F8F8] cursor-pointer text-sm flex items-center gap-2"
+                                className="an-menu-item"
+                                style={{ listStyle: "none" }}
                                 onMouseDown={(e) => {
                                   e.preventDefault();
                                   const el = inputRef.current;
@@ -3483,23 +3528,48 @@ export default function App() {
                                   }, 0);
                                 }}
                               >
-                                <div
-                                  className={`w-6 h-6 rounded flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${item.kind === "bot" ? "bg-[#2EB67D]" : "bg-[#1264A3]"}`}
+                                <span
+                                  className="an-mi-ico"
+                                  style={{
+                                    width: 22,
+                                    height: 22,
+                                    borderRadius: 5,
+                                    color: "#fff",
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    background:
+                                      item.kind === "bot"
+                                        ? "var(--green)"
+                                        : "var(--accent)",
+                                  }}
                                 >
                                   {item.username.slice(0, 1).toUpperCase()}
-                                </div>
-                                <div className="flex flex-col min-w-0">
-                                  <span className="font-medium text-gray-800">
+                                </span>
+                                <div className="flex flex-col min-w-0 flex-1">
+                                  <span
+                                    className="font-medium truncate"
+                                    style={{ color: "var(--fg-1)" }}
+                                  >
                                     @{item.username}
                                   </span>
                                   {item.display_name && (
-                                    <span className="text-xs text-gray-400 truncate">
+                                    <span className="an-mi-sub truncate">
                                       {item.display_name}
                                     </span>
                                   )}
                                 </div>
                                 <span
-                                  className={`ml-auto text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${item.kind === "bot" ? "bg-green-50 text-green-700" : "bg-blue-50 text-blue-700"}`}
+                                  className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0"
+                                  style={{
+                                    background:
+                                      item.kind === "bot"
+                                        ? "var(--green-muted)"
+                                        : "var(--accent-muted)",
+                                    color:
+                                      item.kind === "bot"
+                                        ? "var(--green)"
+                                        : "var(--accent)",
+                                  }}
                                 >
                                   {item.kind === "bot" ? "Bot" : "用户"}
                                 </span>

@@ -1,5 +1,13 @@
+import { useEffect, useRef, useState } from "react";
 import type { Channel, CurrentUser, QaPair } from "../types";
 import { apiFetch } from "../api";
+
+export type ThreadSummary = {
+  rootId: string;
+  title: string;
+  count: number;
+  lastTime?: string;
+};
 
 interface ChannelHeaderProps {
   channel: Channel | undefined | null;
@@ -22,6 +30,9 @@ interface ChannelHeaderProps {
 
   currentUser: CurrentUser;
   onOpenChannelProfile: () => void;
+
+  threads?: ThreadSummary[];
+  onJumpToMessage?: (msgId: string) => void;
 }
 
 export function ChannelHeader({
@@ -40,45 +51,54 @@ export function ChannelHeader({
   onOpenManageMembers,
   currentUser,
   onOpenChannelProfile,
+  threads = [],
+  onJumpToMessage,
 }: ChannelHeaderProps) {
+  const subtitle = autoAssist ? "自动接管已开启" : "";
+  const [threadsOpen, setThreadsOpen] = useState(false);
+  const popRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!threadsOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) {
+        setThreadsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [threadsOpen]);
+
   return (
-    <div className="px-3 sm:px-5 py-2.5 sm:py-3 border-b border-gray-100 bg-white flex items-center gap-2 sm:gap-3">
+    <div className="an-head" style={{ paddingLeft: isMobile ? 12 : undefined }}>
       {isMobile && (
         <button
           type="button"
           onClick={onOpenSidebar}
-          className="w-8 h-8 flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 flex-shrink-0"
+          className="w-8 h-8 flex items-center justify-center rounded-md flex-shrink-0 hover:bg-[var(--surface-soft)] transition-colors"
+          style={{ color: "var(--fg-2)" }}
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={1.5}
-            stroke="currentColor"
-            className="w-6 h-6"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
-            />
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
           </svg>
         </button>
       )}
-      <span className="text-gray-400 font-medium text-base select-none">#</span>
-      <h1 className="font-semibold text-gray-900 text-base truncate flex-1">
-        {channel?.name || ""}
-      </h1>
-      {/* Auto-assist toggle */}
+
+      {/* Title block */}
+      <div className="min-w-0 flex-1 flex items-baseline gap-3">
+        <h1 className="an-title truncate">
+          <span className="an-hash">#</span>
+          <span>{channel?.name || ""}</span>
+        </h1>
+        {subtitle && <span className="an-sub truncate hidden sm:inline">{subtitle}</span>}
+      </div>
+
+      {/* Auto-assist toggle — the one power feature that stays visible */}
       <label
-        className="flex items-center gap-1.5 cursor-pointer select-none"
-        title={
-          autoAssist
-            ? "自动调用内置助手（开启中）"
-            : "自动调用内置助手（关闭）"
-        }
+        className="flex items-center gap-1.5 cursor-pointer select-none flex-shrink-0"
+        title={autoAssist ? "自动调用内置助手（开启中）" : "自动调用内置助手（关闭）"}
       >
-        <span className="text-xs text-gray-500 whitespace-nowrap hidden sm:inline">
+        <span className="text-[11px] whitespace-nowrap hidden sm:inline" style={{ color: "var(--fg-3)" }}>
           自动接管
         </span>
         <button
@@ -107,85 +127,120 @@ export function ChannelHeader({
               })
               .catch(() => setAutoAssist(!next));
           }}
-          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${autoAssist ? "bg-[#1264A3]" : "bg-gray-200"}`}
+          className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
+          style={{
+            background: autoAssist ? "var(--accent)" : "var(--surface-strong)",
+          }}
         >
           <span
-            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${autoAssist ? "translate-x-[18px]" : "translate-x-[3px]"}`}
+            className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+            style={{ transform: autoAssist ? "translateX(18px)" : "translateX(3px)" }}
           />
         </button>
       </label>
-      {blockPairsForExport.length > 0 && (
+
+      {/* Threads pill — list of thread roots in this channel */}
+      {threads.length > 0 && (
+        <div className="relative" ref={popRef}>
+          <button
+            type="button"
+            className={`an-threads-btn ${threadsOpen ? "on" : ""}`}
+            onClick={() => setThreadsOpen((v) => !v)}
+            title="频道对话串"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M2 3h12M2 7h9M2 11h6" strokeLinecap="round" />
+              <circle cx="13" cy="11" r="2.3" />
+            </svg>
+            <span className="hidden sm:inline">对话串</span>
+            <span className="an-tb-n">{threads.length}</span>
+          </button>
+          {threadsOpen && (
+            <div className="an-threads-pop" style={{ right: 0, top: "calc(100% + 6px)", position: "absolute" }}>
+              <div className="an-hd">频道内的对话串</div>
+              {threads.map((t) => (
+                <button
+                  key={t.rootId}
+                  type="button"
+                  className="an-it"
+                  onClick={() => {
+                    setThreadsOpen(false);
+                    onJumpToMessage?.(t.rootId);
+                  }}
+                >
+                  <div className="an-it-t">{t.title || "(无标题)"}</div>
+                  <div className="an-it-s">
+                    <span>{t.count} 条回复</span>
+                    {t.lastTime && (
+                      <>
+                        <span className="an-d" />
+                        <span>最近 {t.lastTime}</span>
+                      </>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Memory icon cluster — design pattern from AgentNexus.html */}
+      <div className="an-mem-cluster" role="group" aria-label="频道记忆">
         <button
           type="button"
-          title="生成问答总结"
-          onClick={onOpenQaSummary}
-          className="w-8 h-8 hidden sm:flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+          className={`an-mc-btn ${memoryPanelOpen ? "on" : ""}`}
+          onClick={onToggleMemoryPanel}
+          title="频道记忆 · Project"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            className="w-4 h-4"
-          >
-            <path
-              fillRule="evenodd"
-              d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm2 6a.75.75 0 0 1 .75-.75h6.5a.75.75 0 0 1 0 1.5h-6.5A.75.75 0 0 1 6 10Zm.75 2.25a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z"
-              clipRule="evenodd"
-            />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 7h18M5 7v12a1 1 0 001 1h12a1 1 0 001-1V7M9 4h6a1 1 0 011 1v2H8V5a1 1 0 011-1z" />
           </svg>
+          <span className="an-mc-label hidden sm:inline">记忆</span>
         </button>
-      )}
-      <button
-        type="button"
-        onClick={onToggleMemoryPanel}
-        title="频道记忆"
-        className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
-          memoryPanelOpen
-            ? "bg-[#1264A3] text-white"
-            : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-        }`}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          className="w-4 h-4"
-        >
-          <path d="M13 3a1 1 0 0 1 1-1 6 6 0 0 1 6 6c0 1.08-.29 2.09-.8 2.96A4 4 0 0 1 20 14a4 4 0 0 1-2.22 3.57c.14.43.22.89.22 1.43a1 1 0 1 1-2 0c0-.5-.1-.95-.27-1.37A4 4 0 0 1 14 14v-1h-1v8a1 1 0 1 1-2 0v-8h-1v1a4 4 0 0 1-1.73 3.63C8.1 18.05 8 18.5 8 19a1 1 0 1 1-2 0c0-.54.08-1 .22-1.43A4 4 0 0 1 4 14a4 4 0 0 1 .8-2.96A6 6 0 0 1 4 8a6 6 0 0 1 6-6 1 1 0 1 1 0 2 4 4 0 0 0-4 4c0 .78.22 1.5.6 2.12A4 4 0 0 1 8 14v-1H7a1 1 0 1 1 0-2h1v-1a2 2 0 1 1 4 0v1h1a1 1 0 1 1 0 2h-1v1a4 4 0 0 1 .4-1.88A4 4 0 0 0 16 8a4 4 0 0 0-3-3.87V10a1 1 0 1 1-2 0V3Z" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        onClick={onOpenManageMembers}
-        title="成员管理"
-        className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 20 20"
-          fill="currentColor"
-          className="w-4 h-4"
-        >
-          <path d="M10 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM1.49 15.326a.78.78 0 0 1-.358-.442 3 3 0 0 1 4.308-3.516 6.484 6.484 0 0 0-1.905 3.959c-.023.222-.014.442.025.654a4.97 4.97 0 0 1-2.07-.655ZM16.44 15.98a4.97 4.97 0 0 0 2.07-.654.78.78 0 0 0 .357-.442 3 3 0 0 0-4.308-3.517 6.484 6.484 0 0 1 1.907 3.96 2.32 2.32 0 0 1-.026.654ZM18 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM5.304 16.19a.844.844 0 0 1-.277-.71 5 5 0 0 1 9.947 0 .843.843 0 0 1-.277.71A6.975 6.975 0 0 1 10 18a6.974 6.974 0 0 1-4.696-1.81Z" />
-        </svg>
-      </button>
-      {currentUser && (
         <button
           type="button"
-          onClick={onOpenChannelProfile}
-          title="我的频道资料"
-          className="w-8 h-8 hidden sm:flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+          className="an-mc-btn"
+          onClick={onOpenManageMembers}
+          title="成员管理"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            className="w-4 h-4"
-          >
-            <path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="9" cy="9" r="3.2" />
+            <path d="M3 19c.8-3.2 3.2-5 6-5s5.2 1.8 6 5" />
+            <circle cx="17" cy="8" r="2.2" />
+            <path d="M15 14.5c1.8-.5 3.6 0 5 2" />
           </svg>
+          <span className="an-mc-label hidden sm:inline">成员</span>
         </button>
-      )}
+        {blockPairsForExport.length > 0 && (
+          <button
+            type="button"
+            className="an-mc-btn"
+            onClick={onOpenQaSummary}
+            title="生成问答总结"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z" />
+              <path d="M14 3v5h5M9 13h6M9 17h4" />
+            </svg>
+            <span className="an-mc-label hidden sm:inline">问答</span>
+          </button>
+        )}
+        {currentUser && (
+          <button
+            type="button"
+            className="an-mc-btn"
+            onClick={onOpenChannelProfile}
+            title="我的频道资料"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="8" r="3.2" />
+              <path d="M5 19c1-3.6 3.8-6 7-6s6 2.4 7 6" />
+            </svg>
+            <span className="an-mc-label hidden sm:inline">资料</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }

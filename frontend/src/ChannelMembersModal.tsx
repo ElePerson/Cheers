@@ -322,44 +322,32 @@ export default function ChannelMembersModal({
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-200">
+        <div className="an-tabs px-3">
           <button
+            type="button"
             onClick={() => setActiveTab("members")}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
-              activeTab === "members"
-                ? "text-[#1264A3] border-b-2 border-[#1264A3]"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
+            className={`an-tab ${activeTab === "members" ? "on" : ""}`}
           >
             当前成员 ({members.length})
           </button>
           <button
+            type="button"
             onClick={() => setActiveTab("invite")}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
-              activeTab === "invite"
-                ? "text-[#1264A3] border-b-2 border-[#1264A3]"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
+            className={`an-tab ${activeTab === "invite" ? "on" : ""}`}
           >
             邀请好友 {friends.length > 0 && `(${friends.length})`}
           </button>
           <button
+            type="button"
             onClick={() => setActiveTab("invite_by_id")}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
-              activeTab === "invite_by_id"
-                ? "text-[#1264A3] border-b-2 border-[#1264A3]"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
+            className={`an-tab ${activeTab === "invite_by_id" ? "on" : ""}`}
           >
             通过ID邀请
           </button>
           <button
+            type="button"
             onClick={() => setActiveTab("invite_bot")}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
-              activeTab === "invite_bot"
-                ? "text-[#1264A3] border-b-2 border-[#1264A3]"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
+            className={`an-tab ${activeTab === "invite_bot" ? "on" : ""}`}
           >
             邀请 Bot
           </button>

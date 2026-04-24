@@ -997,126 +997,139 @@ export default function MemoryPage({
      ══════════════════════════════════════════════════════════════════════════ */
 
   return (
-    <div className="fixed inset-0 z-[110] bg-black/40 backdrop-blur-sm flex">
-      <div className="flex flex-1 bg-white rounded-lg m-3 shadow-2xl overflow-hidden">
-        {/* ── Left sidebar nav ──────────────────────────────────────────── */}
-        <nav className="w-56 flex-shrink-0 bg-gray-50 border-r border-gray-200 flex flex-col">
-          {/* Header */}
-          <div className="px-4 py-4 border-b border-gray-200">
-            <h2 className="text-base font-bold text-gray-900">频道记忆</h2>
+    <div
+      className="fixed inset-0 z-[110] flex"
+      style={{ background: "var(--overlay)" }}
+    >
+      <div
+        className="flex flex-1 m-3 overflow-hidden"
+        style={{
+          background: "var(--bg-1)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          boxShadow: "0 30px 80px var(--shadow)",
+        }}
+      >
+        {/* ── Left layer nav — matches SettingsModal's settings-nav pattern ─ */}
+        <nav
+          className="an-settings-nav"
+          style={{ width: 220, flexShrink: 0, background: "var(--bg-0)" }}
+        >
+          <div
+            className="px-3 pt-1 pb-3"
+            style={{ borderBottom: "1px solid var(--border)", marginBottom: 8 }}
+          >
+            <div
+              style={{ fontSize: 14, fontWeight: 600, color: "var(--fg-1)" }}
+            >
+              频道记忆
+            </div>
             {channelName && (
-              <p className="text-xs text-gray-400 mt-0.5">#{channelName}</p>
+              <div
+                style={{ fontSize: 11, color: "var(--fg-3)", marginTop: 2 }}
+              >
+                #{channelName}
+              </div>
             )}
           </div>
-          {/* Layer list */}
-          <div className="flex-1 overflow-y-auto py-2">
+          <div className="flex-1 overflow-y-auto">
             {LAYERS.map((layer) => {
               const lm = LAYER_META[layer];
               const active = layer === activeLayer;
               return (
                 <button
+                  type="button"
                   key={layer}
                   onClick={() => switchLayer(layer)}
-                  className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors ${
-                    active
-                      ? "bg-white border-r-2 border-[#1264A3] shadow-sm"
-                      : "hover:bg-gray-100"
-                  }`}
+                  className={`an-sn-item ${active ? "on" : ""}`}
                 >
-                  <span className="text-lg flex-shrink-0">{lm.icon}</span>
+                  <span className="an-sn-ico">{lm.icon}</span>
                   <div className="min-w-0 flex-1">
-                    <p
-                      className={`text-sm font-medium truncate ${active ? "text-[#1264A3]" : "text-gray-700"}`}
-                    >
+                    <div className="truncate" style={{ color: "inherit" }}>
                       {lm.label}
-                    </p>
-                    <p className="text-[11px] text-gray-400 truncate">
+                    </div>
+                    <div
+                      className="truncate"
+                      style={{ fontSize: 11, color: "var(--fg-3)" }}
+                    >
                       {lm.desc}
-                    </p>
+                    </div>
                   </div>
                 </button>
               );
             })}
           </div>
-          {/* Close button */}
-          <div className="p-3 border-t border-gray-200">
-            <button
-              onClick={onClose}
-              className="w-full py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              关闭
-            </button>
-          </div>
+          <div className="an-sn-sep" />
+          <button
+            type="button"
+            onClick={onClose}
+            className="an-btn an-btn-ghost"
+            style={{ margin: "0 8px 10px", justifyContent: "center" }}
+          >
+            关闭
+          </button>
         </nav>
 
         {/* ── Main content area ─────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div
+          className="flex-1 flex flex-col min-w-0"
+          style={{ background: "var(--bg-1)" }}
+        >
           {/* Content header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
+          <div
+            className="flex items-center justify-between px-6 py-4 flex-shrink-0"
+            style={{ borderBottom: "1px solid var(--border)" }}
+          >
             <div className="flex items-center gap-3">
               <span className="text-2xl">{meta.icon}</span>
               <div>
-                <h2 className="text-lg font-bold text-gray-900">
+                <div
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: "var(--fg-1)",
+                  }}
+                >
                   {meta.label}
-                </h2>
-                <p className="text-xs text-gray-400">{meta.desc}</p>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--fg-3)" }}>
+                  {meta.desc}
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
               {meta.entryBased && !addingNew && (
                 <button
+                  type="button"
                   onClick={() => setAddingNew(true)}
-                  className="flex items-center gap-1.5 px-3.5 py-2 text-sm rounded-lg bg-[#1264A3] text-white hover:bg-[#0f5a94] transition-colors"
+                  className="an-btn an-btn-primary an-btn-sm"
                 >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 4v16m8-8H4"
-                    />
-                  </svg>
-                  添加
+                  ＋ 添加
                 </button>
               )}
               {meta.entryBased && entries.length > 0 && (
-                <span className="text-xs text-gray-400 px-2">
-                  {entries.length} 条记录
-                </span>
+                <span className="an-chip">{entries.length} 条记录</span>
               )}
               {meta.readonly && activeLayer !== "TODO" && (
-                <span className="text-xs text-gray-400 px-2 py-1 rounded bg-gray-100">
-                  自动生成
-                </span>
+                <span className="an-chip">自动生成</span>
               )}
               <button
+                type="button"
                 onClick={onClose}
-                className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                className="an-modal-close"
                 title="关闭"
               >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
+                ✕
               </button>
             </div>
           </div>
           {/* Scrollable content */}
-          <div className="flex-1 overflow-y-auto p-6">{renderContent()}</div>
+          <div
+            className="flex-1 overflow-y-auto p-6"
+            style={{ background: "var(--bg-0)" }}
+          >
+            {renderContent()}
+          </div>
         </div>
       </div>
     </div>
