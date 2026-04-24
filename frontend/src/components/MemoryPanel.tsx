@@ -52,6 +52,7 @@ export function MemoryPanel({
   const [addingNew, setAddingNew] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
+  const [timelineMode, setTimelineMode] = useState(false);
 
   const meta = LAYER_META[activeLayer];
   const isReadonly = !!meta.readonly;
@@ -276,83 +277,168 @@ export function MemoryPanel({
               添加条目
             </button>
           </div>
-        ) : (
-          <ul className="divide-y divide-gray-100">
-            {entries.map((entry) =>
-              editingEntryId === entry.entry_id ? (
-                <li
-                  key={entry.entry_id}
-                  className="px-3 py-2 space-y-1.5 bg-blue-50/30"
-                >
-                  <input
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="标题（可选）"
-                    className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-400"
-                  />
-                  <textarea
-                    rows={3}
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 resize-none focus:outline-none focus:border-blue-400 font-mono"
-                  />
-                  <div className="flex gap-1 justify-end">
-                    <button
-                      onClick={() => setEditingEntryId(null)}
-                      className="text-[11px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50"
-                    >
-                      取消
-                    </button>
-                    <button
-                      onClick={() => handleUpdateEntry(entry.entry_id)}
-                      className="text-[11px] px-2 py-0.5 rounded bg-[#1264A3] text-white hover:bg-[#0f5a94]"
-                    >
-                      保存
-                    </button>
-                  </div>
-                </li>
-              ) : (
-                <li
-                  key={entry.entry_id}
-                  className="px-3 py-2 group hover:bg-gray-50/50"
-                >
-                  <div className="flex items-start justify-between gap-1.5">
-                    <div className="flex-1 min-w-0">
-                      {entry.title && (
-                        <p className="text-xs font-semibold text-gray-700 mb-0.5">
-                          {entry.title}
-                        </p>
-                      )}
-                      <div className="text-xs text-gray-600">
-                        <MessageMarkdown text={entry.content} />
+        ) : timelineMode && (activeLayer === "PROGRESS" || activeLayer === "DECISIONS") ? (
+          <div className="px-3 py-3">
+            <div className="an-tl-title">
+              {activeLayer === "DECISIONS" ? "Decisions" : "Progress"} · Timeline
+            </div>
+            <div className="an-timeline">
+              {entries.map((entry) => {
+                const isDone = /done|完成|已做|shipped|merged|resolved|批准|approved/i.test(
+                  entry.content + " " + (entry.title || ""),
+                );
+                const kind =
+                  activeLayer === "DECISIONS"
+                    ? "decision"
+                    : isDone
+                      ? "done"
+                      : "progress";
+                return (
+                  <div key={entry.entry_id} className={`an-tl-item ${kind}`}>
+                    <div className="an-tl-dot" />
+                    <div className="an-tl-kind">
+                      {activeLayer === "DECISIONS"
+                        ? "Decision"
+                        : isDone
+                          ? "Done"
+                          : "Progress"}
+                    </div>
+                    {entry.title && (
+                      <div
+                        className="an-tl-tx"
+                        style={{ fontWeight: 600, marginBottom: 2 }}
+                      >
+                        {entry.title}
                       </div>
-                      {entry.updated_at && (
-                        <p className="text-[10px] text-gray-300 mt-1">
-                          {new Date(entry.updated_at).toLocaleString()}
-                        </p>
-                      )}
+                    )}
+                    <div className="an-tl-tx">
+                      <MessageMarkdown text={entry.content} />
                     </div>
-                    <div className="flex gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {entry.updated_at && (
+                      <div className="an-tl-mt">
+                        {new Date(entry.updated_at).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="px-3 py-2">
+            {entries.map((entry) => {
+              if (editingEntryId === entry.entry_id) {
+                return (
+                  <div
+                    key={entry.entry_id}
+                    className="px-1 py-2 space-y-1.5"
+                    style={{
+                      background: "var(--accent-muted)",
+                      borderRadius: 6,
+                      marginBottom: 4,
+                    }}
+                  >
+                    <input
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      placeholder="标题（可选）"
+                      className="w-full text-xs rounded px-2 py-1 focus:outline-none"
+                      style={{
+                        background: "var(--bg-0)",
+                        border: "1px solid var(--border)",
+                        color: "var(--fg-1)",
+                      }}
+                    />
+                    <textarea
+                      rows={3}
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      className="w-full text-xs rounded px-2 py-1.5 resize-none focus:outline-none font-mono"
+                      style={{
+                        background: "var(--bg-0)",
+                        border: "1px solid var(--border)",
+                        color: "var(--fg-1)",
+                      }}
+                    />
+                    <div className="flex gap-1 justify-end">
                       <button
-                        onClick={() => startEditEntry(entry)}
-                        className="text-gray-400 hover:text-blue-500 text-[10px] p-0.5"
-                        title="编辑"
+                        onClick={() => setEditingEntryId(null)}
+                        className="text-[11px] px-2 py-0.5 rounded"
+                        style={{
+                          border: "1px solid var(--border)",
+                          color: "var(--fg-2)",
+                          background: "transparent",
+                        }}
                       >
-                        &#9998;
+                        取消
                       </button>
                       <button
-                        onClick={() => handleDeleteEntry(entry.entry_id)}
-                        className="text-gray-300 hover:text-red-400 text-[10px] p-0.5"
-                        title="删除"
+                        onClick={() => handleUpdateEntry(entry.entry_id)}
+                        className="text-[11px] px-2 py-0.5 rounded"
+                        style={{
+                          background: "var(--accent)",
+                          color: "#fff",
+                          border: 0,
+                        }}
                       >
-                        &#10005;
+                        保存
                       </button>
                     </div>
                   </div>
-                </li>
-              ),
-            )}
-          </ul>
+                );
+              }
+              const isDone = /done|完成|已做|shipped|merged|resolved|批准|approved/i.test(
+                entry.content + " " + (entry.title || ""),
+              );
+              const cls =
+                activeLayer === "ANCHOR"
+                  ? "anchor"
+                  : isDone
+                    ? "done"
+                    : "";
+              return (
+                <div key={entry.entry_id} className={`an-mem-item ${cls} group`}>
+                  <div className="an-tick" />
+                  <div className="an-b">
+                    {entry.title && (
+                      <div
+                        className="an-tx"
+                        style={{ fontWeight: 600, marginBottom: 2 }}
+                      >
+                        {entry.title}
+                      </div>
+                    )}
+                    <div className="an-tx">
+                      <MessageMarkdown text={entry.content} />
+                    </div>
+                    {entry.updated_at && (
+                      <div className="an-mt">
+                        {new Date(entry.updated_at).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity self-start">
+                    <button
+                      onClick={() => startEditEntry(entry)}
+                      className="text-[11px] p-1 rounded hover:bg-[var(--surface-soft)]"
+                      style={{ color: "var(--fg-3)" }}
+                      title="编辑"
+                    >
+                      &#9998;
+                    </button>
+                    <button
+                      onClick={() => handleDeleteEntry(entry.entry_id)}
+                      className="text-[11px] p-1 rounded hover:bg-[var(--surface-soft)]"
+                      style={{ color: "var(--fg-3)" }}
+                      title="删除"
+                    >
+                      &#10005;
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
 
         {/* Add new entry form */}
@@ -401,20 +487,19 @@ export function MemoryPanel({
   };
 
   return (
-    <aside className="w-full border-l border-gray-200 bg-white flex flex-col">
+    <aside className="an-memory w-full flex flex-col" style={{ minHeight: 0 }}>
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 flex-shrink-0">
+      <div className="an-memory-head flex-shrink-0">
         <div className="min-w-0">
-          <span className="text-sm font-semibold text-gray-900">频道记忆</span>
-          {channelName && (
-            <span className="ml-1.5 text-xs text-gray-400">#{channelName}</span>
-          )}
+          <div className="an-t">频道记忆</div>
+          {channelName && <div className="an-sub">#{channelName}</div>}
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
           <button
             type="button"
             onClick={onExpand}
-            className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-blue-500 text-xs leading-none"
+            className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[var(--surface-soft)] transition-colors"
+            style={{ color: "var(--fg-3)" }}
             title="全屏查看"
           >
             <svg
@@ -434,16 +519,17 @@ export function MemoryPanel({
           <button
             type="button"
             onClick={onClose}
-            className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-base leading-none"
+            className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[var(--surface-soft)] transition-colors"
+            style={{ color: "var(--fg-3)", fontSize: 16, lineHeight: 1 }}
             title="关闭"
           >
-            ×
+            ✕
           </button>
         </div>
       </div>
 
       {/* Layer tabs */}
-      <div className="flex border-b border-gray-100 flex-shrink-0">
+      <div className="an-memory-tabs flex-shrink-0">
         {LAYERS.map((layer) => {
           const m = LAYER_META[layer];
           const active = layer === activeLayer;
@@ -458,18 +544,17 @@ export function MemoryPanel({
               key={layer}
               onClick={() => switchLayer(layer)}
               title={m.label}
-              className={`flex-1 py-2 flex flex-col items-center gap-0.5 text-[10px] border-b-2 transition-colors ${
-                active
-                  ? "border-[#1264A3] text-[#1264A3]"
-                  : "border-transparent text-gray-400 hover:text-gray-600 hover:bg-gray-50"
-              }`}
+              className={`an-tab ${active ? "on" : ""}`}
             >
-              <span className="text-sm leading-none">{m.icon}</span>
-              <span className="leading-none font-medium truncate max-w-full px-0.5">
-                {m.label.split(" ")[0]}
-              </span>
+              {m.label.split(" ")[0]}
               {filled && (
-                <span className="w-1 h-1 rounded-full bg-current opacity-60" />
+                <span
+                  className="inline-block w-1 h-1 rounded-full ml-1"
+                  style={{
+                    background: active ? "var(--accent)" : "var(--fg-3)",
+                    verticalAlign: "middle",
+                  }}
+                />
               )}
             </button>
           );
@@ -477,31 +562,77 @@ export function MemoryPanel({
       </div>
 
       {/* Content toolbar */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 flex-shrink-0">
+      <div
+        className="flex items-center justify-between px-3 py-2 flex-shrink-0"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-semibold text-gray-700 truncate">
+          <span
+            className="text-xs font-semibold truncate"
+            style={{ color: "var(--fg-2)" }}
+          >
             {meta.label}
           </span>
           {isEntryBased && entries.length > 0 && (
-            <span className="text-[10px] text-gray-400 flex-shrink-0">
+            <span
+              className="text-[10px] flex-shrink-0"
+              style={{ color: "var(--fg-3)" }}
+            >
               {entries.length} 条
             </span>
           )}
           {isReadonly && activeLayer !== "TODO" && (
-            <span className="text-[10px] text-gray-400 flex-shrink-0">
+            <span
+              className="text-[10px] flex-shrink-0"
+              style={{ color: "var(--fg-3)" }}
+            >
               只读
             </span>
           )}
         </div>
-        {isEntryBased && !addingNew && entries.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setAddingNew(true)}
-            className="text-[11px] px-2 py-1 rounded border border-gray-200 text-gray-500 hover:bg-gray-50"
-          >
-            + 添加
-          </button>
-        )}
+        <div className="flex items-center gap-1.5">
+          {isEntryBased &&
+            (activeLayer === "PROGRESS" || activeLayer === "DECISIONS") &&
+            entries.length > 0 && (
+              <div
+                className="an-seg"
+                style={{ height: 24 }}
+                role="group"
+                aria-label="视图切换"
+              >
+                <button
+                  type="button"
+                  className={!timelineMode ? "on" : ""}
+                  onClick={() => setTimelineMode(false)}
+                  title="列表视图"
+                >
+                  列表
+                </button>
+                <button
+                  type="button"
+                  className={timelineMode ? "on" : ""}
+                  onClick={() => setTimelineMode(true)}
+                  title="时间线视图"
+                >
+                  时间线
+                </button>
+              </div>
+            )}
+          {isEntryBased && !addingNew && entries.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setAddingNew(true)}
+              className="text-[11px] px-2 py-1 rounded"
+              style={{
+                border: "1px solid var(--border)",
+                color: "var(--fg-2)",
+                background: "transparent",
+              }}
+            >
+              + 添加
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Main content */}

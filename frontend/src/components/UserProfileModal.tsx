@@ -202,17 +202,13 @@ export function UserProfileModal({
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-100 px-6 flex-shrink-0">
+        <div className="an-tabs px-4 flex-shrink-0">
           {(["profile", "password"] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`pb-2 mr-4 text-sm font-medium border-b-2 transition-colors ${
-                tab === t
-                  ? "border-[#1264A3] text-[#1264A3]"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
+              className={`an-tab ${tab === t ? "on" : ""}`}
             >
               {t === "profile" ? "基本信息" : "修改密码"}
             </button>
