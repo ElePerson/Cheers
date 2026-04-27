@@ -1336,6 +1336,13 @@ class ChannelBotAdapter(OpenClawAdapter):
             "original_question_text": payload.original_question_text,
             "_db_session": pconfig.get("_db_session"),
             "_bot_id": pconfig.get("_bot_id"),
+            # Streaming hooks: call_bot uses these to pre-create the sub-bot's
+            # placeholder message and stream its tokens directly to the
+            # frontend (otherwise the sub-bot reply lands as a single
+            # non-streamed broadcast on completion).
+            "_pre_create_bot_msg": pconfig.get("_pre_create_bot_msg"),
+            "_finalize_bot_msg": pconfig.get("_finalize_bot_msg"),
+            "_make_stream_token_cb": pconfig.get("_make_stream_token_cb"),
         }
 
         # ── 4. 加载历史消息 / 用户信息 / 回复上下文 ──────────────────────────
