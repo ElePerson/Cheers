@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
+import { ArrowLeftIcon, Bars3Icon } from "@heroicons/react/24/solid";
 
 const API = "/api";  // docs 端点由 manual_routes 提供，路径不含 /v1
 
-type DocFile = { name: string; stem: string; size: number };
+type DocFile = { name: string; stem: string; size: number; category?: string };
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -236,9 +237,10 @@ export default function DocsPage() {
     setMode("preview");
   };
 
-  const filtered = files.filter((f) =>
-    f.stem.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = files.filter((f) => {
+    const q = search.toLowerCase();
+    return f.stem.toLowerCase().includes(q) || f.name.toLowerCase().includes(q);
+  });
 
   const toc = content ? extractToc(content) : [];
   const htmlContent = content ? renderMarkdown(content) : "";
@@ -248,9 +250,7 @@ export default function DocsPage() {
     <div className="flex h-screen flex-col bg-gray-50 font-sans text-gray-900 overflow-hidden">
       <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-4 flex-shrink-0">
         <Link to="/" className="text-gray-500 hover:text-gray-800 text-sm flex items-center gap-1">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-            <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
-          </svg>
+          <ArrowLeftIcon className="w-4 h-4" />
           返回
         </Link>
         <h1 className="text-lg font-semibold text-gray-800">文档</h1>
@@ -282,20 +282,31 @@ export default function DocsPage() {
             {filtered.length === 0 && (
               <p className="text-xs text-gray-400 px-4 py-3">未找到文件。</p>
             )}
-            {filtered.map((f) => (
-              <button
-                key={f.name}
-                onClick={() => { setSelected(f); setMode("preview"); if (isMobile) setSidebarOpen(false); }}
-                className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex flex-col gap-0.5 ${
-                  selected?.name === f.name
-                    ? "bg-blue-50 text-blue-700 border-r-2 border-blue-500"
-                    : "text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                <span className="truncate font-medium">{f.stem}</span>
-                <span className="text-xs text-gray-400">{formatSize(f.size)}</span>
-              </button>
-            ))}
+            {filtered.map((f) => {
+              const basename = f.stem.includes("/") ? f.stem.split("/").pop()! : f.stem;
+              const categoryLabel = f.category === "help" ? "用户" : f.category === "develop" ? "开发" : "";
+              return (
+                <button
+                  key={f.stem}
+                  onClick={() => { setSelected(f); setMode("preview"); if (isMobile) setSidebarOpen(false); }}
+                  className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex flex-col gap-0.5 ${
+                    selected?.stem === f.stem
+                      ? "bg-blue-50 text-blue-700 border-r-2 border-blue-500"
+                      : "text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  <span className="truncate font-medium">{basename}</span>
+                  <span className="text-xs text-gray-400 flex items-center gap-1.5">
+                    {categoryLabel && (
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                        f.category === "help" ? "bg-green-100 text-green-700" : "bg-purple-100 text-purple-700"
+                      }`}>{categoryLabel}</span>
+                    )}
+                    <span>{formatSize(f.size)}</span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {/* Footer */}
@@ -326,11 +337,11 @@ export default function DocsPage() {
                 <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                   {isMobile && (
                     <button onClick={() => setSidebarOpen(true)} className="p-1 -ml-1 text-gray-400 hover:text-gray-600">
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" /></svg>
+                      <Bars3Icon className="w-6 h-6" />
                     </button>
                   )}
                   <h1 className="text-base font-semibold text-gray-900 truncate">
-                    {selected.stem}
+                    {selected.stem.includes("/") ? selected.stem.split("/").pop() : selected.stem}
                   </h1>
                   {!isMobile && content && (
                     <span className="text-xs text-gray-400 flex-shrink-0">

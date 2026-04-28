@@ -23,14 +23,16 @@ from app.utils.crypto import decrypt_value
 
 logger = logging.getLogger("app.services.orchestrator.service")
 
-COORDINATOR_USERNAME = "channel bot"
+COORDINATOR_USERNAME = "Coordinator"
 
 
 def _is_guide_clarify_reply(content: str) -> bool:
-    """判断是否为引导 Bot 的澄清回答消息（兼容 @引导 与 @channel bot）."""
+    """判断是否为协调者 Bot 的澄清回答消息（兼容历史名 @引导 / @channel bot 与
+    现行名 @Coordinator）."""
     t = (content or "").strip()
     return (
-        t.startswith("@引导 澄清回答：")
+        t.startswith("@Coordinator 澄清回答：")
+        or t.startswith("@引导 澄清回答：")
         or t.startswith("@channel bot 澄清回答：")
         or "用户选择跳过澄清" in t
     )
@@ -90,6 +92,71 @@ def _get_trigger_content(msg: Message) -> str:
         except Exception:
             logger.warning("orchestrator: failed to decrypt secret message msg_id=%s", msg.msg_id)
     return msg.content
+
+
+async def _emit_routing_card(
+    *,
+    channel_id: str,
+    coordinator_bot_id: str,
+    trigger_content: str,
+    coordinator_content: str,
+    picked_usernames: list[str],
+    session: AsyncSession,
+    already_broadcast: set[str],
+    created: list[Message],
+    stream_event: Callable[[str, dict], Awaitable[None]] | None = None,
+) -> None:
+    """Write a msg_type="routing" Message carrying the coordinator's decision
+    (who was picked + a terse plan snippet) and broadcast it over the
+    channel WS. Non-fatal: any exception is logged and swallowed so the
+    takeover flow continues.
+    """
+    from app.core.schemas import MessageInResponse
+    from app.services.ws_service import ws_manager
+
+    try:
+        picks = [{"agent": u, "picked": True} for u in picked_usernames]
+        q = (trigger_content or "").strip().replace("\n", " ")
+        if len(q) > 160:
+            q = q[:160] + "…"
+        plan = (coordinator_content or "").strip().replace("\n", " ")
+        if len(plan) > 200:
+            plan = plan[:200] + "…"
+
+        routing_msg = Message(
+            channel_id=channel_id,
+            sender_id=coordinator_bot_id,
+            sender_type="bot",
+            content="",
+            msg_type="routing",
+            content_data={"q": q or None, "picks": picks, "plan": plan or None},
+        )
+        session.add(routing_msg)
+        await session.flush()
+
+        data = MessageInResponse.model_validate(routing_msg).model_dump()
+        if routing_msg.created_at:
+            data["created_at"] = routing_msg.created_at.isoformat()
+        coord_row = await session.execute(
+            select(BotAccount.display_name, BotAccount.username).where(
+                BotAccount.bot_id == coordinator_bot_id
+            )
+        )
+        coord_info = coord_row.first()
+        if coord_info:
+            data["sender_name"] = coord_info[0] or coord_info[1] or ""
+
+        await ws_manager.broadcast_to_channel(
+            channel_id, {"type": "message", "data": data}
+        )
+        if stream_event:
+            await stream_event("message", data)
+        already_broadcast.add(routing_msg.msg_id)
+        created.append(routing_msg)
+    except Exception:
+        logger.exception(
+            "orchestrator: failed to emit routing card channel_id=%s", channel_id,
+        )
 
 
 async def run_orchestrator(
@@ -186,8 +253,8 @@ async def run_orchestrator(
     if _is_guide_clarify_reply(analysis_content):
         original_question, original_file_ids = await _fetch_original_question_for_clarify(session, channel_id, trigger_msg)
 
-    mentioned = extract_mentions(analysis_content)
-    target_usernames = filter_mentioned_bots(mentioned, channel_bot_usernames, text=analysis_content)
+    mentioned = extract_mentions(analysis_content, channel_bot_usernames)
+    target_usernames = filter_mentioned_bots(mentioned, channel_bot_usernames)
     direct_answer_mode = False
     if not target_usernames:
         channel_auto_assist = bool(channel_obj.auto_assist) if channel_obj else False
@@ -242,14 +309,18 @@ async def run_orchestrator(
             logger.exception("failed to prepare attachments channel_id=%s", channel_id)
             attachment_error = f"读取上传文件失败：{exc}"
 
-    from app.services.orchestrator.thread_context import MSG_TYPE_REPLY, gather_thread_context, promote_to_thread
+    from app.services.orchestrator.topic_context import (
+        MSG_TYPE_REPLY,
+        ensure_topic_root,
+        gather_topic_context,
+    )
 
-    memory_context, _, thread_result = await asyncio.gather(
+    memory_context, _, topic_result = await asyncio.gather(
         memory_load(channel_id, session),
         _load_attachments(),
-        gather_thread_context(trigger_msg, session),
+        gather_topic_context(trigger_msg, session),
     )
-    thread_chain, child_replies = thread_result
+    topic_chain, child_replies = topic_result
 
     # 查出发送者的昵称，注入到 trigger_message 供模板变量 {{sender_name}} 使用
     sender_name = ""
@@ -271,6 +342,110 @@ async def run_orchestrator(
     created: list[Message] = []
     already_broadcast: set[str] = set()
     root_task_id = str(uuid.uuid4())
+
+    # Bot @ Bot 自动触发：追踪已触发的 bot 及其发送的消息（用于子回复和循环检测）
+    triggered_bot_ids: set[str] = set()  # 已触发过的 bot_id 集合（避免重复触发）
+    bot_msg_by_id: dict[str, Message] = {}  # bot_id -> 已创建的消息（用于子回复的 in_reply_to）
+
+    # 最大递归深度：Bot @ Bot 最多触发 3 层
+    MAX_BOT_MENTION_DEPTH = 3
+
+    def _extract_bot_mentions_from_content(content: str) -> list[str]:
+        """从消息内容中提取频道内 Bot 的 @ 提及。"""
+        mentioned = extract_mentions(content or "", channel_bot_usernames)
+        return filter_mentioned_bots(mentioned, channel_bot_usernames)
+
+    async def _trigger_sub_bots_from_mentions(
+        parent_msg: Message,
+        parent_bot_id: str,
+        trigger_content: str,
+        depth: int,
+    ) -> None:
+        """递归触发 @ 提及的子 Bot（Bot @ Bot 自动触发）。"""
+        if depth >= MAX_BOT_MENTION_DEPTH:
+            return
+
+        mentions = _extract_bot_mentions_from_content(parent_msg.content or "")
+        for sub_username in mentions:
+            sub_bot_id = bot_id_by_username.get(sub_username)
+            if not sub_bot_id:
+                continue
+            # 循环检测：跳过已触发过的 bot
+            if sub_bot_id in triggered_bot_ids:
+                logger.info("bot_mention_trigger: skip %s (already triggered)", sub_username)
+                continue
+            # 避免自己调用自己
+            if sub_bot_id == parent_bot_id:
+                logger.info("bot_mention_trigger: skip %s (self-call)", sub_username)
+                continue
+
+            triggered_bot_ids.add(sub_bot_id)
+            logger.info(
+                "bot_mention_trigger: @%s triggered by bot_id=%s depth=%d",
+                sub_username, parent_bot_id, depth,
+            )
+
+            sub_adapter = await adapter_factory(sub_bot_id)
+            sub_msg = await _pre_create_bot_msg(sub_bot_id, root_task_id)
+            # 子回复的 in_reply_to 指向父消息
+            sub_msg.in_reply_to_msg_id = parent_msg.msg_id
+            await session.flush()
+
+            other_bots = [item for item in channel_bot_usernames if item != sub_username]
+            sub_payload = AgentPayload(
+                task_id=root_task_id,
+                channel_id=channel_id,
+                trigger_message={
+                    "user": trigger_msg.sender_id,
+                    "sender_name": sender_name,
+                    "text": trigger_content,
+                    "timestamp": trigger_msg.created_at.isoformat() if trigger_msg.created_at else "",
+                    "msg_id": trigger_msg.msg_id,
+                    "in_reply_to_msg_id": trigger_msg.in_reply_to_msg_id,
+                    "topic_chain": topic_chain,
+                    "child_replies": child_replies,
+                },
+                memory_context=memory_context,
+                attachments=attachments,
+                original_question_text=original_question,
+                process_config={
+                    "channel_bot_usernames": other_bots,
+                    "channel_bot_details": {key: value for key, value in bot_details_by_username.items() if key != sub_username},
+                    "bot_id_by_username": {key: value for key, value in bot_id_by_username.items() if key != sub_username},
+                    "_adapter_factory": adapter_factory,
+                    "_create_and_broadcast": _create_msg_and_broadcast,
+                    "_stream_token": _make_stream_token_cb(sub_msg.msg_id),
+                    "_db_session": session,
+                    "_bot_id": sub_bot_id,
+                    "_placeholder_msg_id": sub_msg.msg_id,
+                    "_user_secrets": user_secrets,
+                    "_sender_name": sender_name,
+                    "_channel_name": channel_name,
+                },
+            )
+
+            try:
+                sub_resp = await sub_adapter.execute(sub_payload)
+                if sub_resp.dispatched_async:
+                    await _register_async_pending(sub_msg, root_task_id, sub_bot_id)
+                    await _record_agent_task(sub_bot_id, sub_msg.msg_id)
+                    created.append(sub_msg)
+                    bot_msg_by_id[sub_bot_id] = sub_msg
+                    continue
+                sub_content = sub_resp.content if sub_resp.success else (sub_resp.error_message or "处理出错")
+                sub_file_ids = sub_resp.file_ids or []
+            except Exception as exc:
+                logger.warning("bot_mention_trigger: bot %s raised: %s", sub_username, exc)
+                sub_content = f"处理出错: {exc}"
+                sub_file_ids = []
+
+            await _finalize_bot_msg(sub_msg, sub_content, file_ids=sub_file_ids)
+            await _record_agent_task(sub_bot_id, sub_msg.msg_id)
+            created.append(sub_msg)
+            bot_msg_by_id[sub_bot_id] = sub_msg
+
+            # 递归：检查子 Bot 的回复是否也有 @ 提及
+            await _trigger_sub_bots_from_mentions(sub_msg, sub_bot_id, trigger_content, depth + 1)
     _ctx_token = bind_context(channel_id=channel_id, trace_id=root_task_id)
     _ctx_token.__enter__()
     logger.info(
@@ -283,7 +458,6 @@ async def run_orchestrator(
         from app.services.ws_service import ws_manager
 
         mention_user_ids = await resolve_user_mentions(content, session, channel_id)
-        promote_to_thread(trigger_msg)
         msg = Message(
             channel_id=channel_id,
             sender_id=sender_id,
@@ -296,6 +470,12 @@ async def run_orchestrator(
         )
         session.add(msg)
         await session.flush()
+        # after_insert listener in topic_context.py will flip trigger_msg's
+        # row to "topic" once the reply count crosses
+        # TOPIC_PROMOTE_THRESHOLD. Mirror the flip into the in-memory
+        # Message object so any later code in this request sees the new
+        # msg_type without a refresh.
+        await ensure_topic_root(session, trigger_msg.msg_id)
         data = MessageInResponse.model_validate(msg).model_dump()
         if msg.created_at:
             data["created_at"] = msg.created_at.isoformat()
@@ -316,7 +496,6 @@ async def run_orchestrator(
         from app.core.schemas import MessageInResponse
         from app.services.ws_service import ws_manager
 
-        promote_to_thread(trigger_msg)
         msg = Message(
             channel_id=channel_id,
             sender_id=bot_id,
@@ -328,6 +507,8 @@ async def run_orchestrator(
         )
         session.add(msg)
         await session.flush()
+        # Same threshold-aware promotion as _create_msg_and_broadcast.
+        await ensure_topic_root(session, trigger_msg.msg_id)
         data = MessageInResponse.model_validate(msg).model_dump()
         if msg.created_at:
             data["created_at"] = msg.created_at.isoformat()
@@ -400,6 +581,56 @@ async def run_orchestrator(
         )
         await session.flush()
 
+    async def _register_async_pending(bot_msg: Message, task_id: str, bot_id: str) -> None:
+        """WebSocket Bot 异步派发：占位消息不立即 finalize，为超时兜底武装 timer。
+
+        PendingReply 已由 WebsocketBotAdapter.execute() 在 dispatch 之前预登记
+        （避免 plugin 秒回时 pending 未登记的竞态）；这里只 arm timer。"""
+        from app.config import settings as _settings
+        from app.db.session import async_session_factory
+        from app.services.openclaw_bridge.pending import pending_replies
+        from app.services.openclaw_bridge.service import finalize_bot_reply
+
+        timeout_s = max(5, int(_settings.openclaw_bridge_timeout_seconds or 60))
+
+        async def _on_timeout() -> None:
+            popped = await pending_replies.pop_by_msg(bot_msg.msg_id)
+            if popped is None:
+                return  # 已被回推 finalize
+            logger.warning(
+                "websocket_bot_timeout: bot_id=%s task_id=%s msg_id=%s after %ds",
+                bot_id, task_id, bot_msg.msg_id, timeout_s,
+            )
+            async with async_session_factory() as s2:
+                try:
+                    await finalize_bot_reply(
+                        s2,
+                        bot_id=bot_id,
+                        channel_id=channel_id,
+                        content=f"[WebSocket Bot] 等待 OpenClaw channel plugin 回推超时（>{timeout_s}s）",
+                        task_id=task_id,
+                        reply_to_msg_id=bot_msg.msg_id,
+                    )
+                    await s2.commit()
+                except Exception:
+                    await s2.rollback()
+                    raise
+
+        pending = await pending_replies.peek_by_msg(bot_msg.msg_id)
+        if pending is None:
+            logger.warning(
+                "register_async_pending: pending not pre-registered for msg_id=%s; "
+                "reply may race",
+                bot_msg.msg_id,
+            )
+            return
+        loop = asyncio.get_event_loop()
+
+        def _fire() -> None:
+            asyncio.create_task(_on_timeout())
+
+        pending.timeout_handle = loop.call_later(timeout_s, _fire)
+
     async def _finish_with_attachment_error(bot_id: str, task_id: str) -> Message:
         bot_msg = await _pre_create_bot_msg(bot_id, task_id)
         await _finalize_bot_msg(bot_msg, attachment_error or "读取上传文件失败")
@@ -428,7 +659,7 @@ async def run_orchestrator(
                     "msg_id": trigger_msg.msg_id,
                     "in_reply_to_msg_id": trigger_msg.in_reply_to_msg_id,
                     "msg_type": trigger_msg.msg_type,
-                    "thread_history": thread_chain,
+                    "topic_chain": topic_chain,
                     "child_replies": child_replies,
                 },
                 memory_context=memory_context,
@@ -450,24 +681,55 @@ async def run_orchestrator(
                     "_finalize_bot_msg": _finalize_bot_msg,
                     "_make_stream_token_cb": _make_stream_token_cb,
                     "_bot_id": bot_id,
+                    "_placeholder_msg_id": orch_msg.msg_id,
                     "_user_secrets": user_secrets,
                     "_sender_name": sender_name,
                     "_channel_name": channel_name,
                 },
             )
             resp: AgentResponse = await adapter.execute(payload)
-            content = resp.content if resp.success else (resp.error_message or "处理出错")
-            await _finalize_bot_msg(orch_msg, content, file_ids=resp.file_ids)
-            await _record_agent_task(bot_id, orch_msg.msg_id)
-            created.append(orch_msg)
+            content: str | None = None
+            if resp.dispatched_async:
+                await _register_async_pending(orch_msg, task_id, bot_id)
+                await _record_agent_task(bot_id, orch_msg.msg_id)
+                created.append(orch_msg)
+                triggered_bot_ids.add(bot_id)
+                bot_msg_by_id[bot_id] = orch_msg
+                # 异步派发场景下跳过 auto_takeover 与 Bot@Bot 递归：真正的 Bot 回复还没产出
+            else:
+                content = resp.content if resp.success else (resp.error_message or "处理出错")
+                await _finalize_bot_msg(orch_msg, content, file_ids=resp.file_ids)
+                await _record_agent_task(bot_id, orch_msg.msg_id)
+                created.append(orch_msg)
+                triggered_bot_ids.add(bot_id)
+                bot_msg_by_id[bot_id] = orch_msg
+                # Bot @ Bot 自动触发：递归处理 @ 提及
+                await _trigger_sub_bots_from_mentions(orch_msg, bot_id, trigger_content, depth=0)
 
             orch_settings = get_assist_settings()
-            if orch_settings.get("auto_takeover"):
+            if content is not None and orch_settings.get("auto_takeover"):
                 suggested = extract_suggested_bots(content)
                 valid_suggested = [
                     sug for sug in suggested
                     if sug in channel_bot_usernames and sug != COORDINATOR_USERNAME
                 ]
+
+                if valid_suggested:
+                    # Emit a routing card right before firing the sub-bots, so
+                    # the UI can render the design's .an-routing card (agent
+                    # picks + plan) instead of only seeing the coordinator's
+                    # prose.
+                    await _emit_routing_card(
+                        channel_id=channel_id,
+                        coordinator_bot_id=bot_id,
+                        trigger_content=trigger_content,
+                        coordinator_content=content,
+                        picked_usernames=valid_suggested,
+                        session=session,
+                        already_broadcast=already_broadcast,
+                        created=created,
+                        stream_event=stream_event,
+                    )
 
                 # 阶段 1：串行 broadcast + 预建消息（需要 DB session）
                 pending_sug: list[tuple[str, str, Message, AgentPayload, OpenClawAdapter]] = []
@@ -486,7 +748,7 @@ async def run_orchestrator(
                             "text": trigger_content,
                             "timestamp": trigger_msg.created_at.isoformat() if trigger_msg.created_at else "",
                             "in_reply_to_msg_id": trigger_msg.in_reply_to_msg_id,
-                            "thread_history": thread_chain,
+                            "topic_chain": topic_chain,
                             "child_replies": child_replies,
                         },
                         memory_context=memory_context,
@@ -494,9 +756,11 @@ async def run_orchestrator(
                         original_question_text=original_question,
                         process_config={
                             "_stream_token": _make_stream_token_cb(sug_msg.msg_id),
+                            "_bot_id": sug_bot_id,
+                            "_placeholder_msg_id": sug_msg.msg_id,
                             "_user_secrets": user_secrets,
-                    "_sender_name": sender_name,
-                    "_channel_name": channel_name,
+                            "_sender_name": sender_name,
+                            "_channel_name": channel_name,
                         },
                     )
                     pending_sug.append((sug_username, sug_bot_id, sug_msg, sug_payload, sug_adapter))
@@ -516,6 +780,12 @@ async def run_orchestrator(
                         if isinstance(sug_resp, BaseException):
                             logger.warning("orchestrator_auto_takeover: bot %s raised: %s", sug_username, sug_resp)
                             sug_content = f"处理出错: {sug_resp}"
+                        elif sug_resp.dispatched_async:
+                            await _register_async_pending(sug_msg, root_task_id, sug_bot_id)
+                            await _record_agent_task(sug_bot_id, sug_msg.msg_id)
+                            created.append(sug_msg)
+                            logger.info("orchestrator_auto_takeover: async-dispatched @%s", sug_username)
+                            continue
                         else:
                             sug_content = sug_resp.content if sug_resp.success else (sug_resp.error_message or "处理出错")
                         await _finalize_bot_msg(sug_msg, sug_content)
@@ -549,7 +819,7 @@ async def run_orchestrator(
                 "timestamp": trigger_msg.created_at.isoformat() if trigger_msg.created_at else "",
                 "msg_id": trigger_msg.msg_id,
                 "in_reply_to_msg_id": trigger_msg.in_reply_to_msg_id,
-                "thread_history": thread_chain,
+                "topic_chain": topic_chain,
                 "child_replies": child_replies,
             },
             memory_context=memory_context,
@@ -564,6 +834,7 @@ async def run_orchestrator(
                 "_stream_token": _make_stream_token_cb(bot_msg.msg_id),
                 "_db_session": session,
                 "_bot_id": bot_id,
+                "_placeholder_msg_id": bot_msg.msg_id,
                 "_user_secrets": user_secrets,
                 "_sender_name": sender_name,
                 "_channel_name": channel_name,
@@ -595,6 +866,19 @@ async def run_orchestrator(
                     username, resp, dur_ms,
                 )
                 content = f"处理出错: {resp}"
+                resp_file_ids: list[str] = []
+            elif resp.dispatched_async:
+                logger.info(
+                    "orchestrator: bot %s async-dispatched via bridge duration_ms=%.0f",
+                    username, dur_ms,
+                )
+                await _register_async_pending(bot_msg, root_task_id, bot_id)
+                await _record_agent_task(bot_id, bot_msg.msg_id)
+                created.append(bot_msg)
+                triggered_bot_ids.add(bot_id)
+                bot_msg_by_id[bot_id] = bot_msg
+                # 异步派发：跳过本同步路径的 finalize 与 Bot@Bot 递归
+                continue
             else:
                 if not resp.success:
                     logger.warning(
@@ -607,10 +891,14 @@ async def run_orchestrator(
                         username, dur_ms,
                     )
                 content = resp.content if resp.success else (resp.error_message or "处理出错")
-            resp_file_ids = resp.file_ids if not isinstance(resp, BaseException) else []
+                resp_file_ids = resp.file_ids or []
             await _finalize_bot_msg(bot_msg, content, file_ids=resp_file_ids)
             await _record_agent_task(bot_id, bot_msg.msg_id)
             created.append(bot_msg)
+            triggered_bot_ids.add(bot_id)
+            bot_msg_by_id[bot_id] = bot_msg
+            # Bot @ Bot 自动触发：递归处理 @ 提及
+            await _trigger_sub_bots_from_mentions(bot_msg, bot_id, trigger_content, depth=0)
 
     total_ms = (time.perf_counter() - t_start) * 1000
     logger.info(
