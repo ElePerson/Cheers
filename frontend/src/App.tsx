@@ -1,2662 +1,113 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import FriendsPanel from "./FriendsPanel";
 import NotificationPanel from "./NotificationPanel";
 import ChannelMembersModal from "./ChannelMembersModal";
-import { MessageMarkdown } from "./MessageMarkdown";
 import MemoryPage from "./MemoryPage";
 import { useTheme } from "./useTheme";
+import { useAuth } from "./hooks/useAuth";
+import { useResize } from "./hooks/useResize";
+import {
+  ArrowUturnLeftIcon,
+  Bars3Icon,
+  ChatBubbleLeftEllipsisIcon,
+  ChatBubbleLeftIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  DocumentDuplicateIcon,
+  DocumentIcon,
+  KeyIcon,
+  LinkIcon,
+  LockClosedIcon,
+  MegaphoneIcon,
+  PhotoIcon,
+  PlusIcon,
+  QuestionMarkCircleIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/solid";
+import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
+import { BotAvatar } from "./components/BotAvatar";
+import { FilePreviewSidebar } from "./components/FilePreviewSidebar";
+import { ClarifyInlineBlock } from "./components/ClarifyInlineBlock";
+import { ThinkingIndicator } from "./components/ThinkingIndicator";
+import { MemoryPanel } from "./components/MemoryPanel";
+import { LoginModal } from "./components/LoginModal";
+import { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
+import { InviteWorkspaceMemberModal } from "./components/InviteWorkspaceMemberModal";
+import { CreateChannelModal } from "./components/CreateChannelModal";
+import { OpenClawQcModal } from "./components/OpenClawQcModal";
+import { KeychainModal } from "./components/KeychainModal";
+import { UserProfileModal } from "./components/UserProfileModal";
+import { ChannelProfileModal } from "./components/ChannelProfileModal";
+import { QaSummaryModal } from "./components/QaSummaryModal";
+import { ImageGenModal } from "./components/ImageGenModal";
+import { Sidebar } from "./components/Sidebar";
+import { HelpModal } from "./components/HelpModal";
+import {
+  SettingsModal,
+  applyDensity,
+  getStoredDensity,
+} from "./components/SettingsModal";
+import { DragOverlay } from "./components/DragOverlay";
+import { ImageLightbox } from "./components/ImageLightbox";
+import { ChannelHeader } from "./components/ChannelHeader";
+import { TopicPage } from "./components/TopicPage";
+import { AnnouncementComposerModal } from "./components/AnnouncementComposerModal";
+import { WorkspaceRail } from "./components/WorkspaceRail";
+import { apiFetch, buildWsUrl } from "./api";
+import {
+  parseGuidePayload,
+  isClarifyReplyUserMessage,
+} from "./lib/guide";
+import {
+  isMsgReply,
+  parseQuotePrefix,
+  stripLeadingQuotePrefixes,
+  formatTs,
+  formatDayLabel,
+  TOPIC_DISPLAY_THRESHOLD,
+} from "./lib/message";
+import {
+  buildLogicalQaBlocks,
+  buildQaMarkdown,
+  downloadText,
+} from "./lib/qa";
+import { renderWithThinkFolding, stripThinkTags } from "./lib/think";
+import { refreshChannels, refreshDMs, refreshWorkspaces } from "./lib/refresh";
+import type {
+  Channel,
+  DM,
+  Workspace,
+  Message,
+  QaPair,
+  ContextData,
+  ClarifySchema,
+  ClarifyAnswers,
+  ChannelBot,
+  ChannelUser,
+  BotItem,
+} from "./types";
+import { OTHER_CHOICE_ID } from "./types";
 
 const API = "/api/v1";
-const WS_BASE = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
 const DEV_USER_ID = "a0000000-0000-0000-0000-000000000001";
 const API_DOCS_URL = "/docs";
 
-type Channel = {
-  channel_id: string;
-  name: string;
-  type: string;
-  workspace_id?: string;
-  auto_assist?: boolean;
-};
-type Workspace = { workspace_id: string; name: string };
-type FileInfo = {
-  file_id: string;
-  original_filename?: string;
-  content_type?: string;
-  size_bytes?: number;
-  status?: string;
-};
-type Message = {
-  msg_id: string;
-  sender_id: string;
-  sender_type: string;
-  sender_name?: string;
-  content: string;
-  created_at?: string;
-  _streaming?: boolean;
-  in_reply_to_msg_id?: string | null;
-  msg_type?: "normal" | "thread" | "reply";
-  content_data?: Record<string, unknown> | null;
-  file_ids?: string[];
-  files?: FileInfo[];
-  is_secret?: boolean;
-  secret_token?: string;
-};
-type QaPair = { question: Message; answer: Message };
-type ContextData = Record<string, string>;
 
-const LAYERS = [
-  "ANCHOR",
-  "PROGRESS",
-  "DECISIONS",
-  "FILES_INDEX",
-  "RECENT",
-  "MEMBERS",
-  "TODO",
-] as const;
-
-const GUIDE_FORM_BLOCK = /```guide-form\n([\s\S]*?)```/;
-const GUIDE_CLARIFY_BLOCK = /```guide-clarify\n([\s\S]*?)```/;
-
-function isMsgReply(m: Message | undefined, msgIdSet: Set<string>): boolean {
-  if (!m) return false;
-  return m.msg_type === "reply" || (!m.msg_type && !!m.in_reply_to_msg_id && msgIdSet.has(m.in_reply_to_msg_id));
-}
-
-type GuideFormField = {
-  name: string;
-  type: string;
-  label: string;
-  placeholder?: string;
-  options_url?: string;
-  option_value?: string;
-  option_label?: string;
-};
-
-type GuideFormSchema = { action: string; fields: GuideFormField[] };
-
-type ClarifyOption = {
-  id: string;
-  label: string;
-  requires_text?: boolean;
-  text_placeholder?: string;
-};
-type ClarifyQuestion = {
-  id: string;
-  prompt: string;
-  allow_multiple?: boolean;
-  options: ClarifyOption[];
-  other_enabled?: boolean;
-  other_label?: string;
-  other_placeholder?: string;
-};
-type ClarifySchema = {
-  title?: string;
-  questions: ClarifyQuestion[];
-  skip_policy?: "allow" | "forbid";
-  reason?: string;
-};
-type ClarifyAnswers = {
-  selected: Record<string, string[]>;
-  other_text: Record<string, string>;
-  option_text?: Record<string, string>; // key: `${q.id}:${opt.id}` for requires_text options
-};
-const OTHER_CHOICE_ID = "__other__";
-
-function parseGuidePayload(content: string): {
-  text: string;
-  form?: GuideFormSchema;
-  clarify?: ClarifySchema;
-} {
-  let text = content;
-  let form: GuideFormSchema | undefined;
-  let clarify: ClarifySchema | undefined;
-
-  const formMatch = text.match(GUIDE_FORM_BLOCK);
-  if (formMatch) {
-    try {
-      form = JSON.parse(formMatch[1].trim()) as GuideFormSchema;
-      text = text.replace(formMatch[0], "");
-    } catch {}
-  }
-
-  const clarifyMatch = text.match(GUIDE_CLARIFY_BLOCK);
-  if (clarifyMatch) {
-    try {
-      const parsed = JSON.parse(clarifyMatch[1].trim()) as ClarifySchema;
-      if (Array.isArray(parsed?.questions) && parsed.questions.length > 0) {
-        clarify = parsed;
-      }
-      text = text.replace(clarifyMatch[0], "");
-    } catch {}
-  }
-
-  return { text: text.trim(), form, clarify };
-}
-
-const THINK_BLOCK = /<think>([\s\S]*?)<\/think>/gi;
-
-/** 将内容中的 <think>...</think> 替换为可折叠块，返回用于渲染的 React 节点数组 */
-function renderWithThinkFolding(
-  content: string,
-  keyPrefix = "",
-  streaming?: boolean,
-  onImageClick?: (src: string) => void,
-  onFileClick?: (url: string, filename: string) => void,
-): (string | JSX.Element)[] {
-  const parts: (string | JSX.Element)[] = [];
-  let lastIndex = 0;
-  let key = 0;
-  let match: RegExpExecArray | null;
-  THINK_BLOCK.lastIndex = 0;
-  while ((match = THINK_BLOCK.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      const seg = content.slice(lastIndex, match.index).replace(/\n/g, "  \n");
-      parts.push(
-        <MessageMarkdown
-          key={`${keyPrefix}seg-${key++}`}
-          text={seg}
-          streaming={streaming}
-          onImageClick={onImageClick}
-          onFileClick={onFileClick}
-        />,
-      );
-    }
-    const thinkContent = match[1]?.trim() || "";
-    parts.push(
-      <ThinkFold key={`${keyPrefix}think-${key++}`} content={thinkContent} />,
-    );
-    lastIndex = THINK_BLOCK.lastIndex;
-  }
-  if (lastIndex < content.length) {
-    const seg = content.slice(lastIndex).replace(/\n/g, "  \n");
-    parts.push(
-      <MessageMarkdown
-        key={`${keyPrefix}tail-${key++}`}
-        text={seg}
-        streaming={streaming}
-        onImageClick={onImageClick}
-        onFileClick={onFileClick}
-      />,
-    );
-  }
-  if (parts.length === 0) {
-    const seg = content.replace(/\n/g, "  \n");
-    parts.push(
-      <MessageMarkdown
-        key={`${keyPrefix}full-0`}
-        text={seg}
-        streaming={streaming}
-        onImageClick={onImageClick}
-        onFileClick={onFileClick}
-      />,
-    );
-  }
-  return parts;
-}
-
-function ThinkFold({ content }: { content: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="my-1 rounded border border-gray-200 bg-gray-50 overflow-hidden text-xs">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="w-full px-2 py-1 text-left text-gray-400 hover:bg-gray-100 flex items-center gap-1"
-      >
-        <span
-          className="inline-block transition-transform"
-          style={{ transform: open ? "rotate(90deg)" : "none" }}
-        >
-          ▶
-        </span>
-        <span>
-          {"<think> "}
-          {open ? "收起" : "展开"}
-        </span>
-      </button>
-      {open && (
-        <pre className="p-2 text-xs text-gray-500 whitespace-pre-wrap border-t border-gray-100 max-h-48 overflow-auto">
-          {content}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-// ── Quote prefix helpers ──────────────────────────────────────────────────────
-const QUOTE_PREFIX_RE = /^> \[([^\]]+)\]: ([\s\S]+?)\n\n([\s\S]*)$/;
-
-function parseQuotePrefix(
-  text: string,
-): { label: string; quote: string; rest: string } | null {
-  const m = QUOTE_PREFIX_RE.exec(text);
-  if (!m) return null;
-  return { label: m[1], quote: m[2], rest: m[3] };
-}
-
-// ── Resize handle hook ────────────────────────────────────────────────────────
-function useResize(
-  initialWidth: number,
-  min: number,
-  max: number,
-  direction: "right" | "left" = "right",
-) {
-  const [width, setWidth] = useState(initialWidth);
-  const widthRef = useRef(initialWidth);
-  widthRef.current = width;
-  const onMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startW = widthRef.current;
-      const onMove = (ev: MouseEvent) => {
-        const delta =
-          direction === "right" ? ev.clientX - startX : startX - ev.clientX;
-        setWidth(Math.max(min, Math.min(max, startW + delta)));
-      };
-      const onUp = () => {
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-      };
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    },
-    [direction, min, max],
-  );
-  return [width, onMouseDown] as const;
-}
-
-// ── File Preview Sidebar ──────────────────────────────────────────────────────
-function FilePreviewSidebar({
-  url,
-  filename,
-  onClose,
-}: {
-  url: string;
-  filename: string;
-  onClose: () => void;
-}) {
-  const downloadUrl = url.replace(/\/preview$/, "/download");
-  const ext = (filename.split(".").pop() ?? "").toLowerCase();
-  const isMarkdown = ext === "md" || ext === "markdown";
-
-  const [mdContent, setMdContent] = useState<string | null>(null);
-  const [mdLoading, setMdLoading] = useState(false);
-  const [mdError, setMdError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isMarkdown) return;
-    setMdLoading(true);
-    setMdContent(null);
-    setMdError(null);
-    fetch(url)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.text();
-      })
-      .then((text) => {
-        setMdContent(text);
-        setMdLoading(false);
-      })
-      .catch((e) => {
-        setMdError(String(e));
-        setMdLoading(false);
-      });
-  }, [url, isMarkdown]);
-
-  return (
-    <aside className="w-full border-l border-gray-200 bg-white flex flex-col">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 flex-shrink-0">
-        <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center flex-shrink-0">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            className="w-4 h-4 text-blue-500"
-          >
-            <path d="M3 3.5A1.5 1.5 0 0 1 4.5 2h6.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 16 6.622V16.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 16.5v-13Z" />
-          </svg>
-        </div>
-        <span className="text-sm font-semibold text-gray-900 truncate flex-1 min-w-0">
-          {filename}
-        </span>
-        <div className="flex items-center gap-0.5 flex-shrink-0">
-          <a
-            href={downloadUrl}
-            download={filename}
-            className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-            title="下载文件"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="w-4 h-4"
-            >
-              <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-              <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-            </svg>
-          </a>
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-            title="在新标签页打开"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="w-4 h-4"
-            >
-              <path
-                fillRule="evenodd"
-                d="M4.25 5.5a.75.75 0 0 0-.75.75v8.5c0 .414.336.75.75.75h8.5a.75.75 0 0 0 .75-.75v-4a.75.75 0 0 1 1.5 0v4A2.25 2.25 0 0 1 12.75 17h-8.5A2.25 2.25 0 0 1 2 14.75v-8.5A2.25 2.25 0 0 1 4.25 4h5a.75.75 0 0 1 0 1.5h-5Z"
-                clipRule="evenodd"
-              />
-              <path
-                fillRule="evenodd"
-                d="M6.194 12.753a.75.75 0 0 0 1.06.053L16.5 4.44v2.81a.75.75 0 0 0 1.5 0v-4.5a.75.75 0 0 0-.75-.75h-4.5a.75.75 0 0 0 0 1.5h2.553l-9.056 8.194a.75.75 0 0 0-.053 1.06Z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </a>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-base leading-none transition-colors"
-            title="关闭"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        {isMarkdown ? (
-          mdLoading ? (
-            <div className="flex items-center justify-center h-full text-sm text-gray-400">
-              加载中…
-            </div>
-          ) : mdError ? (
-            <div className="flex items-center justify-center h-full text-sm text-red-400">
-              {mdError}
-            </div>
-          ) : (
-            <div className="px-5 py-4">
-              <MessageMarkdown text={mdContent ?? ""} />
-            </div>
-          )
-        ) : (
-          <iframe
-            key={url}
-            src={url}
-            title={filename}
-            className="w-full h-full border-0"
-          />
-        )}
-      </div>
-    </aside>
-  );
-}
-
-// ── Memory Panel (right sidebar) ─────────────────────────────────────────────
-const LAYER_META: Record<
-  string,
-  {
-    label: string;
-    desc: string;
-    color: string;
-    icon: string;
-    readonly?: boolean;
-    entryBased?: boolean; // 结构化条目层
-  }
-> = {
-  ANCHOR: {
-    label: "项目锚点",
-    desc: "核心目标、约束、背景",
-    color: "blue",
-    icon: "⚓",
-    entryBased: true,
-  },
-  PROGRESS: {
-    label: "项目进度",
-    desc: "当前进度、已完成、下一步",
-    color: "teal",
-    icon: "📈",
-    entryBased: true,
-  },
-  DECISIONS: {
-    label: "决策记录",
-    desc: "重要决策及原因",
-    color: "purple",
-    icon: "📋",
-    entryBased: true,
-  },
-  FILES_INDEX: {
-    label: "资料索引",
-    desc: "上传的文件与参考资料",
-    color: "amber",
-    icon: "🗂️",
-    readonly: true,
-  },
-  RECENT: {
-    label: "近期动态",
-    desc: "最新进展、待办、结论",
-    color: "green",
-    icon: "🕐",
-    readonly: true,
-  },
-  MEMBERS: {
-    label: "频道成员",
-    desc: "用户与 Bot 能力一览",
-    color: "gray",
-    icon: "👥",
-    readonly: true,
-  },
-  TODO: {
-    label: "待办事项",
-    desc: "频道任务清单",
-    color: "rose",
-    icon: "✅",
-    readonly: true,
-  },
-};
-
-export type MemberItem = {
-  member_id: string;
-  member_type: string;
-  username?: string;
-  display_name?: string;
-  avatar_url?: string;
-};
-
-type TodoItem = {
-  todo_id: string;
-  channel_id: string;
-  creator_id: string;
-  creator_type: string;
-  assignee_id: string | null;
-  assignee_type: string | null;
-  content: string;
-  status: string;
-};
-
-type MemoryEntryItem = {
-  entry_id: string;
-  channel_id: string;
-  layer: string;
-  title: string | null;
-  content: string;
-  sort_order: number;
-  created_by: string | null;
-  creator_type: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-};
-
-function getStoredToken(): string | null {
-  try {
-    const stored = localStorage.getItem("currentUser");
-    if (!stored) return null;
-    const data = JSON.parse(stored);
-    if (data.loginTime && Date.now() - data.loginTime < 86400000) {
-      return data.token ?? data.user?.user_id ?? null;
-    }
-  } catch {}
-  return null;
-}
-
-function MemoryPanel({
-  channelId,
-  channelName,
-  contextData,
-  onClose,
-  onExpand,
-}: {
-  channelId: string;
-  channelName: string;
-  contextData: Record<string, string>;
-  onClose: () => void;
-  onExpand: () => void;
-}) {
-  const [activeLayer, setActiveLayer] = useState<string>("ANCHOR");
-  const [members, setMembers] = useState<MemberItem[]>([]);
-  const [membersLoading, setMembersLoading] = useState(false);
-  const [todos, setTodos] = useState<TodoItem[]>([]);
-  const [todosLoading, setTodosLoading] = useState(false);
-  const [todoNewContent, setTodoNewContent] = useState("");
-  const [todoAssignee, setTodoAssignee] = useState("");
-
-  // Channel files state (for FILES_INDEX layer)
-  const [channelFiles, setChannelFiles] = useState<
-    {
-      file_id: string;
-      original_filename: string;
-      content_type: string;
-      size_bytes: number;
-      status: string;
-      summary_3lines: string | null;
-      created_at: string | null;
-    }[]
-  >([]);
-  const [channelFilesLoading, setChannelFilesLoading] = useState(false);
-
-  // Entry-based state
-  const [entries, setEntries] = useState<MemoryEntryItem[]>([]);
-  const [entriesLoading, setEntriesLoading] = useState(false);
-  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editContent, setEditContent] = useState("");
-  const [addingNew, setAddingNew] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newContent, setNewContent] = useState("");
-
-  const meta = LAYER_META[activeLayer];
-  const isReadonly = !!meta.readonly;
-  const isEntryBased = !!meta.entryBased;
-  const rawContent = contextData[activeLayer.toLowerCase()] ?? "";
-
-  const loadEntries = (layer: string) => {
-    const token = getStoredToken();
-    setEntriesLoading(true);
-    fetch(`${API}/channels/${channelId}/memory/?layer=${layer}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setEntries)
-      .catch(() => {})
-      .finally(() => setEntriesLoading(false));
-  };
-
-  const loadTodos = () => {
-    const token = getStoredToken();
-    setTodosLoading(true);
-    fetch(`${API}/channels/${channelId}/todos/`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setTodos)
-      .catch(() => {})
-      .finally(() => setTodosLoading(false));
-  };
-
-  const switchLayer = (layer: string) => {
-    setActiveLayer(layer);
-    setEditingEntryId(null);
-    setAddingNew(false);
-    if (LAYER_META[layer].entryBased) {
-      loadEntries(layer);
-    }
-    if (layer === "MEMBERS") {
-      const token = getStoredToken();
-      setMembersLoading(true);
-      fetch(`${API}/channels/${channelId}/members?with_username=1`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then((r) => r.json())
-        .then((d) => setMembers(d.data || []))
-        .catch(() => {})
-        .finally(() => setMembersLoading(false));
-    }
-    if (layer === "TODO") {
-      loadTodos();
-      if (members.length === 0) {
-        const token = getStoredToken();
-        fetch(`${API}/channels/${channelId}/members?with_username=1`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-          .then((r) => r.json())
-          .then((d) => setMembers(d.data || []))
-          .catch(() => {});
-      }
-    }
-    if (layer === "FILES_INDEX") {
-      loadChannelFiles();
-    }
-  };
-
-  const loadChannelFiles = () => {
-    const token = getStoredToken();
-    setChannelFilesLoading(true);
-    fetch(`${API}/files/by-channel/${channelId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((r) => r.json())
-      .then((d) => setChannelFiles(d.data || []))
-      .catch(() => {})
-      .finally(() => setChannelFilesLoading(false));
-  };
-
-  useEffect(() => {
-    if (LAYER_META[activeLayer].entryBased) loadEntries(activeLayer);
-  }, [channelId]);
-
-  // ── Entry CRUD ──
-  const handleCreateEntry = async () => {
-    if (!newContent.trim()) return;
-    const token = getStoredToken();
-    const res = await fetch(`${API}/channels/${channelId}/memory/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        layer: activeLayer,
-        title: newTitle || null,
-        content: newContent,
-      }),
-    }).catch(() => null);
-    if (res?.ok) {
-      setNewTitle("");
-      setNewContent("");
-      setAddingNew(false);
-      loadEntries(activeLayer);
-    }
-  };
-
-  const handleUpdateEntry = async (entryId: string) => {
-    const token = getStoredToken();
-    const res = await fetch(`${API}/channels/${channelId}/memory/${entryId}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ title: editTitle || null, content: editContent }),
-    }).catch(() => null);
-    if (res?.ok) {
-      setEditingEntryId(null);
-      loadEntries(activeLayer);
-    }
-  };
-
-  const handleDeleteEntry = async (entryId: string) => {
-    const token = getStoredToken();
-    const res = await fetch(`${API}/channels/${channelId}/memory/${entryId}`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }).catch(() => null);
-    if (res?.ok) loadEntries(activeLayer);
-  };
-
-  const startEditEntry = (entry: MemoryEntryItem) => {
-    setEditingEntryId(entry.entry_id);
-    setEditTitle(entry.title || "");
-    setEditContent(entry.content);
-  };
-
-  // ── Todo CRUD ──
-  const handleTodoCreate = async () => {
-    if (!todoNewContent.trim()) return;
-    const token = getStoredToken();
-    let assignee_id = null,
-      assignee_type = null;
-    if (todoAssignee) {
-      const [type, id] = todoAssignee.split(":");
-      assignee_id = id;
-      assignee_type = type;
-    }
-    const res = await fetch(`${API}/channels/${channelId}/todos/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        content: todoNewContent,
-        assignee_id,
-        assignee_type,
-      }),
-    }).catch(() => null);
-    if (res?.ok) {
-      setTodoNewContent("");
-      setTodoAssignee("");
-      loadTodos();
-    }
-  };
-
-  const handleTodoToggle = async (todo: TodoItem) => {
-    const token = getStoredToken();
-    const res = await fetch(
-      `${API}/channels/${channelId}/todos/${todo.todo_id}`,
-      {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          status: todo.status === "completed" ? "pending" : "completed",
-        }),
-      },
-    ).catch(() => null);
-    if (res?.ok) loadTodos();
-  };
-
-  const handleTodoDelete = async (todoId: string) => {
-    const token = getStoredToken();
-    const res = await fetch(`${API}/channels/${channelId}/todos/${todoId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => null);
-    if (res?.ok) loadTodos();
-  };
-
-  const getMemberName = (id: string, type: string) => {
-    const m = members.find((x) => x.member_id === id && x.member_type === type);
-    return m ? m.display_name || m.username || "Unknown" : null;
-  };
-
-  // ── Entry-based layer content renderer ──
-  const renderEntryLayer = () => {
-    if (entriesLoading) {
-      return (
-        <div className="flex items-center justify-center h-12 text-gray-400 text-xs">
-          加载中…
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex-1 overflow-y-auto">
-        {/* Entry list */}
-        {entries.length === 0 && !addingNew ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2 px-4 text-center">
-            <span className="text-3xl opacity-30">{meta.icon}</span>
-            <p className="text-xs font-medium text-gray-500">暂无内容</p>
-            <p className="text-[11px] text-gray-400">{meta.desc}</p>
-            <button
-              type="button"
-              onClick={() => setAddingNew(true)}
-              className="mt-1 text-xs px-2.5 py-1 rounded border border-gray-200 text-gray-500 hover:bg-gray-50"
-            >
-              添加条目
-            </button>
-          </div>
-        ) : (
-          <ul className="divide-y divide-gray-100">
-            {entries.map((entry) =>
-              editingEntryId === entry.entry_id ? (
-                <li
-                  key={entry.entry_id}
-                  className="px-3 py-2 space-y-1.5 bg-blue-50/30"
-                >
-                  <input
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="标题（可选）"
-                    className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-400"
-                  />
-                  <textarea
-                    rows={3}
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 resize-none focus:outline-none focus:border-blue-400 font-mono"
-                  />
-                  <div className="flex gap-1 justify-end">
-                    <button
-                      onClick={() => setEditingEntryId(null)}
-                      className="text-[11px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50"
-                    >
-                      取消
-                    </button>
-                    <button
-                      onClick={() => handleUpdateEntry(entry.entry_id)}
-                      className="text-[11px] px-2 py-0.5 rounded bg-[#1264A3] text-white hover:bg-[#0f5a94]"
-                    >
-                      保存
-                    </button>
-                  </div>
-                </li>
-              ) : (
-                <li
-                  key={entry.entry_id}
-                  className="px-3 py-2 group hover:bg-gray-50/50"
-                >
-                  <div className="flex items-start justify-between gap-1.5">
-                    <div className="flex-1 min-w-0">
-                      {entry.title && (
-                        <p className="text-xs font-semibold text-gray-700 mb-0.5">
-                          {entry.title}
-                        </p>
-                      )}
-                      <div className="text-xs text-gray-600">
-                        <MessageMarkdown text={entry.content} />
-                      </div>
-                      {entry.updated_at && (
-                        <p className="text-[10px] text-gray-300 mt-1">
-                          {new Date(entry.updated_at).toLocaleString()}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => startEditEntry(entry)}
-                        className="text-gray-400 hover:text-blue-500 text-[10px] p-0.5"
-                        title="编辑"
-                      >
-                        &#9998;
-                      </button>
-                      <button
-                        onClick={() => handleDeleteEntry(entry.entry_id)}
-                        className="text-gray-300 hover:text-red-400 text-[10px] p-0.5"
-                        title="删除"
-                      >
-                        &#10005;
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              ),
-            )}
-          </ul>
-        )}
-
-        {/* Add new entry form */}
-        {addingNew && (
-          <div className="px-3 py-2 border-t border-gray-100 space-y-1.5 bg-green-50/20">
-            <input
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="标题（可选）"
-              className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-400"
-            />
-            <textarea
-              rows={3}
-              value={newContent}
-              onChange={(e) => setNewContent(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey))
-                  handleCreateEntry();
-              }}
-              placeholder="内容…"
-              className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 resize-none focus:outline-none focus:border-blue-400 font-mono"
-              autoFocus
-            />
-            <div className="flex gap-1 justify-end">
-              <button
-                onClick={() => {
-                  setAddingNew(false);
-                  setNewTitle("");
-                  setNewContent("");
-                }}
-                className="text-[11px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleCreateEntry}
-                className="text-[11px] px-2 py-0.5 rounded bg-[#1264A3] text-white hover:bg-[#0f5a94]"
-              >
-                添加
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  return (
-    <aside className="w-full border-l border-gray-200 bg-white flex flex-col">
-      {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 flex-shrink-0">
-        <div className="min-w-0">
-          <span className="text-sm font-semibold text-gray-900">频道记忆</span>
-          {channelName && (
-            <span className="ml-1.5 text-xs text-gray-400">#{channelName}</span>
-          )}
-        </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <button
-            type="button"
-            onClick={onExpand}
-            className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-blue-500 text-xs leading-none"
-            title="全屏查看"
-          >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-base leading-none"
-            title="关闭"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-
-      {/* Layer tabs */}
-      <div className="flex border-b border-gray-100 flex-shrink-0">
-        {LAYERS.map((layer) => {
-          const m = LAYER_META[layer];
-          const active = layer === activeLayer;
-          const filled =
-            layer === "TODO"
-              ? todos.length > 0
-              : m.entryBased
-                ? entries.length > 0 && activeLayer === layer
-                : !!contextData[layer.toLowerCase()]?.trim();
-          return (
-            <button
-              key={layer}
-              onClick={() => switchLayer(layer)}
-              title={m.label}
-              className={`flex-1 py-2 flex flex-col items-center gap-0.5 text-[10px] border-b-2 transition-colors ${
-                active
-                  ? "border-[#1264A3] text-[#1264A3]"
-                  : "border-transparent text-gray-400 hover:text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              <span className="text-sm leading-none">{m.icon}</span>
-              <span className="leading-none font-medium truncate max-w-full px-0.5">
-                {m.label.split(" ")[0]}
-              </span>
-              {filled && (
-                <span className="w-1 h-1 rounded-full bg-current opacity-60" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Content toolbar */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 flex-shrink-0">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-semibold text-gray-700 truncate">
-            {meta.label}
-          </span>
-          {isEntryBased && entries.length > 0 && (
-            <span className="text-[10px] text-gray-400 flex-shrink-0">
-              {entries.length} 条
-            </span>
-          )}
-          {isReadonly && activeLayer !== "TODO" && (
-            <span className="text-[10px] text-gray-400 flex-shrink-0">
-              只读
-            </span>
-          )}
-        </div>
-        {isEntryBased && !addingNew && entries.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setAddingNew(true)}
-            className="text-[11px] px-2 py-1 rounded border border-gray-200 text-gray-500 hover:bg-gray-50"
-          >
-            + 添加
-          </button>
-        )}
-      </div>
-
-      {/* Main content */}
-      <div className="flex flex-col flex-1 overflow-hidden">
-        {activeLayer === "TODO" ? (
-          <>
-            {/* Todo create form */}
-            <div className="px-3 py-2 border-b border-gray-100 flex-shrink-0 space-y-1.5">
-              <textarea
-                rows={2}
-                value={todoNewContent}
-                onChange={(e) => setTodoNewContent(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey))
-                    handleTodoCreate();
-                }}
-                placeholder="新建任务…"
-                className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 resize-none focus:outline-none focus:border-blue-400"
-              />
-              <div className="flex items-center gap-1.5">
-                <select
-                  value={todoAssignee}
-                  onChange={(e) => setTodoAssignee(e.target.value)}
-                  className="flex-1 text-xs border border-gray-200 rounded px-1.5 py-1 focus:outline-none focus:border-blue-400 text-gray-500"
-                >
-                  <option value="">指派给…</option>
-                  {members.map((m) => (
-                    <option
-                      key={m.member_id}
-                      value={`${m.member_type}:${m.member_id}`}
-                    >
-                      {m.member_type === "bot" ? "🤖 " : "👤 "}
-                      {m.display_name || m.username}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={handleTodoCreate}
-                  className="px-2.5 py-1 text-xs bg-[#1264A3] text-white rounded hover:bg-[#0f5a94] flex-shrink-0"
-                >
-                  添加
-                </button>
-              </div>
-            </div>
-            {/* Todo list */}
-            <div className="flex-1 overflow-y-auto">
-              {todosLoading ? (
-                <div className="flex items-center justify-center h-12 text-gray-400 text-xs">
-                  加载中…
-                </div>
-              ) : todos.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-20 text-gray-400 gap-1 text-center px-4">
-                  <span className="text-2xl opacity-30">✅</span>
-                  <p className="text-xs text-gray-400">暂无待办</p>
-                </div>
-              ) : (
-                <ul className="divide-y divide-gray-100">
-                  {todos.map((todo) => (
-                    <li
-                      key={todo.todo_id}
-                      className="flex items-start gap-2 px-3 py-2"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={todo.status === "completed"}
-                        onChange={() => handleTodoToggle(todo)}
-                        className="mt-0.5 flex-shrink-0 cursor-pointer"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p
-                          className={`text-xs ${todo.status === "completed" ? "line-through text-gray-400" : "text-gray-800"}`}
-                        >
-                          {todo.content}
-                        </p>
-                        {todo.assignee_id && (
-                          <p className="text-[10px] text-gray-400 mt-0.5">
-                            →{" "}
-                            {getMemberName(
-                              todo.assignee_id,
-                              todo.assignee_type!,
-                            ) ?? todo.assignee_id}
-                          </p>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => handleTodoDelete(todo.todo_id)}
-                        className="flex-shrink-0 text-gray-300 hover:text-red-400 transition-colors text-[10px] leading-none mt-0.5"
-                      >
-                        ✕
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </>
-        ) : isEntryBased ? (
-          renderEntryLayer()
-        ) : activeLayer === "MEMBERS" ? (
-          membersLoading ? (
-            <div className="flex items-center justify-center h-full text-gray-400 text-xs">
-              加载中…
-            </div>
-          ) : members.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2 text-center px-4">
-              <span className="text-3xl opacity-30">👥</span>
-              <p className="text-xs text-gray-500">暂无成员</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100 overflow-y-auto">
-              {[...members]
-                .sort(
-                  (a, b) =>
-                    (a.member_type === "bot" ? -1 : 1) -
-                    (b.member_type === "bot" ? -1 : 1),
-                )
-                .map((m) => {
-                  const isBot = m.member_type === "bot";
-                  const label =
-                    m.display_name || m.username || (isBot ? "Bot" : "用户");
-                  const sub =
-                    m.username && m.username !== m.display_name
-                      ? `@${m.username}`
-                      : null;
-                  const initial = label.slice(0, 1).toUpperCase();
-                  return (
-                    <div
-                      key={m.member_id}
-                      className="flex items-center gap-2.5 px-3 py-2"
-                    >
-                      <div
-                        className={`w-7 h-7 rounded${isBot ? "" : "-full"} flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${isBot ? "bg-[#2EB67D]" : "bg-[#1264A3]"}`}
-                      >
-                        {initial}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-medium text-gray-800 truncate">
-                          {label}
-                        </p>
-                        {sub && (
-                          <p className="text-[10px] text-gray-400 truncate">
-                            {sub}
-                          </p>
-                        )}
-                      </div>
-                      <span
-                        className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${isBot ? "bg-green-50 text-green-700" : "bg-blue-50 text-blue-700"}`}
-                      >
-                        {isBot ? "Bot" : "用户"}
-                      </span>
-                    </div>
-                  );
-                })}
-            </div>
-          )
-        ) : activeLayer === "FILES_INDEX" ? (
-          channelFilesLoading ? (
-            <div className="flex items-center justify-center h-full text-gray-400 text-xs">
-              加载中…
-            </div>
-          ) : channelFiles.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2 px-4 text-center">
-              <span className="text-3xl opacity-30">{meta.icon}</span>
-              <p className="text-xs font-medium text-gray-500">暂无文件</p>
-              <p className="text-[11px] text-gray-400">{meta.desc}</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100 overflow-y-auto">
-              {channelFiles.map((f) => {
-                const ct = f.content_type || "";
-                const typeLabel = ct.includes("pdf")
-                  ? "PDF"
-                  : ct.includes("wordprocessingml") || ct.includes("docx")
-                    ? "Word"
-                    : ct.includes("spreadsheetml") || ct.includes("xlsx")
-                      ? "Excel"
-                      : ct.startsWith("text/")
-                        ? "文本"
-                        : "文件";
-                const sizeStr = f.size_bytes
-                  ? f.size_bytes < 1024
-                    ? `${f.size_bytes} B`
-                    : f.size_bytes < 1024 * 1024
-                      ? `${(f.size_bytes / 1024).toFixed(1)} KB`
-                      : `${(f.size_bytes / (1024 * 1024)).toFixed(1)} MB`
-                  : "";
-                return (
-                  <div
-                    key={f.file_id}
-                    className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="w-8 h-8 rounded-md bg-amber-50 flex items-center justify-center flex-shrink-0">
-                      <span className="text-sm">
-                        {typeLabel === "PDF"
-                          ? "\uD83D\uDCC4"
-                          : typeLabel === "Word"
-                            ? "\uD83D\uDCC3"
-                            : typeLabel === "Excel"
-                              ? "\uD83D\uDCCA"
-                              : "\uD83D\uDCC1"}
-                      </span>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium text-gray-800 truncate">
-                        {f.original_filename || f.file_id}
-                      </p>
-                      <p className="text-[10px] text-gray-400 truncate">
-                        {typeLabel}
-                        {sizeStr ? ` · ${sizeStr}` : ""}
-                        {f.created_at
-                          ? ` · ${f.created_at.slice(0, 10)}`
-                          : ""}
-                      </p>
-                      {f.summary_3lines && (
-                        <p className="text-[10px] text-gray-400 truncate mt-0.5">
-                          {f.summary_3lines}
-                        </p>
-                      )}
-                    </div>
-                    <a
-                      href={`${API}/files/${f.file_id}/download`}
-                      className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-700 transition-colors flex-shrink-0"
-                      title="下载文件"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        className="w-4 h-4"
-                      >
-                        <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-                        <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-                      </svg>
-                    </a>
-                  </div>
-                );
-              })}
-            </div>
-          )
-        ) : rawContent.trim() ? (
-          /* Readonly derived layers (RECENT) */
-          <div className="px-3 py-3 text-sm overflow-y-auto">
-            <MessageMarkdown text={rawContent} />
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2 px-4 text-center">
-            <span className="text-3xl opacity-30">{meta.icon}</span>
-            <p className="text-xs font-medium text-gray-500">暂无内容</p>
-            <p className="text-[11px] text-gray-400">{meta.desc}</p>
-          </div>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function stripThinkTags(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-}
-
-/** 将消息按逻辑问答块分组（含 clarify 轮次），每个块以用户问题开头 */
-function buildLogicalQaBlocks(
-  messages: Message[],
-): { question: Message; messages: Message[] }[] {
-  const blocks: { question: Message; messages: Message[] }[] = [];
-  let i = 0;
-  while (i < messages.length) {
-    const m = messages[i];
-    if (m.sender_type !== "user" || isClarifyReplyUserMessage(m.content)) {
-      i++;
-      continue;
-    }
-    const blockMessages: Message[] = [m];
-    let j = i + 1;
-    while (j < messages.length) {
-      const next = messages[j];
-      if (
-        next.sender_type === "user" &&
-        !isClarifyReplyUserMessage(next.content)
-      ) {
-        break;
-      }
-      blockMessages.push(next);
-      j++;
-    }
-    blocks.push({ question: m, messages: blockMessages });
-    i = j;
-  }
-  return blocks;
-}
-
-function formatTs(ts?: string): string {
-  return (ts || "").slice(0, 19);
-}
-
-function buildQaMarkdown(channelName: string, pairs: QaPair[]): string {
-  const now = new Date();
-  const rows: string[] = [];
-  rows.push(`# 问答导出 - ${channelName}`);
-  rows.push("");
-  rows.push(`导出时间: ${now.toISOString()}`);
-  rows.push(`问答数量: ${pairs.length}`);
-  rows.push("");
-  pairs.forEach((p, idx) => {
-    const qText = stripThinkTags(
-      parseGuidePayload(p.question.content).text || p.question.content,
-    );
-    const aText = stripThinkTags(
-      parseGuidePayload(p.answer.content).text || p.answer.content,
-    );
-    rows.push(`## ${idx + 1}. 问答`);
-    rows.push("");
-    rows.push(`### 问题 (${formatTs(p.question.created_at) || "-"})`);
-    rows.push("");
-    rows.push(qText || "-");
-    rows.push("");
-    rows.push(`### 回答 (${formatTs(p.answer.created_at) || "-"})`);
-    rows.push("");
-    rows.push(aText || "-");
-    rows.push("");
-    rows.push("---");
-    rows.push("");
-  });
-  return rows.join("\n");
-}
-
-function downloadText(filename: string, content: string): void {
-  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function refreshChannels(setChannels: (c: Channel[]) => void, token?: string) {
-  const headers: Record<string, string> = token
-    ? { Authorization: `Bearer ${token}` }
-    : {};
-  fetch(`${API}/channels`, { headers })
-    .then((r) => r.json())
-    .then((d) => d.data && setChannels(d.data))
-    .catch(console.error);
-}
-
-function refreshWorkspaces(
-  setWorkspaces: (w: Workspace[]) => void,
-  token?: string,
-) {
-  const headers: Record<string, string> = token
-    ? { Authorization: `Bearer ${token}` }
-    : {};
-  fetch(`${API}/workspaces`, { headers })
-    .then((r) => r.json())
-    .then((d) => d.data && setWorkspaces(d.data))
-    .catch(console.error);
-}
-
-/** 引导动态表单：根据 schema 渲染并提交，成功后回调 */
-function GuideFormBlock({
-  msgId: _msgId,
-  form,
-  channelId,
-  onReply,
-  onChannelsRefresh,
-  userToken,
-}: {
-  msgId: string;
-  form: GuideFormSchema;
-  channelId: string;
-  onReply: (msg: Message) => void;
-  onChannelsRefresh: () => void;
-  userToken?: string;
-}) {
-  const authHeaders: Record<string, string> = userToken
-    ? { Authorization: `Bearer ${userToken}` }
-    : {};
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [options, setOptions] = useState<
-    Record<string, { value: string; label: string }[]>
-  >({});
-  const [submitted, setSubmitted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    form.fields.forEach((f) => {
-      if (f.type === "select" && f.options_url) {
-        fetch(`${API}${f.options_url}`, { headers: authHeaders })
-          .then((r) => r.json())
-          .then((d) => {
-            if (d.data && Array.isArray(d.data)) {
-              const val = f.option_value || "value";
-              const lab = f.option_label || "label";
-              setOptions((prev) => ({
-                ...prev,
-                [f.name]: d.data.map((o: Record<string, string>) => ({
-                  value: o[val],
-                  label: o[lab] ?? o[val],
-                })),
-              }));
-            }
-          })
-          .catch(() => {});
-      }
-    });
-  }, [form.fields]);
-
-  const handleSubmit = () => {
-    if (form.action === "create_channel") {
-      const workspace_id = values.workspace_id;
-      const name = values.name?.trim();
-      if (!workspace_id || !name) {
-        const msg = "请选择工作空间并填写项目名称";
-        setError(msg);
-        toast.error(msg);
-        return;
-      }
-      setError(null);
-      fetch(`${API}/channels`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify({ workspace_id, name, type: "public" }),
-      })
-        .then((r) => r.json())
-        .then((d) => {
-          if (d.status === "success") {
-            setSubmitted(true);
-            const chName = d.data?.name ?? name;
-            return fetch(`${API}/channels/${channelId}/guide-reply`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                content: `项目「${chName}」已创建。你可以在左侧列表中看到新项目。`,
-              }),
-            })
-              .then((res) => res.json())
-              .then((res) => {
-                if (res.data) onReply(res.data);
-                onChannelsRefresh();
-              });
-          }
-          const errMsg = d.detail || d.message || "创建失败";
-          setError(errMsg);
-          toast.error(errMsg);
-        })
-        .catch(() => {
-          setError("请求失败");
-          toast.error("请求失败");
-        });
-    }
-  };
-
-  if (submitted) {
-    return <p className="text-sm text-green-600 mt-2">已提交并创建项目。</p>;
-  }
-
-  return (
-    <div className="mt-2 p-3 bg-[#F8F8F8] rounded-lg border border-gray-200 text-sm">
-      {form.fields.map((f) => (
-        <div key={f.name} className="mb-3">
-          <label className="block text-gray-700 text-xs font-medium mb-1">
-            {f.label}
-          </label>
-          {f.type === "select" ? (
-            <select
-              value={values[f.name] ?? ""}
-              onChange={(e) =>
-                setValues((v) => ({ ...v, [f.name]: e.target.value }))
-              }
-              className="border border-gray-300 rounded px-2 py-1.5 w-full text-sm focus:outline-none focus:border-[#1264A3]"
-            >
-              <option value="">请选择</option>
-              {(options[f.name] ?? []).map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type="text"
-              value={values[f.name] ?? ""}
-              onChange={(e) =>
-                setValues((v) => ({ ...v, [f.name]: e.target.value }))
-              }
-              placeholder={f.placeholder}
-              className="border border-gray-300 rounded px-2 py-1.5 w-full text-sm focus:outline-none focus:border-[#1264A3]"
-            />
-          )}
-        </div>
-      ))}
-      {error && <p className="text-red-500 text-xs mb-2">{error}</p>}
-      <button
-        type="button"
-        onClick={handleSubmit}
-        className="px-4 py-1.5 bg-[#007a5a] text-white rounded font-medium text-sm hover:bg-[#006a4d]"
-      >
-        提交
-      </button>
-    </div>
-  );
-}
-
-function isClarifyReplyUserMessage(content: string): boolean {
-  const t = (content || "").trim();
-  return (
-    t.startsWith("@channel bot 澄清回答：") || t.includes("用户选择跳过澄清")
-  );
-}
-
-function ClarifyInlineBlock({
-  msgId,
-  schema,
-  status,
-  replyContent,
-  onContinue,
-  onSkip,
-}: {
-  msgId: string;
-  schema: ClarifySchema;
-  status: "form" | "waiting" | "answered";
-  replyContent?: string;
-  onContinue: (answers: ClarifyAnswers) => void;
-  onSkip: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [answers, setAnswers] = useState<Record<string, string[]>>({});
-  const [otherText, setOtherText] = useState<Record<string, string>>({});
-  const [optionText, setOptionText] = useState<Record<string, string>>({}); // key: `${q.id}:${opt.id}`
-  const allowSkip = (schema.skip_policy || "allow") === "allow";
-  const canContinue = schema.questions.every((q) => {
-    const selected = answers[q.id] || [];
-    if (selected.length === 0) return false;
-    if (selected.includes(OTHER_CHOICE_ID)) {
-      return !!(otherText[q.id] || "").trim();
-    }
-    for (const opt of q.options) {
-      if (opt.requires_text && selected.includes(opt.id)) {
-        const key = `${q.id}:${opt.id}`;
-        if (!(optionText[key] || "").trim()) return false;
-      }
-    }
-    return true;
-  });
-
-  const toggleOption = (q: ClarifyQuestion, optionId: string) => {
-    setAnswers((prev) => {
-      const current = prev[q.id] || [];
-      if (q.allow_multiple) {
-        const next = current.includes(optionId)
-          ? current.filter((id) => id !== optionId)
-          : [...current, optionId];
-        return { ...prev, [q.id]: next };
-      }
-      return { ...prev, [q.id]: [optionId] };
-    });
-  };
-
-  const toggleOther = (q: ClarifyQuestion) => toggleOption(q, OTHER_CHOICE_ID);
-
-  if (status === "waiting") {
-    return (
-      <div className="my-2 rounded-lg border border-gray-200 bg-[#F8F8F8] p-3">
-        <span className="text-xs text-gray-400 flex items-center gap-1.5">
-          <span className="inline-block w-2 h-2 rounded-full bg-gray-300 animate-pulse" />
-          引导正在根据澄清回答…
-        </span>
-      </div>
-    );
-  }
-
-  if (status === "answered") {
-    const displayReply =
-      replyContent?.replace(/^@channel bot\s*澄清回答[：:]\s*/i, "").trim() ||
-      "";
-    return (
-      <div className="my-2 rounded-lg border border-gray-200 bg-[#F8F8F8] overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="w-full px-3 py-2 text-left text-xs text-gray-500 hover:bg-gray-100 flex items-center gap-1.5"
-        >
-          <span
-            className="inline-block transition-transform"
-            style={{ transform: open ? "rotate(90deg)" : "none" }}
-          >
-            ▶
-          </span>
-          <span className="font-medium">澄清</span>
-          <span className="text-gray-400">{open ? "收起" : "展开"}</span>
-        </button>
-        {open && (
-          <div className="px-3 pb-3 text-xs text-gray-600 border-t border-gray-200 space-y-2 pt-2">
-            <p className="text-gray-500">已澄清并已收到引导回复</p>
-            {displayReply && (
-              <div className="rounded border border-gray-200 bg-white p-2">
-                <p className="text-gray-400 mb-1">澄清回答</p>
-                <pre className="whitespace-pre-wrap text-gray-700 font-sans text-xs">
-                  {displayReply}
-                </pre>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="my-2 rounded-lg border border-[#1264A3]/30 bg-[#F8F8F8] overflow-hidden p-3">
-      <div className="mb-3">
-        <h4 className="text-sm font-semibold text-gray-800">
-          {schema.title || "请先确认以下问题"}
-        </h4>
-      </div>
-      <div className="space-y-2 max-h-[40vh] overflow-auto pr-1">
-        {schema.questions.map((q, idx) => (
-          <div
-            key={q.id}
-            className="rounded-lg border border-gray-200 bg-white p-3"
-          >
-            <p className="text-sm mb-2 text-gray-700 font-medium">
-              {idx + 1}. {q.prompt}
-            </p>
-            <div className="space-y-1.5">
-              {q.options.map((opt) => {
-                const checked = (answers[q.id] || []).includes(opt.id);
-                const optKey = `${q.id}:${opt.id}`;
-                return (
-                  <div key={opt.id} className="space-y-1">
-                    <label className="flex items-center gap-2 text-sm cursor-pointer text-gray-700 hover:text-gray-900">
-                      <input
-                        type={q.allow_multiple ? "checkbox" : "radio"}
-                        name={`${msgId}-${q.id}`}
-                        checked={checked}
-                        onChange={() => toggleOption(q, opt.id)}
-                        className="accent-[#1264A3]"
-                      />
-                      <span>{opt.label}</span>
-                    </label>
-                    {opt.requires_text && checked && (
-                      <input
-                        type="text"
-                        value={optionText[optKey] || ""}
-                        onChange={(e) =>
-                          setOptionText((prev) => ({
-                            ...prev,
-                            [optKey]: e.target.value,
-                          }))
-                        }
-                        placeholder={opt.text_placeholder || "请输入"}
-                        className="ml-6 w-full rounded border border-gray-300 px-2 py-1.5 text-sm text-gray-800 focus:outline-none focus:border-[#1264A3]"
-                      />
-                    )}
-                  </div>
-                );
-              })}
-              {q.other_enabled && (
-                <div className="pt-1">
-                  <label className="flex items-center gap-2 text-sm cursor-pointer text-gray-700 hover:text-gray-900">
-                    <input
-                      type={q.allow_multiple ? "checkbox" : "radio"}
-                      name={`${msgId}-${q.id}`}
-                      checked={(answers[q.id] || []).includes(OTHER_CHOICE_ID)}
-                      onChange={() => toggleOther(q)}
-                      className="accent-[#1264A3]"
-                    />
-                    <span>{q.other_label || "其他"}</span>
-                  </label>
-                  {(answers[q.id] || []).includes(OTHER_CHOICE_ID) && (
-                    <input
-                      type="text"
-                      value={otherText[q.id] || ""}
-                      onChange={(e) =>
-                        setOtherText((prev) => ({
-                          ...prev,
-                          [q.id]: e.target.value,
-                        }))
-                      }
-                      placeholder={q.other_placeholder || "请输入其他补充"}
-                      className="mt-1.5 w-full rounded border border-gray-300 px-2 py-1.5 text-sm text-gray-800 focus:outline-none focus:border-[#1264A3]"
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 flex justify-end gap-2">
-        {allowSkip && (
-          <button
-            type="button"
-            onClick={onSkip}
-            className="px-4 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 text-sm font-medium"
-          >
-            跳过
-          </button>
-        )}
-        <button
-          type="button"
-          disabled={!canContinue}
-          onClick={() =>
-            onContinue({
-              selected: answers,
-              other_text: otherText,
-              option_text: optionText,
-            })
-          }
-          className="px-4 py-1.5 rounded bg-[#007a5a] text-white font-medium disabled:opacity-40 text-sm hover:bg-[#006a4d]"
-        >
-          继续
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ThinkingIndicator() {
-  return (
-    <div className="p-2 rounded bg-amber-50 border-l-2 border-amber-400 text-sm text-gray-600 animate-pulse">
-      正在思考...
-    </div>
-  );
-}
-
-// ── Keychain Modal ────────────────────────────────────────────────────────────
-function KeychainModal({
-  userToken,
-  onClose,
-}: {
-  userToken: string;
-  onClose: () => void;
-}) {
-  type KeychainItem = {
-    key_id: string;
-    name: string;
-    description?: string;
-    value_masked: string;
-  };
-  const [items, setItems] = useState<KeychainItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [newName, setNewName] = useState("");
-  const [newValue, setNewValue] = useState("");
-  const [newDesc, setNewDesc] = useState("");
-  const [showValue, setShowValue] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-
-  const inputCls =
-    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]";
-
-  useEffect(() => {
-    fetch(`${API}/keychain/`, {
-      headers: { Authorization: `Bearer ${userToken}` },
-    })
-      .then((r) => r.json())
-      .then(setItems)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [userToken]);
-
-  const handleCreate = async () => {
-    if (!newName.trim() || !newValue.trim()) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${API}/keychain/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${userToken}`,
-        },
-        body: JSON.stringify({
-          name: newName.trim(),
-          value: newValue,
-          description: newDesc.trim() || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "创建失败");
-      setItems((prev) => [...prev, data]);
-      setNewName("");
-      setNewValue("");
-      setNewDesc("");
-      setShowValue(false);
-      toast.success("密钥已保存");
-    } catch (e: any) {
-      toast.error(e.message || "创建失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (keyId: string) => {
-    setDeletingId(keyId);
-    try {
-      const res = await fetch(`${API}/keychain/${keyId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${userToken}` },
-      });
-      if (!res.ok) throw new Error("删除失败");
-      setItems((prev) => prev.filter((k) => k.key_id !== keyId));
-      toast.success("密钥已删除");
-    } catch (e: any) {
-      toast.error(e.message || "删除失败");
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-      onClick={onClose}
-      aria-modal="true"
-      role="dialog"
-    >
-      <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[90vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="w-5 h-5 text-[#1264A3]"
-            >
-              <path
-                fillRule="evenodd"
-                d="M8 7a5 5 0 1 1 3.61 4.804l-1.903 1.903A1 1 0 0 1 9 14H8v1a1 1 0 0 1-1 1H6v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-2a1 1 0 0 1 .293-.707L7.196 10.39A5.002 5.002 0 0 1 8 7Zm5-3a.75.75 0 0 0 0 1.5A1.5 1.5 0 0 1 14.5 7 .75.75 0 0 0 16 7a3 3 0 0 0-3-3Z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <h2 className="text-lg font-bold text-gray-900">密钥链</h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-xl leading-none"
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-          {/* Usage hint */}
-          <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="w-4 h-4 flex-shrink-0 mt-0.5"
-            >
-              <path
-                fillRule="evenodd"
-                d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <span>
-              在频道消息中使用{" "}
-              <code className="font-mono bg-blue-100 px-1 rounded">
-                $secret&#123;密钥名称&#125;
-              </code>{" "}
-              引用密钥，Bot 会自动获取真实值。
-            </span>
-          </div>
-
-          {/* List */}
-          {loading ? (
-            <div className="text-center py-4 text-sm text-gray-400">
-              加载中…
-            </div>
-          ) : items.length === 0 ? (
-            <div className="text-center py-4 text-sm text-gray-400">
-              暂无密钥，在下方添加第一个
-            </div>
-          ) : (
-            <ul className="space-y-2">
-              {items.map((item) => (
-                <li
-                  key={item.key_id}
-                  className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 border border-gray-200"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm font-medium text-gray-800 truncate">
-                        {item.name}
-                      </span>
-                      <span className="font-mono text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded flex-shrink-0">
-                        {item.value_masked}
-                      </span>
-                    </div>
-                    {item.description && (
-                      <p className="text-xs text-gray-400 mt-0.5 truncate">
-                        {item.description}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(item.key_id)}
-                    disabled={deletingId === item.key_id}
-                    className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
-                    title="删除密钥"
-                  >
-                    {deletingId === item.key_id ? (
-                      <svg
-                        className="animate-spin w-3.5 h-3.5"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8v8z"
-                        />
-                      </svg>
-                    ) : (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        className="w-3.5 h-3.5"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* Add new */}
-          <div className="border-t border-gray-100 pt-4 space-y-2">
-            <p className="text-xs font-medium text-gray-600">添加新密钥</p>
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="密钥名称（如 openai-key）"
-              className={inputCls}
-            />
-            <div className="relative">
-              <input
-                type={showValue ? "text" : "password"}
-                value={newValue}
-                onChange={(e) => setNewValue(e.target.value)}
-                placeholder="密钥值"
-                className={`${inputCls} pr-10`}
-              />
-              <button
-                type="button"
-                onClick={() => setShowValue((v) => !v)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                tabIndex={-1}
-              >
-                {showValue ? (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="w-4 h-4"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M3.28 2.22a.75.75 0 0 0-1.06 1.06l14.5 14.5a.75.75 0 1 0 1.06-1.06l-1.745-1.745a10.029 10.029 0 0 0 3.3-4.38 1.651 1.651 0 0 0 0-1.185A10.004 10.004 0 0 0 9.999 3a9.956 9.956 0 0 0-4.744 1.194L3.28 2.22ZM7.752 6.69l1.092 1.092a2.5 2.5 0 0 1 3.374 3.373l1.091 1.092a4 4 0 0 0-5.557-5.557Z"
-                      clipRule="evenodd"
-                    />
-                    <path d="M10.748 13.93l2.523 2.523a9.987 9.987 0 0 1-3.27.547c-4.258 0-7.894-2.66-9.337-6.41a1.651 1.651 0 0 1 0-1.186A10.007 10.007 0 0 1 2.839 6.02L6.07 9.252a4 4 0 0 0 4.678 4.678Z" />
-                  </svg>
-                ) : (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="w-4 h-4"
-                  >
-                    <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
-                    <path
-                      fillRule="evenodd"
-                      d="M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41Z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                )}
-              </button>
-            </div>
-            <input
-              type="text"
-              value={newDesc}
-              onChange={(e) => setNewDesc(e.target.value)}
-              placeholder="描述（可选）"
-              className={inputCls}
-            />
-            <button
-              type="button"
-              onClick={handleCreate}
-              disabled={saving || !newName.trim() || !newValue.trim()}
-              className="w-full py-2 bg-[#1264A3] text-white rounded-lg text-sm font-medium hover:bg-[#0f5a94] disabled:opacity-50 transition-colors"
-            >
-              {saving ? "保存中…" : "保存密钥"}
-            </button>
-          </div>
-        </div>
-
-        <div className="flex justify-end px-6 py-4 border-t border-gray-100 flex-shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-          >
-            关闭
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── User Profile Modal ────────────────────────────────────────────────────────
-function UserProfileModal({
-  currentUser,
-  userToken,
-  onClose,
-  onProfileUpdated,
-}: {
-  currentUser: {
-    user_id: string;
-    username: string;
-    display_name: string;
-    role: string;
-  };
-  userToken: string;
-  onClose: () => void;
-  onProfileUpdated: (data: { display_name: string; bio?: string }) => void;
-}) {
-  const [displayName, setDisplayName] = useState(
-    currentUser.display_name || "",
-  );
-  const [bio, setBio] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordSaving, setPasswordSaving] = useState(false);
-  const [tab, setTab] = useState<"profile" | "password">("profile");
-  const [pwVerifyMode, setPwVerifyMode] = useState<"password" | "email">(
-    "password",
-  );
-  const [emailCode, setEmailCode] = useState("");
-  const [emailCodeSent, setEmailCodeSent] = useState(false);
-  const [emailCodeLoading, setEmailCodeLoading] = useState(false);
-  const [userEmail, setUserEmail] = useState<string>("");
-
-  useEffect(() => {
-    fetch(`${API}/auth/users/me`, {
-      headers: { Authorization: `Bearer ${userToken}` },
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.display_name !== undefined) setDisplayName(d.display_name || "");
-        if (d.bio !== undefined) setBio(d.bio || "");
-        if (d.email !== undefined) setUserEmail(d.email || "");
-      })
-      .catch(() => {});
-  }, [userToken]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const res = await fetch(`${API}/auth/users/me`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${userToken}`,
-        },
-        body: JSON.stringify({ display_name: displayName, bio }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "保存失败");
-      onProfileUpdated({
-        display_name: data.display_name || displayName,
-        bio: data.bio,
-      });
-      toast.success("个人资料已更新");
-      onClose();
-    } catch (e: any) {
-      toast.error(e.message || "保存失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSendEmailCode = async () => {
-    if (!userEmail) {
-      toast.error("账号未绑定邮箱");
-      return;
-    }
-    setEmailCodeLoading(true);
-    try {
-      const res = await fetch(`${API}/auth/send-code`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${userToken}`,
-        },
-        body: JSON.stringify({ email: userEmail, purpose: "change_password" }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "发送失败");
-      setEmailCodeSent(true);
-      toast.success("验证码已发送至 " + userEmail);
-    } catch (e: any) {
-      toast.error(e.message || "发送失败");
-    } finally {
-      setEmailCodeLoading(false);
-    }
-  };
-
-  const handlePasswordChange = async () => {
-    if (!newPassword) return;
-    if (newPassword !== confirmPassword) {
-      toast.error("两次输入的新密码不一致");
-      return;
-    }
-    if (pwVerifyMode === "password" && !currentPassword) return;
-    if (pwVerifyMode === "email" && !emailCode) return;
-    setPasswordSaving(true);
-    try {
-      const body: Record<string, string> = { new_password: newPassword };
-      if (pwVerifyMode === "password") body.current_password = currentPassword;
-      else body.email_code = emailCode;
-      const res = await fetch(`${API}/auth/users/me/password`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${userToken}`,
-        },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "密码修改失败");
-      toast.success("密码已更新");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setEmailCode("");
-      setEmailCodeSent(false);
-    } catch (e: any) {
-      toast.error(e.message || "密码修改失败");
-    } finally {
-      setPasswordSaving(false);
-    }
-  };
-
-  const inputCls =
-    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]";
-
-  return (
-    <div
-      className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-      onClick={onClose}
-      aria-modal="true"
-      role="dialog"
-    >
-      <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[90vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
-          <h2 className="text-lg font-bold text-gray-900">个人资料</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-xl leading-none"
-          >
-            ×
-          </button>
-        </div>
-
-        {/* Avatar + username */}
-        <div className="flex items-center gap-4 px-6 py-4 flex-shrink-0">
-          <div className="w-16 h-16 rounded-full bg-[#1264A3] text-white flex items-center justify-center text-2xl font-bold flex-shrink-0">
-            {(displayName || currentUser.username).slice(0, 1).toUpperCase()}
-          </div>
-          <div>
-            <p className="font-semibold text-gray-900">
-              {displayName || currentUser.username}
-            </p>
-            <p className="text-xs text-gray-400">@{currentUser.username}</p>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 mt-1 inline-block">
-              {currentUser.role}
-            </span>
-          </div>
-        </div>
-
-        {/* UUID */}
-        <div className="px-6 pb-3 flex-shrink-0">
-          <label className="block text-xs font-medium text-gray-500 mb-1">UUID（可分享给好友添加）</label>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 select-all break-all">
-              {currentUser.user_id}
-            </code>
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard.writeText(currentUser.user_id);
-                toast.success("UUID 已复制");
-              }}
-              className="px-3 py-2 text-xs bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 text-gray-600 whitespace-nowrap"
-            >
-              复制
-            </button>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex border-b border-gray-100 px-6 flex-shrink-0">
-          {(["profile", "password"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={`pb-2 mr-4 text-sm font-medium border-b-2 transition-colors ${
-                tab === t
-                  ? "border-[#1264A3] text-[#1264A3]"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {t === "profile" ? "基本信息" : "修改密码"}
-            </button>
-          ))}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          {tab === "profile" ? (
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  显示名称
-                </label>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="输入你的显示名称"
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  个人简介
-                </label>
-                <textarea
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value)}
-                  placeholder="介绍一下你自己…"
-                  className={`${inputCls} resize-none`}
-                  rows={4}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {/* Verify mode toggle */}
-              <div className="flex gap-2 p-1 bg-gray-100 rounded-lg">
-                <button
-                  type="button"
-                  onClick={() => setPwVerifyMode("password")}
-                  className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${pwVerifyMode === "password" ? "bg-white shadow text-gray-800" : "text-gray-500 hover:text-gray-700"}`}
-                >
-                  密码验证
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPwVerifyMode("email")}
-                  className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${pwVerifyMode === "email" ? "bg-white shadow text-gray-800" : "text-gray-500 hover:text-gray-700"}`}
-                >
-                  邮箱验证
-                </button>
-              </div>
-
-              {pwVerifyMode === "password" ? (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    当前密码
-                  </label>
-                  <input
-                    type="password"
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    placeholder="输入当前密码"
-                    className={inputCls}
-                    autoComplete="current-password"
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    邮箱验证码
-                  </label>
-                  {userEmail ? (
-                    <div className="flex gap-2">
-                      <input
-                        value={emailCode}
-                        onChange={(e) => setEmailCode(e.target.value)}
-                        placeholder="输入验证码"
-                        className={`${inputCls} flex-1`}
-                      />
-                      <button
-                        type="button"
-                        disabled={emailCodeLoading}
-                        onClick={handleSendEmailCode}
-                        className="px-3 py-2 text-xs bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 disabled:opacity-50 whitespace-nowrap"
-                      >
-                        {emailCodeLoading
-                          ? "发送中"
-                          : emailCodeSent
-                            ? "重新发送"
-                            : "获取验证码"}
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-red-500">
-                      账号未绑定邮箱，无法使用邮箱验证
-                    </p>
-                  )}
-                  {userEmail && (
-                    <p className="text-xs text-gray-400 mt-1">
-                      验证码将发送至 {userEmail}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  新密码
-                </label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="输入新密码"
-                  className={inputCls}
-                  autoComplete="new-password"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  确认新密码
-                </label>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="再次输入新密码"
-                  className={inputCls}
-                  autoComplete="new-password"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100 flex-shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-          >
-            取消
-          </button>
-          {tab === "profile" ? (
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="px-4 py-2 bg-[#1264A3] text-white rounded-lg text-sm font-medium hover:bg-[#0f5a94] disabled:opacity-50"
-            >
-              {saving ? "保存中…" : "保存"}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handlePasswordChange}
-              disabled={
-                passwordSaving ||
-                !newPassword ||
-                !confirmPassword ||
-                (pwVerifyMode === "password" && !currentPassword) ||
-                (pwVerifyMode === "email" && !emailCode)
-              }
-              className="px-4 py-2 bg-[#1264A3] text-white rounded-lg text-sm font-medium hover:bg-[#0f5a94] disabled:opacity-50"
-            >
-              {passwordSaving ? "更新中…" : "更新密码"}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Channel Profile Modal ─────────────────────────────────────────────────────
-function ChannelProfileModal({
-  channelId,
-  channelName,
-  userToken,
-  onClose,
-}: {
-  channelId: string;
-  channelName: string;
-  userToken: string;
-  onClose: () => void;
-}) {
-  const [nickname, setNickname] = useState("");
-  const [bio, setBio] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    fetch(`${API}/channels/${channelId}/my-profile`, {
-      headers: { Authorization: `Bearer ${userToken}` },
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.data) {
-          setNickname(d.data.nickname || "");
-          setBio(d.data.bio || "");
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [channelId, userToken]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const res = await fetch(`${API}/channels/${channelId}/my-profile`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${userToken}`,
-        },
-        body: JSON.stringify({ nickname: nickname || null, bio: bio || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "保存失败");
-      toast.success("频道资料已更新");
-      onClose();
-    } catch (e: any) {
-      toast.error(e.message || "保存失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const inputCls =
-    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]";
-
-  return (
-    <div
-      className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-      onClick={onClose}
-      aria-modal="true"
-      role="dialog"
-    >
-      <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[90vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
-          <div>
-            <h2 className="text-lg font-bold text-gray-900">我在频道的资料</h2>
-            <p className="text-xs text-gray-400 mt-0.5">#{channelName}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-xl leading-none"
-          >
-            ×
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          {loading ? (
-            <div className="flex items-center justify-center py-8 text-gray-400 text-sm">
-              加载中…
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-                在这里设置的昵称和简介仅在本频道内显示，不影响其他频道。
-              </p>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  频道昵称
-                </label>
-                <input
-                  type="text"
-                  value={nickname}
-                  onChange={(e) => setNickname(e.target.value)}
-                  placeholder="留空则使用全局显示名称"
-                  className={inputCls}
-                  maxLength={64}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  频道简介
-                </label>
-                <textarea
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value)}
-                  placeholder="在本频道的身份介绍…"
-                  className={`${inputCls} resize-none`}
-                  rows={4}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100 flex-shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving || loading}
-            className="px-4 py-2 bg-[#1264A3] text-white rounded-lg text-sm font-medium hover:bg-[#0f5a94] disabled:opacity-50"
-          >
-            {saving ? "保存中…" : "保存"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function App() {
-  // 用户认证状态
-  type CurrentUser = {
-    user_id: string;
-    username: string;
-    display_name: string;
-    role: string;
-  } | null;
+  const { isDark, setTheme } = useTheme();
 
-  // 从 localStorage 恢复登录状态
-  const getStoredUser = (): CurrentUser => {
-    try {
-      const stored = localStorage.getItem("currentUser");
-      if (!stored) return null;
-      const data = JSON.parse(stored);
-      // 检查是否在24小时内
-      if (data.loginTime && Date.now() - data.loginTime < 86400000) {
-        return data.user;
-      }
-    } catch {}
-    return null;
-  };
+  // Apply stored appearance prefs (density only — theme is light/dark, no
+  // custom accent since the brand color is fixed in design-tokens.css).
+  useEffect(() => {
+    applyDensity(getStoredDensity());
+  }, []);
 
-  const getStoredToken = (): string | null => {
-    try {
-      const stored = localStorage.getItem("currentUser");
-      if (!stored) return null;
-      const data = JSON.parse(stored);
-      if (data.loginTime && Date.now() - data.loginTime < 86400000) {
-        return data.token ?? data.user?.user_id ?? null;
-      }
-    } catch {}
-    return null;
-  };
+  const { currentUser, authToken, currentUserId, authFetch, setAuth, setCurrentUser, logout: clearAuth } =
+    useAuth(DEV_USER_ID);
 
-  const { toggleTheme, isDark } = useTheme();
-
-  const [currentUser, setCurrentUser] = useState<CurrentUser>(getStoredUser);
-  const [authToken, setAuthToken] = useState<string | null>(getStoredToken);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginError, setLoginError] = useState("");
-  // mode: "login" | "register" | "forgot"
-  const [authMode, setAuthMode] = useState<"login" | "register" | "forgot">(
-    "login",
-  );
-  const [regEmail, setRegEmail] = useState("");
-  const [regCode, setRegCode] = useState("");
-  const [regCodeSent, setRegCodeSent] = useState(false);
-  const [regCodeLoading, setRegCodeLoading] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [forgotCode, setForgotCode] = useState("");
-  const [forgotNewPw, setForgotNewPw] = useState("");
-  const [forgotCodeSent, setForgotCodeSent] = useState(false);
-  const [forgotCodeLoading, setForgotCodeLoading] = useState(false);
-
-  // 当前用户ID（用于API调用）
-  const currentUserId = currentUser?.user_id || DEV_USER_ID;
-
-  // 带认证头的 fetch 工具
-  const authFetch = useCallback(
-    (url: string, options: RequestInit = {}) =>
-      fetch(url, {
-        ...options,
-        headers: {
-          "Content-Type": "application/json",
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-          ...(options.headers as Record<string, string> | undefined),
-        },
-      }),
-    [authToken],
-  );
 
   // 前��错误上报（best-effort, 不抛异常）
   const reportClientError = useCallback(
@@ -2692,7 +143,45 @@ export default function App() {
   }, []);
 
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [dms, setDMs] = useState<DM[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  // Topic viewer: pageTopicId — root msg_id for the full-page view,
+  // mirrored to URL hash. There is no side-dock panel; opening a topic
+  // always replaces the channel stream with the dedicated page.
+  const [announcementOpen, setAnnouncementOpen] = useState(false);
+  // Composer send-kind: 4 unified types — 普通 / 加密 / 公告 / 主题.
+  // Switchable via Tab / Shift-Tab and the ‹ › buttons flanking the composer.
+  // Always resets to "normal" after each send. "reply" is orthogonal —
+  // replyingTo overrides this. The "secret" kind syncs with the legacy
+  // `secretMode` boolean so downstream code (send payload, render path) keeps
+  // working unchanged.
+  type MsgKind = "normal" | "secret" | "announcement" | "topic";
+  const MSG_KINDS_ORDER: MsgKind[] = ["normal", "secret", "announcement", "topic"];
+  const MSG_KIND_LABEL: Record<MsgKind, string> = {
+    normal: "消息",
+    secret: "加密",
+    announcement: "公告",
+    topic: "主题",
+  };
+  const [msgKind, setMsgKind] = useState<MsgKind>("normal");
+  // Optional title carried by announcement + topic kinds. Normal messages
+  // ignore it; we clear it whenever kind cycles or a send completes.
+  const [composerTitle, setComposerTitle] = useState<string>("");
+  const composerTitleRef = useRef<HTMLInputElement | null>(null);
+  const cycleMsgKind = (direction: 1 | -1) => {
+    setMsgKind((prev) => {
+      const idx = MSG_KINDS_ORDER.indexOf(prev);
+      const next =
+        (idx + direction + MSG_KINDS_ORDER.length) % MSG_KINDS_ORDER.length;
+      setComposerTitle("");
+      return MSG_KINDS_ORDER[next];
+    });
+  };
+  const [pageTopicId, setPageTopicId] = useState<string | null>(() => {
+    if (typeof location === "undefined") return null;
+    const m = /#topic=([^&]+)/.exec(location.hash || "");
+    return m ? decodeURIComponent(m[1]) : null;
+  });
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
@@ -2703,7 +192,17 @@ export default function App() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [memoryPanelOpen, setMemoryPanelOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // memoryTab drives the 4-tab cluster in the channel header + the drawer.
+  //   null          — drawer closed
+  //   "PROJECT"     — anchors + progress + decisions (design's Project view)
+  //   "FILES_INDEX" — channel files
+  //   "MEMBERS"     — members list
+  //   "TODO"        — todos
+  const [memoryTab, setMemoryTab] = useState<
+    "PROJECT" | "FILES_INDEX" | "MEMBERS" | "TODO" | null
+  >(null);
+  const memoryPanelOpen = memoryTab !== null;
   const [memoryPageOpen, setMemoryPageOpen] = useState(false);
   const [contextData, setContextData] = useState<ContextData>({});
   const [pendingFileIds, setPendingFileIds] = useState<string[]>([]);
@@ -2798,11 +297,11 @@ export default function App() {
   >(null);
   const [autoAssist, setAutoAssist] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
-  const [expandedThreads, setExpandedThreads] = useState<Set<string>>(
+  const [expandedTopics, setExpandedTopics] = useState<Set<string>>(
     new Set(),
   );
-  const toggleThread = (rootId: string) =>
-    setExpandedThreads((prev) => {
+  const toggleTopic = (rootId: string) =>
+    setExpandedTopics((prev) => {
       const next = new Set(prev);
       next.has(rootId) ? next.delete(rootId) : next.add(rootId);
       return next;
@@ -2817,25 +316,6 @@ export default function App() {
       return next;
     });
 
-  type ChannelBot = {
-    member_id: string;
-    username: string;
-    avatar_url?: string;
-    display_name?: string;
-  };
-  type ChannelUser = {
-    member_id: string;
-    username: string;
-    avatar_url?: string;
-    display_name?: string;
-  };
-  type BotItem = {
-    bot_id: string;
-    username: string;
-    display_name?: string;
-    intro?: string;
-    avatar_url?: string;
-  };
   const [channelBots, setChannelBots] = useState<ChannelBot[]>([]);
   const [channelUsers, setChannelUsers] = useState<ChannelUser[]>([]);
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
@@ -2843,29 +323,53 @@ export default function App() {
   const [mentionDropdownPlacement, setMentionDropdownPlacement] = useState<
     "top" | "bottom"
   >("bottom");
-  // 文生图 / 图生图状态
+  // 文生图 / 图生图 Modal 打开状态 + 初始参数
   const [imageGenOpen, setImageGenOpen] = useState(false);
-  const [imageGenTab, setImageGenTab] = useState<"gen" | "edit">("gen");
-  const [imageGenPrompt, setImageGenPrompt] = useState("");
-  const [imageGenModel, setImageGenModel] = useState("qwen-image-2.0-pro");
-  const [imageGenSize, setImageGenSize] = useState("1024*1024");
-  const [imageGenLoading, setImageGenLoading] = useState(false);
-  const [imageGenPreview, setImageGenPreview] = useState<{
-    file_id: string;
-    preview_url: string;
-  } | null>(null);
-  // 图生图源图片
-  const [imageEditModel, setImageEditModel] = useState("qwen-image-edit-max");
-  const [imageEditSourceFileId, setImageEditSourceFileId] = useState("");
-  const [imageEditPrompt, setImageEditPrompt] = useState("");
-  const [imageEditSize, setImageEditSize] = useState("1024*1024");
-  const [imageEditLoading, setImageEditLoading] = useState(false);
-  const [imageEditPreview, setImageEditPreview] = useState<{
-    file_id: string;
-    preview_url: string;
-  } | null>(null);
-  // 加密消息状态
+  const [imageGenInitialSourceFileId, setImageGenInitialSourceFileId] =
+    useState("");
+  const [imageGenInitialTab, setImageGenInitialTab] = useState<"gen" | "edit">(
+    "gen",
+  );
+  // 加密消息状态。Bound to msgKind === "secret" via the effect below — the
+  // 🔒 toolbar button and the kind switcher both flip this through msgKind,
+  // and downstream send/render code keeps reading `secretMode` unchanged.
   const [secretMode, setSecretMode] = useState(false);
+  useEffect(() => {
+    if (msgKind === "secret" && !secretMode) setSecretMode(true);
+    if (msgKind !== "secret" && secretMode) setSecretMode(false);
+  }, [msgKind, secretMode]);
+
+  // Drag-resize: user can grab the top edge of the composer to pull it taller.
+  // null = use the CSS default (auto-grow up to max-height); otherwise a pinned
+  // textarea height in pixels. Double-click on the handle resets to default.
+  const [composerTextareaHeight, setComposerTextareaHeight] = useState<
+    number | null
+  >(null);
+  const composerDragRef = useRef<{ startY: number; startH: number } | null>(
+    null,
+  );
+  const onComposerResizeDown = (e: React.PointerEvent) => {
+    const ta = inputRef.current;
+    const startH = ta?.offsetHeight ?? 40;
+    composerDragRef.current = { startY: e.clientY, startH };
+    (e.target as Element).setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  const onComposerResizeMove = (e: React.PointerEvent) => {
+    const drag = composerDragRef.current;
+    if (!drag) return;
+    // 用户向上拖拽 → composer 变高（startY > clientY → delta > 0）
+    const next = Math.max(40, Math.min(600, drag.startH + (drag.startY - e.clientY)));
+    setComposerTextareaHeight(next);
+  };
+  const onComposerResizeUp = (e: React.PointerEvent) => {
+    composerDragRef.current = null;
+    try {
+      (e.target as Element).releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+  };
   const [revealedSecrets, setRevealedSecrets] = useState<
     Record<string, string>
   >({});
@@ -2937,58 +441,8 @@ export default function App() {
     {},
   );
 
-  // ── OpenClaw 快速连接 ──────────────────────────────────────────────────────
   const [qcOpen, setQcOpen] = useState(false);
-  const [qcUrl, setQcUrl] = useState("");
-  const [qcToken, setQcToken] = useState("");
-  const [qcAgentId, setQcAgentId] = useState("main");
-  const [qcBotName, setQcBotName] = useState("");
-  const [qcDisplayName, setQcDisplayName] = useState("");
-  const [qcAddToChannel, setQcAddToChannel] = useState(true);
-  const [qcLoading, setQcLoading] = useState(false);
-  type QcResult = {
-    bot: { bot_id: string; username: string; display_name: string };
-    probe: { who_am_i: string; skills: string; connected: boolean };
-  };
-  const [qcResult, setQcResult] = useState<QcResult | null>(null);
-  const [qcError, setQcError] = useState("");
 
-  // 登录/注册处理函数
-  const handleLogin = async (username: string, password: string) => {
-    setLoginLoading(true);
-    setLoginError("");
-    try {
-      const res = await fetch(`${API}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || data.message || "登录失败");
-      const payload = data.data ?? data;
-      const userInfo = payload.user ?? payload;
-      const user = {
-        user_id: userInfo.user_id,
-        username: userInfo.username,
-        display_name: userInfo.display_name || userInfo.username,
-        role: userInfo.role,
-      };
-      const token: string =
-        payload.access_token || payload.token || userInfo.user_id;
-      setCurrentUser(user);
-      setAuthToken(token);
-      // 保存到 localStorage（24小时有效）
-      localStorage.setItem(
-        "currentUser",
-        JSON.stringify({ user, token, loginTime: Date.now() }),
-      );
-      setLoginModalOpen(false);
-    } catch (e: any) {
-      setLoginError(e.message);
-    } finally {
-      setLoginLoading(false);
-    }
-  };
 
   const handleNotifNavigate = (channelId: string, msgId?: string) => {
     setSelectedId(channelId);
@@ -2996,130 +450,12 @@ export default function App() {
     setNotifPanelOpen(false);
   };
 
-  const handleSendCode = async (
-    email: string,
-    purpose: string,
-    onSent: () => void,
-  ) => {
-    if (!email.trim() || !email.includes("@")) {
-      setLoginError("请输入有效的邮箱地址");
-      return;
-    }
-    if (purpose === "register") setRegCodeLoading(true);
-    else setForgotCodeLoading(true);
-    setLoginError("");
-    try {
-      const res = await fetch(`${API}/auth/send-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), purpose }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "发送失败");
-      onSent();
-      toast.success("验证码已发送，请查收邮件");
-    } catch (e: any) {
-      setLoginError(e.message);
-    } finally {
-      if (purpose === "register") setRegCodeLoading(false);
-      else setForgotCodeLoading(false);
-    }
-  };
-
-  const handleRegister = async (
-    username: string,
-    password: string,
-    displayName: string,
-  ) => {
-    setLoginLoading(true);
-    setLoginError("");
-    try {
-      const res = await fetch(`${API}/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username,
-          email: regEmail.trim(),
-          password,
-          display_name: displayName,
-          code: regCode,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || data.message || "注册失败");
-      const loginRes = await fetch(`${API}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      const loginData = await loginRes.json();
-      const loginPayload = loginData.data ?? loginData;
-      const regPayload = data.data ?? data;
-      const userInfo = loginPayload.user ?? regPayload;
-      const user = {
-        user_id: userInfo.user_id,
-        username: userInfo.username,
-        display_name: userInfo.display_name || userInfo.username,
-        role: userInfo.role,
-      };
-      const token: string =
-        loginPayload.access_token || loginPayload.token || userInfo.user_id;
-      setCurrentUser(user);
-      setAuthToken(token);
-      localStorage.setItem(
-        "currentUser",
-        JSON.stringify({ user, token, loginTime: Date.now() }),
-      );
-      setLoginModalOpen(false);
-      setRegEmail("");
-      setRegCode("");
-      setRegCodeSent(false);
-    } catch (e: any) {
-      setLoginError(e.message);
-    } finally {
-      setLoginLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    if (!forgotCode.trim() || !forgotNewPw.trim()) {
-      setLoginError("请填写验证码和新密码");
-      return;
-    }
-    setLoginLoading(true);
-    setLoginError("");
-    try {
-      const res = await fetch(`${API}/auth/forgot-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: forgotEmail.trim(),
-          code: forgotCode,
-          new_password: forgotNewPw,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "重置失败");
-      toast.success("密码已重置，请重新登录");
-      setAuthMode("login");
-      setForgotEmail("");
-      setForgotCode("");
-      setForgotNewPw("");
-      setForgotCodeSent(false);
-    } catch (e: any) {
-      setLoginError(e.message);
-    } finally {
-      setLoginLoading(false);
-    }
-  };
-
   const handleLogout = () => {
-    setCurrentUser(null);
-    setAuthToken(null);
-    localStorage.removeItem("currentUser");
+    clearAuth();
     setSelectedId(null);
     setSelectedWorkspaceId("");
     setChannels([]);
+    setDMs([]);
     setWorkspaces([]);
     setMessages([]);
     setHasMore(true);
@@ -3226,8 +562,59 @@ export default function App() {
 
   useEffect(() => {
     refreshChannels(setChannels, authToken ?? undefined);
+    refreshDMs(setDMs, authToken ?? undefined);
     refreshWorkspaces(setWorkspaces, authToken ?? undefined);
   }, [authToken]);
+
+  // Default to the user's Personal workspace on first load (or when the
+  // currently-selected workspace is no longer in the list, e.g. after a
+  // deletion). Explicit team-workspace picks from the rail are preserved.
+  useEffect(() => {
+    if (workspaces.length === 0) return;
+    const current = workspaces.find(
+      (w) => w.workspace_id === selectedWorkspaceId,
+    );
+    if (current) return;
+    const personal = workspaces.find((w) => w.kind === "personal");
+    setSelectedWorkspaceId(
+      personal?.workspace_id ?? workspaces[0].workspace_id,
+    );
+  }, [workspaces, selectedWorkspaceId]);
+
+  const activeWorkspace = workspaces.find(
+    (w) => w.workspace_id === selectedWorkspaceId,
+  );
+  const isPersonalWorkspace = activeWorkspace?.kind === "personal";
+
+  // ── URL hash sync for #topic=<id> ──────────────────────────────────────
+  // Writer: whenever pageTopicId changes, reflect it into the hash (without
+  // adding history entries — replaceState). Reader: listen to popstate in
+  // case the user navigates back/forward.
+  useEffect(() => {
+    if (typeof history === "undefined") return;
+    const hash = location.hash || "";
+    const current = /#topic=([^&]+)/.exec(hash);
+    const currentId = current ? decodeURIComponent(current[1]) : null;
+    if (pageTopicId === currentId) return;
+    if (pageTopicId) {
+      history.replaceState(
+        null,
+        "",
+        `${location.pathname}${location.search}#topic=${encodeURIComponent(pageTopicId)}`,
+      );
+    } else if (/#topic=/.test(hash)) {
+      history.replaceState(null, "", `${location.pathname}${location.search}`);
+    }
+  }, [pageTopicId]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const m = /#topic=([^&]+)/.exec(location.hash || "");
+      setPageTopicId(m ? decodeURIComponent(m[1]) : null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   useEffect(() => {
     if (!selectedId) {
@@ -3378,7 +765,7 @@ export default function App() {
 
     function connect() {
       if (disposed) return;
-      ws = new WebSocket(`${WS_BASE}/ws/channels/${selectedId}`);
+      ws = new WebSocket(buildWsUrl(`/ws/channels/${selectedId}`));
 
       ws.onopen = () => {
         retryCount = 0;
@@ -3390,7 +777,22 @@ export default function App() {
           if (msg.type === "message" && msg.data) {
             setMessages((prev) => {
               const id = msg.data.msg_id;
-              if (id && prev.some((m) => m.msg_id === id)) return prev;
+              if (id && prev.some((m) => m.msg_id === id)) {
+                // Already present — merge post-hoc updates (e.g. permission
+                // card resolution flipping content_data.resolved). Keep any
+                // client-local transient fields like _streaming.
+                return prev.map((m) =>
+                  m.msg_id === id
+                    ? {
+                        ...m,
+                        content: msg.data.content ?? m.content,
+                        content_data:
+                          msg.data.content_data ?? m.content_data,
+                        msg_type: msg.data.msg_type ?? m.msg_type,
+                      }
+                    : m,
+                );
+              }
               const entry =
                 msg.data.sender_type === "bot"
                   ? { ...msg.data, _streaming: true }
@@ -3417,7 +819,7 @@ export default function App() {
               ),
             );
           } else if (msg.type === "message_done" && msg.data) {
-            const { msg_id, content, files, file_ids } = msg.data;
+            const { msg_id, content, files, file_ids, is_partial } = msg.data;
             setMessages((prev) =>
               prev.map((m) =>
                 m.msg_id === msg_id
@@ -3427,6 +829,9 @@ export default function App() {
                       _streaming: false,
                       ...(files ? { files } : {}),
                       ...(file_ids ? { file_ids } : {}),
+                      ...(typeof is_partial === "boolean"
+                        ? { is_partial }
+                        : {}),
                     }
                   : m,
               ),
@@ -3474,6 +879,72 @@ export default function App() {
       if (ws) ws.close();
     };
   }, [selectedId, reportClientError]);
+
+  // User-scoped WebSocket: receives lightweight notifications for channels
+  // the user isn't currently viewing. Used to live-increment rail unread
+  // counts without opening a per-channel socket for every membership.
+  useEffect(() => {
+    if (!currentUserId) return;
+    let ws: WebSocket | null = null;
+    let disposed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+    const MAX_RETRIES = 10;
+    const BASE_DELAY = 1000;
+    const MAX_DELAY = 30000;
+
+    const connect = () => {
+      if (disposed) return;
+      ws = new WebSocket(buildWsUrl(`/ws/users/${currentUserId}`));
+      ws.onopen = () => {
+        retryCount = 0;
+      };
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type !== "channel_new_message" || !msg.data) return;
+          const chId = msg.data.channel_id as string | undefined;
+          if (!chId) return;
+          // Ignore the channel the user is actively viewing — they'll get the
+          // message on the channel WS and we'll mark-read on scroll/select.
+          if (chId === selectedId) return;
+          setChannels((prev) =>
+            prev.map((c) =>
+              c.channel_id === chId
+                ? { ...c, unread_count: (c.unread_count ?? 0) + 1 }
+                : c,
+            ),
+          );
+          setDMs((prev) =>
+            prev.map((d) =>
+              d.channel_id === chId
+                ? { ...d, unread_count: (d.unread_count ?? 0) + 1 }
+                : d,
+            ),
+          );
+        } catch {
+          /* ignore malformed payloads */
+        }
+      };
+      ws.onclose = () => {
+        if (disposed) return;
+        if (retryCount >= MAX_RETRIES) return;
+        const delay = Math.min(BASE_DELAY * 2 ** retryCount, MAX_DELAY);
+        retryCount += 1;
+        reconnectTimer = setTimeout(connect, delay);
+      };
+      ws.onerror = () => {
+        // onclose will run after onerror, which handles the retry.
+      };
+    };
+    connect();
+
+    return () => {
+      disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close();
+    };
+  }, [currentUserId, selectedId]);
 
   useEffect(() => {
     if ((memoryPanelOpen || memoryPageOpen) && selectedId) {
@@ -3704,17 +1175,33 @@ export default function App() {
       content = `> [${refLabel}]: ${quotedText}\n\n${content}`;
     }
     const isSecretSend = secretMode;
+    // Resolve msg_type: a pending reply-to always wins; otherwise use the
+    // user's current msgKind pick from the composer switcher.
+    const effectiveKind: MsgKind | "reply" = replyingTo
+      ? "reply"
+      : msgKind;
     const body: Record<string, unknown> = {
       content,
       sender_id: currentUserId,
       sender_type: "user",
       file_ids: pendingFileIds,
       is_secret: isSecretSend,
-      msg_type: replyingTo ? "reply" : "normal",
+      msg_type: effectiveKind,
     };
     if (replyingTo) body.in_reply_to_msg_id = replyingTo.msg_id;
+    const titleTrim = composerTitle.trim() || null;
+    if (effectiveKind === "announcement") {
+      body.content_data = {
+        pinned_by: currentUserId,
+        ...(titleTrim ? { title: titleTrim } : {}),
+      };
+    } else if (effectiveKind === "topic") {
+      body.content_data = titleTrim ? { title: titleTrim } : {};
+    }
     setInput("");
     setSecretMode(false);
+    setMsgKind("normal");
+    setComposerTitle("");
     setPendingFileIds([]);
     setPendingFileNames([]);
     setPendingFilePreviews((prev) => {
@@ -3750,12 +1237,156 @@ export default function App() {
       .catch(console.error);
   };
 
+  // Reveal an encrypted message by hitting /messages/:id/secret with the
+  // per-send token (only the sender holds one, captured in secretTokens).
+  // On success, stashes plaintext into revealedSecrets so the stream
+  // renders it in place of the 🔒 veil.
+  const revealSecretMessage = (msgId: string) => {
+    const token = secretTokens[msgId];
+    if (!selectedId || !token) return;
+    fetch(
+      `${API}/channels/${selectedId}/messages/${msgId}/secret?token=${encodeURIComponent(token)}`,
+      { headers: { Authorization: `Bearer ${authToken}` } },
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data?.content) {
+          setRevealedSecrets((prev) => ({
+            ...prev,
+            [msgId]: d.data.content,
+          }));
+        } else {
+          toast.error(d.detail || "无法查看加密内容");
+        }
+      })
+      .catch(() => toast.error("请求失败"));
+  };
+
+  // Copy a message's rendered text (stripping think-folds / guide payload
+  // JSON) to the system clipboard. Best-effort — silently toasts failure.
+  const copyMessageText = async (m: Message) => {
+    const raw = parseGuidePayload(m.content || "").text || m.content || "";
+    try {
+      await navigator.clipboard.writeText(raw);
+      toast.success("已复制");
+    } catch {
+      toast.error("复制失败");
+    }
+  };
+
+  const cancelStreamingMessage = async (m: Message) => {
+    if (!selectedId) return;
+    // Optimistic: stop the streaming pulse immediately so the user sees feedback;
+    // the message_done event will arrive shortly with is_partial=true and the
+    // final buffered content. If the request fails we restore _streaming.
+    setMessages((prev) =>
+      prev.map((x) =>
+        x.msg_id === m.msg_id ? { ...x, _streaming: false } : x,
+      ),
+    );
+    try {
+      const r = await apiFetch(
+        `/channels/${selectedId}/messages/${m.msg_id}/cancel`,
+        { method: "POST", token: authToken },
+      );
+      if (!r.ok) {
+        setMessages((prev) =>
+          prev.map((x) =>
+            x.msg_id === m.msg_id ? { ...x, _streaming: true } : x,
+          ),
+        );
+        toast.error("取消失败");
+      }
+    } catch {
+      setMessages((prev) =>
+        prev.map((x) =>
+          x.msg_id === m.msg_id ? { ...x, _streaming: true } : x,
+        ),
+      );
+      toast.error("取消失败");
+    }
+  };
+
+  /** Inline ⏹ stop button shown next to the streaming pulse on bot bubbles.
+   *  Returns null for non-streaming or non-bot messages so callers can drop
+   *  it next to every pulse location without an extra wrapping condition. */
+  const renderStopStreamButton = (m: Message) => {
+    if (!m._streaming || m.sender_type !== "bot") return null;
+    return (
+      <button
+        type="button"
+        title="停止生成"
+        onClick={() => cancelStreamingMessage(m)}
+        className="inline-flex items-center justify-center align-middle ml-1.5 w-5 h-5 rounded border"
+        style={{
+          borderColor: "var(--border)",
+          background: "var(--surface-soft)",
+          color: "var(--fg-2)",
+          cursor: "pointer",
+        }}
+      >
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            background: "currentColor",
+            borderRadius: 1,
+          }}
+        />
+      </button>
+    );
+  };
+
+  /** Inline "已取消" badge shown after a streaming bot reply was cancelled. */
+  const renderPartialBadge = (m: Message) => {
+    if (m._streaming || !m.is_partial || m.sender_type !== "bot") return null;
+    return (
+      <span
+        className="inline-block align-middle ml-1.5 px-1.5 py-0.5 rounded text-[10px]"
+        style={{
+          background: "var(--surface-soft)",
+          border: "1px solid var(--border)",
+          color: "var(--fg-3)",
+        }}
+      >
+        已取消
+      </span>
+    );
+  };
+
+  const sendTopicReply = async (
+    channelId: string,
+    rootMsgId: string,
+    text: string,
+  ) => {
+    if (!text.trim()) return;
+    const body: Record<string, unknown> = {
+      content: text.trim(),
+      sender_id: currentUserId,
+      sender_type: "user",
+      file_ids: [],
+      is_secret: false,
+      msg_type: "reply",
+      in_reply_to_msg_id: rootMsgId,
+    };
+    const r = await authFetch(`${API}/channels/${channelId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => null);
+    if (d?.data && selectedIdRef.current === channelId) {
+      setMessages((prev) =>
+        prev.some((m) => m.msg_id === d.data.msg_id) ? prev : [...prev, d.data],
+      );
+    }
+  };
+
   const handleClarifyContinue = (
     msgId: string,
     schema: ClarifySchema,
     answers: ClarifyAnswers,
   ) => {
-    const lines = ["@channel bot 澄清回答："];
+    const lines = ["@Coordinator 澄清回答："];
     const optText = answers.option_text || {};
     for (const q of schema.questions) {
       const picked = new Set(answers.selected[q.id] || []);
@@ -3783,7 +1414,7 @@ export default function App() {
   const handleClarifySkip = (msgId: string) => {
     setPendingClarifyReplyMsgId(msgId);
     sendUserMessage(
-      "@channel bot 用户选择跳过澄清，请在当前信息下继续回答。",
+      "@Coordinator 用户选择跳过澄清，请在当前信息下继续回答。",
       msgId,
     ).catch(() => {
       setPendingClarifyReplyMsgId(null);
@@ -3965,18 +1596,7 @@ export default function App() {
             />
             {f.original_filename && (
               <div className="px-2.5 py-1.5 bg-white text-[11px] text-gray-500 border-t border-gray-100 flex items-center gap-1.5">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  className="w-3 h-3 text-gray-400"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm10.5 5.707a.5.5 0 0 0-.146-.353l-2.5-2.5a.5.5 0 0 0-.708 0L7.5 8.5 6.354 7.354a.5.5 0 0 0-.708 0l-3.146 3.15V12a.5.5 0 0 0 .5.5h10a.5.5 0 0 0 .5-.5v-2.293ZM11 5.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"
-                    clipRule="evenodd"
-                  />
-                </svg>
+                <PhotoIcon className="w-3 h-3 text-gray-400" />
                 <span className="truncate max-w-[200px]">
                   {f.original_filename}
                 </span>
@@ -3998,14 +1618,7 @@ export default function App() {
             className="flex items-center gap-2.5 px-3 py-2.5 bg-white border border-gray-200 rounded-xl shadow-sm max-w-[300px] hover:bg-gray-50 transition-colors cursor-pointer no-underline"
           >
             <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-5 h-5 text-blue-500"
-              >
-                <path d="M3 3.5A1.5 1.5 0 0 1 4.5 2h6.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 16 6.622V16.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 16.5v-13Z" />
-              </svg>
+              <DocumentIcon className="w-5 h-5 text-blue-500" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-[13px] font-medium text-gray-700 truncate">
@@ -4022,8 +1635,28 @@ export default function App() {
     );
   };
 
-  const selectedChannel =
-    channels.find((c) => c.channel_id === selectedId) || null;
+  const selectedChannel: Channel | null = (() => {
+    const hit = channels.find((c) => c.channel_id === selectedId);
+    if (hit) return hit;
+    // DMs aren't in the channels[] list — synthesize a minimal Channel so
+    // downstream references to selectedChannel.name / .workspace_id work.
+    const dm = selectedId
+      ? dms.find((d) => d.channel_id === selectedId)
+      : undefined;
+    if (!dm) return null;
+    const label =
+      dm.counterparty.display_name ||
+      dm.counterparty.username ||
+      "DM";
+    return {
+      channel_id: dm.channel_id,
+      workspace_id: dm.workspace_id,
+      name: label,
+      type: "dm",
+      auto_assist: false,
+      unread_count: dm.unread_count ?? 0,
+    };
+  })();
   const blocks = buildLogicalQaBlocks(messages);
   const blockPairsForExport: QaPair[] = blocks.map((b) => {
     const lastBot = [...b.messages]
@@ -4096,6 +1729,36 @@ export default function App() {
       messagesContainerRef.current.scrollHeight;
   }, [selectedId, messages.length]);
 
+  // 打开频道时把未读标记为已读：先在本地把徽标清零（立即反馈），再向后端
+  // 同步阅读游标。失败不回滚徽标——下次加载频道列表时会重新计算。
+  useEffect(() => {
+    if (!selectedId || !authToken) return;
+    setChannels((prev) =>
+      prev.some(
+        (c) => c.channel_id === selectedId && (c.unread_count ?? 0) > 0,
+      )
+        ? prev.map((c) =>
+            c.channel_id === selectedId ? { ...c, unread_count: 0 } : c,
+          )
+        : prev,
+    );
+    setDMs((prev) =>
+      prev.some(
+        (d) => d.channel_id === selectedId && (d.unread_count ?? 0) > 0,
+      )
+        ? prev.map((d) =>
+            d.channel_id === selectedId ? { ...d, unread_count: 0 } : d,
+          )
+        : prev,
+    );
+    apiFetch(`/channels/${selectedId}/read`, {
+      method: "POST",
+      token: authToken,
+    }).catch(() => {
+      /* ignore — rail badge stays cleared locally; next list refresh re-syncs */
+    });
+  }, [selectedId, authToken]);
+
   const generateQaSummary = async (pairsToSummarize: QaPair[]) => {
     if (pairsToSummarize.length === 0) {
       toast.error("请勾选至少一组问答");
@@ -4149,7 +1812,7 @@ export default function App() {
     refreshQaLlmStatus();
   }, [selectedId]);
 
-  // Auto-expand threads that contain streaming (incoming) messages
+  // Auto-expand topics that contain streaming (incoming) messages
   useEffect(() => {
     const msgIdSet = new Set(messages.map((x) => x.msg_id));
     const rootIdCache = new Map<string, string>();
@@ -4168,11 +1831,11 @@ export default function App() {
       .filter((m) => isMsgReply(m, msgIdSet) && m._streaming)
       .map((m) => getRootId(m.msg_id));
     if (toExpand.length > 0)
-      setExpandedThreads((prev) => new Set([...prev, ...toExpand]));
+      setExpandedTopics((prev) => new Set([...prev, ...toExpand]));
   }, [messages]);
 
-  // Build thread tree: follow parent chain to find root, group all descendants under it
-  const { threadRoots, threadRepliesOf } = (() => {
+  // Build topic tree: follow parent chain to find root, group all descendants under it
+  const { topicRoots, topicRepliesOf } = (() => {
     const msgIdSet = new Set(messages.map((x) => x.msg_id));
     const rootIdCache = new Map<string, string>();
     function getRootId(msgId: string): string {
@@ -4203,1347 +1866,131 @@ export default function App() {
       );
     }
     return {
-      threadRoots: messages.filter((m) => !replySet.has(m.msg_id)),
-      threadRepliesOf: (rootId: string): Message[] =>
+      topicRoots: messages.filter((m) => !replySet.has(m.msg_id)),
+      topicRepliesOf: (rootId: string): Message[] =>
         replyMap.get(rootId) ?? [],
     };
   })();
 
   return (
     <>
-      {loginModalOpen && (
-        <div
-          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-          onClick={() => {
-            if (currentUser) setLoginModalOpen(false);
-          }}
-        >
-          <div
-            className="bg-white rounded-xl p-8 w-full max-w-sm shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="text-center mb-6">
-              <div className="w-12 h-12 rounded-lg bg-[#4A154B] flex items-center justify-center mx-auto mb-3">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="white"
-                  className="w-7 h-7"
-                >
-                  <path d="M4.5 6.375a4.125 4.125 0 118.25 0 4.125 4.125 0 01-8.25 0zM14.25 8.625a3.375 3.375 0 116.75 0 3.375 3.375 0 01-6.75 0zM1.5 19.125a7.125 7.125 0 0114.25 0v.003l-.001.119a.75.75 0 01-.363.63 13.067 13.067 0 01-6.761 1.873c-2.472 0-4.786-.684-6.76-1.873a.75.75 0 01-.364-.63l-.001-.122zM17.25 19.128l-.001.144a2.25 2.25 0 01-.233.96 10.088 10.088 0 005.06-1.01.75.75 0 00.42-.643 4.875 4.875 0 00-6.957-4.611 8.586 8.586 0 011.71 5.157v.003z" />
-                </svg>
-              </div>
-              <h2 className="text-2xl font-bold text-gray-900">
-                {authMode === "login"
-                  ? "登录到智枢"
-                  : authMode === "register"
-                    ? "创建账号"
-                    : "重置密码"}
-              </h2>
-              <p className="text-gray-500 text-sm mt-1">
-                {authMode === "login"
-                  ? "欢迎回来！"
-                  : authMode === "register"
-                    ? "填写信息以创建新账号"
-                    : "通过邮箱验证重置密码"}
-              </p>
-            </div>
-            {loginError && (
-              <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 p-3 rounded-lg">
-                {loginError}
-              </div>
-            )}
+      <LoginModal
+        open={loginModalOpen}
+        currentUser={currentUser}
+        onClose={() => setLoginModalOpen(false)}
+        onSuccess={(user, token) => {
+          setAuth(user, token);
+          setLoginModalOpen(false);
+        }}
+      />
 
-            {/* ── Login ── */}
-            {authMode === "login" && (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const fd = new FormData(e.currentTarget);
-                  handleLogin(
-                    fd.get("username") as string,
-                    fd.get("password") as string,
-                  );
-                }}
-              >
-                <input
-                  name="username"
-                  placeholder="用户名或邮箱"
-                  required
-                  className="w-full mb-3 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]"
-                />
-                <input
-                  name="password"
-                  type="password"
-                  placeholder="密码"
-                  required
-                  className="w-full mb-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]"
-                />
-                <div className="text-right mb-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAuthMode("forgot");
-                      setLoginError("");
-                    }}
-                    className="text-xs text-[#1264A3] hover:underline"
-                  >
-                    忘记密码？
-                  </button>
-                </div>
-                <button
-                  type="submit"
-                  disabled={loginLoading}
-                  className="w-full bg-[#4A154B] text-white py-2.5 rounded-lg font-semibold hover:bg-[#3d1040] disabled:opacity-50 text-sm"
-                >
-                  {loginLoading ? "处理中..." : "登录"}
-                </button>
-              </form>
-            )}
-
-            {/* ── Register ── */}
-            {authMode === "register" && (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const fd = new FormData(e.currentTarget);
-                  handleRegister(
-                    fd.get("username") as string,
-                    fd.get("password") as string,
-                    fd.get("display_name") as string,
-                  );
-                }}
-              >
-                {/* Step 1: Email verification */}
-                <div className="flex gap-2 mb-3">
-                  <input
-                    value={regEmail}
-                    onChange={(e) => {
-                      setRegEmail(e.target.value);
-                      setRegCodeSent(false);
-                      setRegCode("");
-                    }}
-                    type="email"
-                    placeholder="邮箱地址（必填）"
-                    required
-                    className="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]"
-                  />
-                  <button
-                    type="button"
-                    disabled={regCodeLoading || !regEmail.includes("@")}
-                    onClick={() =>
-                      handleSendCode(regEmail, "register", () =>
-                        setRegCodeSent(true),
-                      )
-                    }
-                    className="px-3 py-2 text-xs bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 disabled:opacity-50 whitespace-nowrap"
-                  >
-                    {regCodeLoading
-                      ? "发送中"
-                      : regCodeSent
-                        ? "重新发送"
-                        : "获取验证码"}
-                  </button>
-                </div>
-                <input
-                  value={regCode}
-                  onChange={(e) => setRegCode(e.target.value)}
-                  placeholder="邮箱验证码"
-                  required
-                  disabled={!regCodeSent}
-                  className="w-full mb-4 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3] disabled:bg-gray-50 disabled:text-gray-400"
-                />
-                {/* Step 2: Account info (shown after code sent) */}
-                <input
-                  name="display_name"
-                  placeholder="显示名称"
-                  required
-                  disabled={!regCodeSent}
-                  className="w-full mb-3 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3] disabled:bg-gray-50 disabled:text-gray-400"
-                />
-                <input
-                  name="username"
-                  placeholder="用户名（登录用）"
-                  required
-                  disabled={!regCodeSent}
-                  className="w-full mb-3 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3] disabled:bg-gray-50 disabled:text-gray-400"
-                />
-                <input
-                  name="password"
-                  type="password"
-                  placeholder="密码（8位以上，含字母和数字）"
-                  required
-                  disabled={!regCodeSent}
-                  className="w-full mb-4 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3] disabled:bg-gray-50 disabled:text-gray-400"
-                />
-                <button
-                  type="submit"
-                  disabled={loginLoading || !regCodeSent}
-                  className="w-full bg-[#4A154B] text-white py-2.5 rounded-lg font-semibold hover:bg-[#3d1040] disabled:opacity-50 text-sm"
-                >
-                  {loginLoading ? "处理中..." : "注册"}
-                </button>
-              </form>
-            )}
-
-            {/* ── Forgot Password ── */}
-            {authMode === "forgot" && (
-              <div>
-                <div className="flex gap-2 mb-3">
-                  <input
-                    value={forgotEmail}
-                    onChange={(e) => setForgotEmail(e.target.value)}
-                    type="email"
-                    placeholder="注册邮箱"
-                    required
-                    className="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]"
-                  />
-                  <button
-                    type="button"
-                    disabled={forgotCodeLoading || !forgotEmail.includes("@")}
-                    onClick={() =>
-                      handleSendCode(forgotEmail, "reset_password", () =>
-                        setForgotCodeSent(true),
-                      )
-                    }
-                    className="px-3 py-2 text-xs bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 disabled:opacity-50 whitespace-nowrap"
-                  >
-                    {forgotCodeLoading
-                      ? "发送中"
-                      : forgotCodeSent
-                        ? "重新发送"
-                        : "获取验证码"}
-                  </button>
-                </div>
-                <input
-                  value={forgotCode}
-                  onChange={(e) => setForgotCode(e.target.value)}
-                  placeholder="邮箱验证码"
-                  className="w-full mb-3 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]"
-                />
-                <input
-                  value={forgotNewPw}
-                  onChange={(e) => setForgotNewPw(e.target.value)}
-                  type="password"
-                  placeholder="新密码（8位以上，含字母和数字）"
-                  className="w-full mb-4 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]"
-                />
-                <button
-                  onClick={handleForgotPassword}
-                  disabled={loginLoading || !forgotCodeSent}
-                  className="w-full bg-[#4A154B] text-white py-2.5 rounded-lg font-semibold hover:bg-[#3d1040] disabled:opacity-50 text-sm"
-                >
-                  {loginLoading ? "处理中..." : "重置密码"}
-                </button>
-              </div>
-            )}
-
-            <div className="mt-4 text-center text-sm text-gray-500">
-              {authMode === "login" ? (
-                <>
-                  没有账号？{" "}
-                  <button
-                    onClick={() => {
-                      setAuthMode("register");
-                      setLoginError("");
-                    }}
-                    className="text-[#1264A3] font-medium hover:underline"
-                  >
-                    注册
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => {
-                    setAuthMode("login");
-                    setLoginError("");
-                  }}
-                  className="text-[#1264A3] font-medium hover:underline"
-                >
-                  返回登录
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex h-dvh bg-white">
+      <div className="flex h-dvh" style={{ background: "var(--bg-0)" }}>
         {isMobile && sidebarOpen && (
           <div
             className="fixed inset-0 bg-black/50 z-[55]"
             onClick={() => setSidebarOpen(false)}
           />
         )}
-        {/* Slack-style dark purple sidebar */}
-        <aside
-          className={`bg-[#3F0E40] flex flex-col flex-shrink-0 ${isMobile ? "fixed inset-y-0 left-0 z-[60] shadow-2xl transition-transform duration-300 ease-in-out" : "relative"}`}
-          style={{
-            width: isMobile ? "280px" : leftWidth,
-            transform:
-              isMobile && !sidebarOpen ? "translateX(-100%)" : "translateX(0)",
+        {!isMobile && (
+          <WorkspaceRail
+            workspaces={workspaces}
+            selectedWorkspaceId={selectedWorkspaceId}
+            onSelect={setSelectedWorkspaceId}
+            onCreate={() => setCreateWsOpen(true)}
+          />
+        )}
+        <Sidebar
+          isMobile={isMobile}
+          sidebarOpen={sidebarOpen}
+          leftWidth={leftWidth}
+          onLeftResize={onLeftResize}
+          currentUser={currentUser}
+          authToken={authToken}
+          onLoginClick={() => setLoginModalOpen(true)}
+          workspaces={workspaces}
+          setWorkspaces={setWorkspaces}
+          selectedWorkspaceId={selectedWorkspaceId}
+          setSelectedWorkspaceId={setSelectedWorkspaceId}
+          isPersonalWorkspace={isPersonalWorkspace}
+          channels={channels}
+          setChannels={setChannels}
+          dms={dms}
+          setDMs={setDMs}
+          selectedId={selectedId}
+          setSelectedId={setSelectedId}
+          setSidebarOpen={setSidebarOpen}
+          onOpenCreateWorkspace={() => setCreateWsOpen(true)}
+          onOpenInviteWsMember={() => setInviteWsMemberOpen(true)}
+          onOpenCreateChannel={() => setCreateChannelOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+
+        <HelpModal
+          open={helpOpen}
+          onClose={() => setHelpOpen(false)}
+          apiDocsUrl={API_DOCS_URL}
+        />
+
+        <AnnouncementComposerModal
+          open={announcementOpen}
+          channelId={selectedId}
+          channelName={selectedChannel?.name}
+          currentUserId={currentUserId}
+          authToken={authToken}
+          onClose={() => setAnnouncementOpen(false)}
+          onPublished={() => toast.success("公告已发布")}
+        />
+
+        <SettingsModal
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          isDark={isDark}
+          setTheme={setTheme}
+          authToken={authToken}
+          currentUser={currentUser}
+          onProfileUpdated={(data) => {
+            if (!currentUser) return;
+            setCurrentUser({
+              ...currentUser,
+              display_name: data.display_name,
+            });
           }}
-        >
-          {/* Workspace header */}
-          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-white font-bold text-lg truncate">
-                智枢协作
-              </span>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-4 h-4 text-white/60 flex-shrink-0"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {currentUser ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setKeychainModalOpen(true)}
-                    className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10 transition-colors"
-                    title="密钥链"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="w-3.5 h-3.5"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M8 7a5 5 0 1 1 3.61 4.804l-1.903 1.903A1 1 0 0 1 9 14H8v1a1 1 0 0 1-1 1H6v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-2a1 1 0 0 1 .293-.707L7.196 10.39A5.002 5.002 0 0 1 8 7Zm5-3a.75.75 0 0 0 0 1.5A1.5 1.5 0 0 1 14.5 7 .75.75 0 0 0 16 7a3 3 0 0 0-3-3Z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setUserProfileOpen(true)}
-                    className="w-7 h-7 rounded-full bg-[#D0B3D3] text-[#3F0E40] text-xs font-bold flex items-center justify-center hover:bg-white transition-colors"
-                    title={`${currentUser.display_name} · 编辑资料`}
-                  >
-                    {currentUser.display_name.slice(0, 1).toUpperCase()}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10 transition-colors"
-                    title="退出登录"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
-                      className="w-3.5 h-3.5"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M2 4.75A2.75 2.75 0 0 1 4.75 2h3a2.75 2.75 0 0 1 2.75 2.75v.5a.75.75 0 0 1-1.5 0v-.5c0-.69-.56-1.25-1.25-1.25h-3c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h3c.69 0 1.25-.56 1.25-1.25v-.5a.75.75 0 0 1 1.5 0v.5A2.75 2.75 0 0 1 7.75 14h-3A2.75 2.75 0 0 1 2 11.25v-6.5Zm9.47.47a.75.75 0 0 1 1.06 0l2.25 2.25a.75.75 0 0 1 0 1.06l-2.25 2.25a.75.75 0 1 1-1.06-1.06l.97-.97H6.75a.75.75 0 0 1 0-1.5h5.69l-.97-.97a.75.75 0 0 1 0-1.06Z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => setLoginModalOpen(true)}
-                  className="text-xs text-white/70 hover:text-white px-2 py-1"
-                >
-                  登录
-                </button>
-              )}
-            </div>
-          </div>
+          onLogout={handleLogout}
+        />
 
-          {/* User status bar */}
-          {currentUser && (
-            <div className="px-4 py-2 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
-              <span className="text-[#C9BDD0] text-sm truncate">
-                {currentUser.display_name}
-              </span>
-            </div>
-          )}
+        <OpenClawQcModal
+          open={qcOpen}
+          onClose={() => setQcOpen(false)}
+          channelId={selectedId}
+          channelName={selectedChannel?.name}
+        />
 
-          {/* Workspace selector */}
-          <div className="px-3 py-2">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[#C9BDD0] text-xs font-semibold uppercase tracking-wider">
-                工作空间
-              </span>
-              <div className="flex items-center gap-1">
-                {selectedWorkspaceId && (
-                  <button
-                    type="button"
-                    onClick={() => setInviteWsMemberOpen(true)}
-                    className="text-white/60 hover:text-white text-xs p-1 rounded hover:bg-white/10"
-                    title="邀请成员"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="w-4 h-4"
-                    >
-                      <path d="M11 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM2.046 15.253c-.058.468.172.92.57 1.174A9.953 9.953 0 0 0 8 18c1.536 0 2.991-.346 4.184-.964l-4.253-4.25A3.5 3.5 0 0 0 5.6 11.5H5.5a3.5 3.5 0 0 0-3.454 3.753ZM15.5 9.5a.75.75 0 0 0-1.5 0v1.5H12.5a.75.75 0 0 0 0 1.5H14v1.5a.75.75 0 0 0 1.5 0V12.5h1.5a.75.75 0 0 0 0-1.5H15.5V9.5Z" />
-                    </svg>
-                  </button>
-                )}
-                {selectedWorkspaceId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (
-                        confirm(
-                          "确定删除该工作空间？删除后其下的频道也将被删除。",
-                        )
-                      ) {
-                        authFetch(`${API}/workspaces/${selectedWorkspaceId}`, {
-                          method: "DELETE",
-                        })
-                          .then((r) => r.json())
-                          .then((d) => {
-                            if (d.status === "success") {
-                              toast.success("工作空间已删除");
-                              setSelectedWorkspaceId("");
-                              refreshWorkspaces(
-                                setWorkspaces,
-                                authToken ?? undefined,
-                              );
-                              refreshChannels(
-                                setChannels,
-                                authToken ?? undefined,
-                              );
-                            } else {
-                              toast.error(d.detail || "删除失败");
-                            }
-                          })
-                          .catch(() => toast.error("请求失败"));
-                      }
-                    }}
-                    className="text-white/60 hover:text-red-400 text-xs p-1 rounded hover:bg-white/10"
-                    title="删除工作空间"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="w-4 h-4"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setCreateWsOpen(true)}
-                  className="text-white/60 hover:text-white text-xs p-1 rounded hover:bg-white/10"
-                  title="创建工作空间"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="w-4 h-4"
-                  >
-                    <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <select
-              value={selectedWorkspaceId}
-              onChange={(e) => setSelectedWorkspaceId(e.target.value)}
-              className="w-full bg-white/10 text-white text-sm rounded px-2 py-1.5 border border-white/20 focus:outline-none focus:border-white/40"
-            >
-              <option value="" className="text-gray-900">
-                全部工作空间
-              </option>
-              {workspaces.map((w) => (
-                <option
-                  key={w.workspace_id}
-                  value={w.workspace_id}
-                  className="text-gray-900"
-                >
-                  {w.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <CreateWorkspaceModal
+          open={createWsOpen}
+          value={newWorkspaceName}
+          onChange={setNewWorkspaceName}
+          onSubmit={handleCreateWorkspace}
+          onClose={() => setCreateWsOpen(false)}
+        />
 
-          {/* Channels section */}
-          <div className="px-3 pt-3 pb-1 flex items-center justify-between">
-            <span className="text-[#C9BDD0] text-xs font-semibold uppercase tracking-wider">
-              频道
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                if (!selectedWorkspaceId) {
-                  toast.error("请先选择工作空间");
-                  return;
-                }
-                setCreateChannelOpen(true);
-              }}
-              className="text-white/60 hover:text-white text-xs p-1 rounded hover:bg-white/10"
-              title="创建频道"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-4 h-4"
-              >
-                <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-              </svg>
-            </button>
-          </div>
-          <ul className="overflow-auto flex-1 px-2">
-            {channels
-              .filter(
-                (c) =>
-                  !selectedWorkspaceId ||
-                  c.workspace_id === selectedWorkspaceId,
-              )
-              .map((c) => (
-                <li
-                  key={c.channel_id}
-                  className="group relative"
-                  onClick={() => isMobile && setSidebarOpen(false)}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(c.channel_id)}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[13px] flex items-center gap-1.5 transition-colors pr-7 ${
-                      selectedId === c.channel_id
-                        ? "bg-white/20 text-white font-semibold"
-                        : "text-[#C9BDD0] hover:bg-white/10 hover:text-white"
-                    }`}
-                  >
-                    <span className="text-current opacity-60 text-base leading-none">
-                      #
-                    </span>
-                    <span className="truncate">{c.name}</span>
-                    {!selectedWorkspaceId &&
-                      c.workspace_id &&
-                      (() => {
-                        const ws = workspaces.find(
-                          (w) => w.workspace_id === c.workspace_id,
-                        );
-                        const abbrev = ws ? ws.name.slice(0, 4) : "";
-                        return abbrev ? (
-                          <span className="ml-1 flex-shrink-0 text-[10px] px-1 py-0 rounded bg-white/10 text-[#C9BDD0] leading-4">
-                            {abbrev}
-                          </span>
-                        ) : null;
-                      })()}
-                  </button>
-                  <button
-                    type="button"
-                    title="删除频道"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (
-                        !confirm(`确定删除频道「${c.name}」？此操作不可恢复。`)
-                      )
-                        return;
-                      authFetch(`${API}/channels/${c.channel_id}`, {
-                        method: "DELETE",
-                      })
-                        .then((r) => {
-                          if (!r.ok) throw new Error("删除失败");
-                          setChannels((prev) =>
-                            prev.filter((x) => x.channel_id !== c.channel_id),
-                          );
-                          if (selectedId === c.channel_id) setSelectedId(null);
-                        })
-                        .catch(() => toast.error("删除频道失败"));
-                    }}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-white/20 text-[#C9BDD0] hover:text-red-300"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
-                      className="w-3 h-3"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5ZM6.05 6a.75.75 0 0 1 .787.713l.275 5.5a.75.75 0 0 1-1.498.075l-.275-5.5A.75.75 0 0 1 6.05 6Zm3.9 0a.75.75 0 0 1 .712.787l-.275 5.5a.75.75 0 0 1-1.498-.075l.275-5.5a.75.75 0 0 1 .786-.711Z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                </li>
-              ))}
-          </ul>
+        <InviteWorkspaceMemberModal
+          open={inviteWsMemberOpen}
+          value={inviteWsIdentifier}
+          onChange={setInviteWsIdentifier}
+          onSubmit={handleInviteWsMember}
+          onClose={() => setInviteWsMemberOpen(false)}
+        />
 
-          {/* Bottom nav */}
-          <div className="px-2 py-2 border-t border-white/10 space-y-0.5">
-            <button
-              type="button"
-              onClick={() => {
-                setNotifPanelOpen(true);
-                if (isMobile) setSidebarOpen(false);
-              }}
-              className="relative flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[#C9BDD0] hover:bg-white/10 hover:text-white text-sm transition-colors"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-4 h-4"
-              >
-                <path d="M4.214 3.227a.75.75 0 0 0-1.156-.956 8.97 8.97 0 0 0-1.856 5.476.75.75 0 0 0 1.498.066A7.47 7.47 0 0 1 4.214 3.227ZM16.942 2.271a.75.75 0 0 0-1.157.956 7.47 7.47 0 0 1 1.514 4.586.75.75 0 0 0 1.498-.066 8.97 8.97 0 0 0-1.855-5.476ZM10 2a6 6 0 0 0-6 6v1.076a2.25 2.25 0 0 1-.659 1.59l-.537.537a1.5 1.5 0 0 0 1.06 2.563h12.272a1.5 1.5 0 0 0 1.06-2.563l-.537-.537A2.25 2.25 0 0 1 16 9.076V8a6 6 0 0 0-6-6ZM8.5 17.5a1.5 1.5 0 0 0 3 0H8.5Z" />
-              </svg>
-              <span>通知</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setFriendsPanelOpen(true);
-                if (isMobile) setSidebarOpen(false);
-              }}
-              className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[#C9BDD0] hover:bg-white/10 hover:text-white text-sm transition-colors"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-4 h-4"
-              >
-                <path d="M10 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM1.49 15.326a.78.78 0 0 1-.358-.442 3 3 0 0 1 4.308-3.516 6.484 6.484 0 0 0-1.905 3.959c-.023.222-.014.442.025.654a4.97 4.97 0 0 1-2.07-.655ZM16.44 15.98a4.97 4.97 0 0 0 2.07-.654.78.78 0 0 0 .357-.442 3 3 0 0 0-4.308-3.517 6.484 6.484 0 0 1 1.907 3.96 2.32 2.32 0 0 1-.026.654ZM18 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM5.304 16.19a.844.844 0 0 1-.277-.71 5 5 0 0 1 9.947 0 .843.843 0 0 1-.277.71A6.975 6.975 0 0 1 10 18a6.974 6.974 0 0 1-4.696-1.81Z" />
-              </svg>
-              <span>好友</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setQcOpen(true);
-                setQcResult(null);
-                setQcError("");
-                if (isMobile) setSidebarOpen(false);
-              }}
-              className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[#C9BDD0] hover:bg-white/10 hover:text-white text-sm transition-colors"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-4 h-4"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M11.983 1.907a.75.75 0 0 0-1.292-.657l-8.5 9.5A.75.75 0 0 0 2.75 12h6.572l-1.305 6.093a.75.75 0 0 0 1.292.657l8.5-9.5A.75.75 0 0 0 17.25 8h-6.572l1.305-6.093Z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <span>接入 OpenClaw</span>
-            </button>
-            <Link
-              to="/admin"
-              onClick={() => isMobile && setSidebarOpen(false)}
-              className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[#C9BDD0] hover:bg-white/10 hover:text-white text-sm transition-colors"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-4 h-4"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M7.84 1.804A1 1 0 0 1 8.82 1h2.36a1 1 0 0 1 .98.804l.331 1.652a6.993 6.993 0 0 1 1.929 1.115l1.598-.54a1 1 0 0 1 1.186.447l1.18 2.044a1 1 0 0 1-.205 1.251l-1.267 1.113a7.047 7.047 0 0 1 0 2.228l1.267 1.113a1 1 0 0 1 .206 1.25l-1.18 2.045a1 1 0 0 1-1.187.447l-1.598-.54a6.993 6.993 0 0 1-1.929 1.115l-.33 1.652a1 1 0 0 1-.98.804H8.82a1 1 0 0 1-.98-.804l-.331-1.652a6.993 6.993 0 0 1-1.929-1.115l-1.598.54a1 1 0 0 1-1.186-.447l-1.18-2.044a1 1 0 0 1 .205-1.251l1.267-1.114a7.05 7.05 0 0 1 0-2.227L1.821 7.773a1 1 0 0 1-.206-1.25l1.18-2.045a1 1 0 0 1 1.187-.447l1.598.54A6.992 6.992 0 0 1 7.51 3.456l.33-1.652ZM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <span>管理</span>
-            </Link>
-            <Link
-              to="/docs"
-              onClick={() => isMobile && setSidebarOpen(false)}
-              className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[#C9BDD0] hover:bg-white/10 hover:text-white text-sm transition-colors"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-4 h-4"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm2 6a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H7a1 1 0 0 1-1-1Zm1 3a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2H7Z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <span>Docs</span>
-            </Link>
-            <Link
-              to="/bulletin"
-              onClick={() => isMobile && setSidebarOpen(false)}
-              className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[#C9BDD0] hover:bg-white/10 hover:text-white text-sm transition-colors"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-4 h-4"
-              >
-                <path d="M10 2a6 6 0 0 0-6 6v3.586l-.707.707A1 1 0 0 0 4 14h12a1 1 0 0 0 .707-1.707L16 11.586V8a6 6 0 0 0-6-6ZM10 18a3 3 0 0 1-2.83-2h5.66A3 3 0 0 1 10 18Z" />
-              </svg>
-              <span>留言板</span>
-            </Link>
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[#C9BDD0] hover:bg-white/10 hover:text-white text-sm transition-colors"
-              title={isDark ? "切换到浅色模式" : "切换到深色模式"}
-            >
-              {isDark ? (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                  <path d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2ZM10 15a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15ZM10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM15.657 5.404a.75.75 0 1 0-1.06-1.06l-1.061 1.06a.75.75 0 0 0 1.06 1.06l1.06-1.06ZM6.464 14.596a.75.75 0 1 0-1.06-1.06l-1.06 1.06a.75.75 0 0 0 1.06 1.06l1.06-1.06ZM18 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 18 10ZM5 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 5 10ZM14.596 13.536a.75.75 0 0 1 1.06 0l1.06 1.06a.75.75 0 0 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.06ZM5.404 5.404a.75.75 0 0 1 0-1.06l1.06-1.06a.75.75 0 1 1 1.06 1.06l-1.06 1.06a.75.75 0 0 1-1.06 0Z" />
-                </svg>
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                  <path fillRule="evenodd" d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z" clipRule="evenodd" />
-                </svg>
-              )}
-              <span>{isDark ? "浅色模式" : "深色模式"}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setHelpOpen(true);
-                if (isMobile) setSidebarOpen(false);
-              }}
-              className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[#C9BDD0] hover:bg-white/10 hover:text-white text-sm transition-colors"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-4 h-4"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <span>帮助</span>
-            </button>
-          </div>
-          {/* Left sidebar resize handle */}
-          {!isMobile && (
-            <div
-              onMouseDown={onLeftResize}
-              className="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-white/30 transition-colors z-10"
-            />
-          )}
-        </aside>
-
-        {helpOpen && (
-          <div
-            className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={() => setHelpOpen(false)}
-            aria-modal="true"
-            role="dialog"
-          >
-            <div
-              className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6 text-left max-h-[90vh] overflow-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-gray-900">使用帮助</h2>
-                <button
-                  type="button"
-                  onClick={() => setHelpOpen(false)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-xl leading-none"
-                  aria-label="关闭"
-                >
-                  ×
-                </button>
-              </div>
-              <p className="text-gray-700 text-sm mb-3">
-                在任意频道输入 <strong>@channel bot</strong>{" "}
-                并输入你的问题，channel bot
-                会根据说明书自动回复，并显示相关入口。
-              </p>
-              <p className="text-gray-600 text-xs mb-2">例如可以问：</p>
-              <ul className="text-sm text-gray-700 space-y-1 list-disc list-inside mb-2">
-                <li>@channel bot 怎么用</li>
-                <li>@channel bot 怎么创建项目</li>
-                <li>@channel bot 怎么加入项目</li>
-                <li>@channel bot 怎么接入 OpenClaw</li>
-                <li>@channel bot 入口</li>
-              </ul>
-              <p className="text-gray-600 text-xs mb-2">前端入口：</p>
-              <ul className="text-sm text-gray-700 space-y-1 list-disc list-inside mb-4">
-                <li>
-                  创建项目、Bot、性能监控、日志排查：左侧 <strong>管理</strong>{" "}
-                  进入管理页面
-                </li>
-                <li>
-                  上传文件：频道内输入框旁 <strong>上传</strong>
-                  （.txt/.md/.docx/.pdf/.xlsx/.png/.jpg 等）
-                </li>
-                <li>
-                  频道上下文：选中频道后点击 <strong>频道上下文</strong>
-                </li>
-                <li>
-                  API 文档：管理页内「打开 API 文档」或{" "}
-                  <a
-                    href={API_DOCS_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[#1264A3] underline"
-                  >
-                    /docs
-                  </a>
-                </li>
-              </ul>
-              <p className="text-gray-500 text-xs">完整说明见项目文档。</p>
-              <div className="mt-5 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setHelpOpen(false)}
-                  className="px-4 py-2 bg-[#F8F8F8] text-gray-700 rounded-lg hover:bg-gray-200 text-sm font-medium"
-                >
-                  关闭
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── OpenClaw 快速连接 Modal ───────────────────────────────────────────── */}
-        {qcOpen && (
-          <div
-            className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={() => {
-              if (!qcLoading) setQcOpen(false);
-            }}
-            aria-modal="true"
-            role="dialog"
-          >
-            <div
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[90vh]"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="flex items-center gap-3 px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
-                <div className="w-9 h-9 rounded-xl bg-[#4A154B] flex items-center justify-center flex-shrink-0">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="white"
-                    className="w-5 h-5"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M11.983 1.907a.75.75 0 0 0-1.292-.657l-8.5 9.5A.75.75 0 0 0 2.75 12h6.572l-1.305 6.093a.75.75 0 0 0 1.292.657l8.5-9.5A.75.75 0 0 0 17.25 8h-6.572l1.305-6.093Z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-[15px] font-bold text-gray-900">
-                    接入 OpenClaw
-                  </h2>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    输入 Gateway URL 和 Token，自动创建 Bot 并探测其能力
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!qcLoading) setQcOpen(false);
-                  }}
-                  className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-xl leading-none flex-shrink-0"
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto px-6 py-4">
-                {!qcResult ? (
-                  /* ── 表单 ── */
-                  <div className="space-y-4">
-                    {qcError && (
-                      <div className="text-sm text-red-600 bg-red-50 border border-red-200 p-3 rounded-lg">
-                        {qcError}
-                      </div>
-                    )}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Gateway URL <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="url"
-                        value={qcUrl}
-                        onChange={(e) => setQcUrl(e.target.value)}
-                        placeholder="http://host:port 或 http://host:port/v1"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4A154B] focus:ring-1 focus:ring-[#4A154B]"
-                        disabled={qcLoading}
-                      />
-                      <p className="text-[11px] text-gray-400 mt-1">
-                        若 URL 未包含 /v1，将自动补全
-                      </p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Bearer Token <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="password"
-                        value={qcToken}
-                        onChange={(e) => setQcToken(e.target.value)}
-                        placeholder="Gateway 鉴权 Token"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4A154B] focus:ring-1 focus:ring-[#4A154B]"
-                        disabled={qcLoading}
-                      />
-                    </div>
-                    <div className="flex gap-3">
-                      <div className="flex-1">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Agent ID（模型名）
-                        </label>
-                        <input
-                          type="text"
-                          value={qcAgentId}
-                          onChange={(e) => setQcAgentId(e.target.value)}
-                          placeholder="main"
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4A154B] focus:ring-1 focus:ring-[#4A154B]"
-                          disabled={qcLoading}
-                        />
-                      </div>
-                      <div className="flex-1">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Bot 显示名称
-                        </label>
-                        <input
-                          type="text"
-                          value={qcDisplayName}
-                          onChange={(e) => setQcDisplayName(e.target.value)}
-                          placeholder={`OpenClaw ${qcAgentId || "main"}`}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4A154B] focus:ring-1 focus:ring-[#4A154B]"
-                          disabled={qcLoading}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Bot 用户名（@ 名）
-                      </label>
-                      <input
-                        type="text"
-                        value={qcBotName}
-                        onChange={(e) => setQcBotName(e.target.value)}
-                        placeholder={`openclaw_${qcAgentId || "main"}（留空自动生成）`}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4A154B] focus:ring-1 focus:ring-[#4A154B]"
-                        disabled={qcLoading}
-                      />
-                    </div>
-                    {selectedId && (
-                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={qcAddToChannel}
-                          onChange={(e) => setQcAddToChannel(e.target.checked)}
-                          className="w-4 h-4 rounded border-gray-300 accent-[#4A154B]"
-                          disabled={qcLoading}
-                        />
-                        <span className="text-sm text-gray-700">
-                          创建后自动加入当前频道
-                          <span className="text-gray-400 ml-1">
-                            #{selectedChannel?.name}
-                          </span>
-                        </span>
-                      </label>
-                    )}
-                  </div>
-                ) : (
-                  /* ── 结果展示 ── */
-                  <div className="space-y-4">
-                    {/* Connection status */}
-                    <div
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium ${qcResult.probe.connected ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}
-                    >
-                      {qcResult.probe.connected ? (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 16 16"
-                          fill="currentColor"
-                          className="w-4 h-4 flex-shrink-0"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      ) : (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 16 16"
-                          fill="currentColor"
-                          className="w-4 h-4 flex-shrink-0"
-                        >
-                          <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
-                        </svg>
-                      )}
-                      {qcResult.probe.connected
-                        ? `已连接 · Bot @${qcResult.bot.username} 创建成功`
-                        : `Bot @${qcResult.bot.username} 已创建，但探测请求未成功响应`}
-                    </div>
-
-                    {/* who_am_i */}
-                    <div>
-                      <p className="text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">
-                        你是谁
-                      </p>
-                      <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-gray-700 whitespace-pre-wrap max-h-40 overflow-y-auto leading-relaxed">
-                        {qcResult.probe.who_am_i || "（无响应）"}
-                      </div>
-                    </div>
-
-                    {/* skills */}
-                    <div>
-                      <p className="text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">
-                        /skill
-                      </p>
-                      <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed">
-                        {qcResult.probe.skills || "（无响应）"}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center gap-3 flex-shrink-0">
-                {!qcResult ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setQcOpen(false)}
-                      className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                      disabled={qcLoading}
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!qcUrl.trim() || !qcToken.trim() || qcLoading}
-                      onClick={async () => {
-                        setQcLoading(true);
-                        setQcError("");
-                        try {
-                          const res = await authFetch(
-                            `${API}/bots/quick-connect`,
-                            {
-                              method: "POST",
-                              body: JSON.stringify({
-                                url: qcUrl.trim(),
-                                token: qcToken.trim(),
-                                agent_id: qcAgentId.trim() || "main",
-                                bot_username: qcBotName.trim() || null,
-                                display_name: qcDisplayName.trim() || null,
-                                channel_id:
-                                  qcAddToChannel && selectedId
-                                    ? selectedId
-                                    : null,
-                              }),
-                            },
-                          );
-                          const data = await res.json();
-                          if (!res.ok)
-                            throw new Error(data?.detail || "连接失败");
-                          setQcResult(data.data as QcResult);
-                          toast.success(
-                            `Bot @${(data.data as QcResult).bot.username} 已创建`,
-                          );
-                        } catch (e) {
-                          setQcError(
-                            (e as Error).message ||
-                              "连接失败，请检查 URL 和 Token",
-                          );
-                        } finally {
-                          setQcLoading(false);
-                        }
-                      }}
-                      className="flex items-center gap-2 px-5 py-2 bg-[#4A154B] text-white rounded-lg text-sm font-semibold hover:bg-[#3d1040] disabled:opacity-50 transition-colors"
-                    >
-                      {qcLoading ? (
-                        <>
-                          <span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          探测中…
-                        </>
-                      ) : (
-                        <>
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 16 16"
-                            fill="currentColor"
-                            className="w-3.5 h-3.5"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M9.58 1.077a.75.75 0 0 1 .43.82L9.188 6h4.062a.75.75 0 0 1 .558 1.252l-7.5 8.25a.75.75 0 0 1-1.358-.588L5.812 10H1.75a.75.75 0 0 1-.557-1.252l7.5-8.25a.75.75 0 0 1 .887-.42Z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          连接并探测
-                        </>
-                      )}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setQcResult(null);
-                        setQcError("");
-                        setQcUrl("");
-                        setQcToken("");
-                        setQcAgentId("main");
-                        setQcBotName("");
-                        setQcDisplayName("");
-                      }}
-                      className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                    >
-                      再接入一个
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setQcOpen(false)}
-                      className="px-5 py-2 bg-[#4A154B] text-white rounded-lg text-sm font-semibold hover:bg-[#3d1040]"
-                    >
-                      完成
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 创建工作空间 Modal */}
-        {createWsOpen && (
-          <div
-            className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={() => setCreateWsOpen(false)}
-            aria-modal="true"
-            role="dialog"
-          >
-            <div
-              className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6 text-left"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-gray-900">
-                  创建工作空间
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setCreateWsOpen(false)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-xl leading-none"
-                  aria-label="关闭"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    名称
-                  </label>
-                  <input
-                    type="text"
-                    value={newWorkspaceName}
-                    onChange={(e) => setNewWorkspaceName(e.target.value)}
-                    placeholder="输入工作空间名称"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]"
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && handleCreateWorkspace()
-                    }
-                  />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCreateWsOpen(false)}
-                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCreateWorkspace}
-                    className="px-4 py-2 bg-[#4A154B] text-white rounded-lg text-sm font-medium hover:bg-[#3d1040]"
-                  >
-                    创建
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 邀请工作空间成员 Modal */}
-        {inviteWsMemberOpen && (
-          <div
-            className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={() => setInviteWsMemberOpen(false)}
-            aria-modal="true"
-            role="dialog"
-          >
-            <div
-              className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6 text-left"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-gray-900">邀请成员</h2>
-                <button
-                  type="button"
-                  onClick={() => setInviteWsMemberOpen(false)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-xl leading-none"
-                  aria-label="关闭"
-                >
-                  ×
-                </button>
-              </div>
-              <p className="text-sm text-gray-500 mb-4">
-                被邀请的成员将自动加入该工作空间下的所有频道。
-              </p>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    用户名
-                  </label>
-                  <input
-                    type="text"
-                    value={inviteWsIdentifier}
-                    onChange={(e) => setInviteWsIdentifier(e.target.value)}
-                    placeholder="输入用户名"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]"
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && handleInviteWsMember()
-                    }
-                    autoFocus
-                  />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setInviteWsMemberOpen(false)}
-                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleInviteWsMember}
-                    className="px-4 py-2 bg-[#4A154B] text-white rounded-lg text-sm font-medium hover:bg-[#3d1040]"
-                  >
-                    邀请
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 创建频道 Modal */}
-        {createChannelOpen && (
-          <div
-            className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={() => setCreateChannelOpen(false)}
-            aria-modal="true"
-            role="dialog"
-          >
-            <div
-              className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6 text-left"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-gray-900">创建频道</h2>
-                <button
-                  type="button"
-                  onClick={() => setCreateChannelOpen(false)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-xl leading-none"
-                  aria-label="关闭"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    工作空间
-                  </label>
-                  <select
-                    value={selectedWorkspaceId}
-                    onChange={(e) => setSelectedWorkspaceId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]"
-                  >
-                    <option value="">选择工作空间</option>
-                    {workspaces.map((w) => (
-                      <option key={w.workspace_id} value={w.workspace_id}>
-                        {w.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    频道名称
-                  </label>
-                  <input
-                    type="text"
-                    value={newChannelName}
-                    onChange={(e) => setNewChannelName(e.target.value)}
-                    placeholder="输入频道名称"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#1264A3] focus:ring-1 focus:ring-[#1264A3]"
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && handleCreateChannel()
-                    }
-                  />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCreateChannelOpen(false)}
-                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCreateChannel}
-                    className="px-4 py-2 bg-[#4A154B] text-white rounded-lg text-sm font-medium hover:bg-[#3d1040]"
-                  >
-                    创建
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <CreateChannelModal
+          open={createChannelOpen}
+          workspaces={workspaces}
+          selectedWorkspaceId={selectedWorkspaceId}
+          onSelectWorkspace={setSelectedWorkspaceId}
+          channelName={newChannelName}
+          onChannelNameChange={setNewChannelName}
+          onSubmit={handleCreateChannel}
+          onClose={() => setCreateChannelOpen(false)}
+        />
 
         {addBotOpen && selectedId && (
           <div
@@ -5724,40 +2171,35 @@ export default function App() {
         )}
 
         {/* Keychain modal */}
-        {keychainModalOpen && authToken && (
+        {authToken && (
           <KeychainModal
+            open={keychainModalOpen}
             userToken={authToken}
             onClose={() => setKeychainModalOpen(false)}
           />
         )}
 
         {/* User profile modal */}
-        {userProfileOpen && currentUser && (
+        {currentUser && (
           <UserProfileModal
+            open={userProfileOpen}
             currentUser={currentUser}
             userToken={authToken!}
             onClose={() => setUserProfileOpen(false)}
             onProfileUpdated={(data) => {
-              const updated = {
+              if (!currentUser) return;
+              setCurrentUser({
                 ...currentUser,
                 display_name: data.display_name,
-              };
-              setCurrentUser(updated);
-              localStorage.setItem(
-                "currentUser",
-                JSON.stringify({
-                  user: updated,
-                  token: authToken,
-                  loginTime: Date.now(),
-                }),
-              );
+              });
             }}
           />
         )}
 
         {/* Channel profile modal */}
-        {channelProfileOpen && currentUser && selectedId && (
+        {currentUser && selectedId && (
           <ChannelProfileModal
+            open={channelProfileOpen}
             channelId={selectedId}
             channelName={selectedChannel?.name || ""}
             userToken={authToken!}
@@ -5765,175 +2207,35 @@ export default function App() {
           />
         )}
 
-        {/* Summary Modal */}
-        {summaryModalOpen && (
-          <div
-            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40"
-            onClick={() => setSummaryModalOpen(false)}
-          >
-            <div
-              className="bg-white rounded-2xl shadow-2xl w-[680px] max-w-[95vw] max-h-[85vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Modal header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h2 className="font-semibold text-gray-900 text-base">
-                  生成问答总结
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setSummaryModalOpen(false)}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="w-4 h-4"
-                  >
-                    <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* QA pair list */}
-              <div className="flex-1 overflow-auto px-5 py-3 space-y-2 min-h-0">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-gray-500">
-                    {selectedPairs.length} / {blockPairsForExport.length} 组已选
-                  </span>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSelectedQaIds(
-                          Object.fromEntries(
-                            blockPairsForExport.map((p) => [
-                              p.question.msg_id,
-                              true,
-                            ]),
-                          ),
-                        )
-                      }
-                      className="text-xs text-[#1264A3] hover:underline"
-                    >
-                      全选
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedQaIds({})}
-                      className="text-xs text-gray-400 hover:underline"
-                    >
-                      取消全选
-                    </button>
-                  </div>
-                </div>
-                {blockPairsForExport.map((pair) => {
-                  const checked = !!selectedQaIds[pair.question.msg_id];
-                  const qText = stripThinkTags(
-                    parseGuidePayload(pair.question.content).text ||
-                      pair.question.content,
-                  );
-                  const aText = stripThinkTags(
-                    parseGuidePayload(pair.answer.content).text ||
-                      pair.answer.content,
-                  );
-                  const senderBot = channelBots.find(
-                    (b) => b.member_id === pair.answer.sender_id,
-                  );
-                  const botLabel =
-                    pair.answer.sender_name ||
-                    senderBot?.display_name ||
-                    senderBot?.username ||
-                    "Bot";
-                  return (
-                    <label
-                      key={pair.question.msg_id}
-                      className={`flex gap-3 p-3 rounded-xl border cursor-pointer transition-colors select-none ${checked ? "bg-blue-50 border-[#1264A3]/30" : "bg-gray-50 border-gray-200 hover:bg-gray-100"}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() =>
-                          setSelectedQaIds((prev) => ({
-                            ...prev,
-                            [pair.question.msg_id]: !prev[pair.question.msg_id],
-                          }))
-                        }
-                        className="mt-0.5 flex-shrink-0 accent-[#1264A3]"
-                      />
-                      <div className="flex-1 min-w-0 space-y-1.5">
-                        <div className="flex items-start gap-1.5">
-                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 font-medium flex-shrink-0">
-                            问
-                          </span>
-                          <span className="text-[13px] text-gray-800 line-clamp-2">
-                            {qText}
-                          </span>
-                        </div>
-                        <div className="flex items-start gap-1.5">
-                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#2EB67D]/15 text-[#2EB67D] font-medium flex-shrink-0">
-                            {pair.answer.sender_type === "bot"
-                              ? botLabel
-                              : "答"}
-                          </span>
-                          <span className="text-[13px] text-gray-500 line-clamp-2">
-                            {aText || "(无回复)"}
-                          </span>
-                        </div>
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-
-              {/* Summary result */}
-              {summaryPreview && (
-                <div className="mx-5 mb-3 border border-gray-200 rounded-xl bg-gray-50 p-3 max-h-48 overflow-auto">
-                  <div className="text-xs font-medium text-gray-500 mb-1.5">
-                    总结结果
-                  </div>
-                  <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                    {summaryPreview}
-                  </div>
-                </div>
-              )}
-
-              {/* Modal footer */}
-              <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 gap-3">
-                <div className="text-xs text-gray-400" title={qaLlmHint}>
-                  {qaLlmReady ? "✓ LLM 已就绪" : "⚠ LLM 未配置"}
-                </div>
-                <div className="flex gap-2">
-                  {summaryPreview && (
-                    <button
-                      type="button"
-                      onClick={downloadQaMarkdown}
-                      disabled={selectedPairs.length === 0}
-                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:border-gray-400 disabled:opacity-40 transition-colors"
-                    >
-                      导出 MD
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => generateQaSummary(selectedPairs)}
-                    disabled={
-                      selectedPairs.length === 0 || summaryBusy || !qaLlmReady
-                    }
-                    className="px-4 py-1.5 rounded-lg bg-[#1264A3] text-white text-sm font-medium hover:bg-[#0d4f82] disabled:opacity-40 transition-colors"
-                  >
-                    {summaryBusy ? "生成中…" : "生成总结"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <QaSummaryModal
+          open={summaryModalOpen}
+          onClose={() => setSummaryModalOpen(false)}
+          pairs={blockPairsForExport}
+          selectedIds={selectedQaIds}
+          onToggle={(id) =>
+            setSelectedQaIds((prev) => ({ ...prev, [id]: !prev[id] }))
+          }
+          onSelectAll={() =>
+            setSelectedQaIds(
+              Object.fromEntries(
+                blockPairsForExport.map((p) => [p.question.msg_id, true]),
+              ),
+            )
+          }
+          onDeselectAll={() => setSelectedQaIds({})}
+          channelBots={channelBots}
+          summaryPreview={summaryPreview}
+          summaryBusy={summaryBusy}
+          qaLlmReady={qaLlmReady}
+          qaLlmHint={qaLlmHint}
+          onGenerate={() => generateQaSummary(selectedPairs)}
+          onDownload={downloadQaMarkdown}
+        />
 
         <div className="flex-1 flex min-w-0">
           <main
-            className="flex-1 flex flex-col min-w-0 bg-white relative"
+            className="flex-1 flex flex-col min-w-0 relative"
+            style={{ background: "var(--bg-0)" }}
             onDragEnter={(e) => {
               if (!selectedId || !e.dataTransfer.types.includes("Files"))
                 return;
@@ -5964,281 +2266,138 @@ export default function App() {
               }
             }}
           >
-            {/* ── 拖放叠加层 ───────────────────────────────────────────── */}
-            {isDraggingOver && selectedId && (
-              <>
-                <style>{`
-              @keyframes charColorCycle {
-                0%   { color: hsl(270,75%,60%); }
-                14%  { color: hsl(330,80%,60%); }
-                28%  { color: hsl(10, 85%,60%); }
-                42%  { color: hsl(35, 92%,52%); }
-                56%  { color: hsl(60, 88%,46%); }
-                70%  { color: hsl(130,65%,48%); }
-                84%  { color: hsl(200,72%,50%); }
-                92%  { color: hsl(230,75%,60%); }
-                100% { color: hsl(270,75%,60%); }
-              }
-              @keyframes dropIconBounce {
-                0%,100% { transform: translateY(0px); }
-                50%     { transform: translateY(12px); }
-              }
-              .drag-overlay-char {
-                display: inline-block;
-                animation: charColorCycle 3.5s linear infinite;
-                font-weight: 900;
-                letter-spacing: 0.04em;
-              }
-            `}</style>
-                <div
-                  className="absolute inset-0 z-50 flex flex-col items-center justify-center select-none pointer-events-none"
-                  style={{
-                    backdropFilter: "blur(8px)",
-                    backgroundColor: isDark ? "rgba(26,29,33,0.75)" : "rgba(255,255,255,0.65)",
-                  }}
-                >
+            <DragOverlay
+              visible={isDraggingOver && !!selectedId}
+              isDark={isDark}
+            />
+
+            {pageTopicId &&
+              selectedId &&
+              (() => {
+                const rootMsg = messages.find(
+                  (m) => m.msg_id === pageTopicId,
+                );
+                if (!rootMsg) return null;
+                const rootId = pageTopicId; // narrowed non-null
+                const topicReplies = messages
+                  .filter((m) => m.in_reply_to_msg_id === rootId)
+                  .sort((a, b) =>
+                    (a.created_at || "") < (b.created_at || "") ? -1 : 1,
+                  );
+                return (
                   <div
                     style={{
-                      animation: "dropIconBounce 1.3s ease-in-out infinite",
-                    }}
-                    className="mb-7"
-                  >
-                    <svg
-                      width="72"
-                      height="72"
-                      viewBox="0 0 72 72"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <rect
-                        x="10"
-                        y="6"
-                        width="38"
-                        height="48"
-                        rx="5"
-                        fill="#EEF2FF"
-                        stroke="#818CF8"
-                        strokeWidth="2.5"
-                      />
-                      <path d="M48 6 L48 18 L60 18Z" fill="#818CF8" />
-                      <rect
-                        x="22"
-                        y="6"
-                        width="30"
-                        height="48"
-                        rx="5"
-                        fill="#E0F2FE"
-                        stroke="#38BDF8"
-                        strokeWidth="2.5"
-                        transform="rotate(-6 22 6)"
-                      />
-                      <rect
-                        x="18"
-                        y="10"
-                        width="30"
-                        height="48"
-                        rx="5"
-                        fill="#F0FDF4"
-                        stroke="#4ADE80"
-                        strokeWidth="2.5"
-                        transform="rotate(-12 18 10)"
-                      />
-                      <path
-                        d="M36 54 L36 40 M36 54 L29 47 M36 54 L43 47"
-                        stroke="#6366F1"
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-                  <div
-                    className="text-5xl mb-5"
-                    style={{
-                      fontFamily: "system-ui, -apple-system, sans-serif",
+                      position: "absolute",
+                      inset: 0,
+                      background: "var(--bg-0)",
+                      zIndex: 20,
+                      display: "flex",
+                      flexDirection: "column",
+                      minHeight: 0,
                     }}
                   >
-                    {"可拖拽文件到此处".split("").map((char, i) => (
-                      <span
-                        key={i}
-                        className="drag-overlay-char"
-                        style={{ animationDelay: `${-(i / 8) * 3.5}s` }}
-                      >
-                        {char}
-                      </span>
-                    ))}
+                    <TopicPage
+                      rootMsg={rootMsg}
+                      replies={topicReplies}
+                      channel={selectedChannel}
+                      channelBots={channelBots}
+                      channelUsers={channelUsers}
+                      currentUserId={currentUserId}
+                      onBack={() => setPageTopicId(null)}
+                      onGoToChannel={() => setPageTopicId(null)}
+                      onSendReply={(text) =>
+                        sendTopicReply(selectedId, rootId, text)
+                      }
+                    />
                   </div>
-                  <p className="text-sm text-gray-400 text-center leading-relaxed">
-                    图片：PNG、JPG、JPEG、WEBP、GIF
-                    <br />
-                    文档：PDF、TXT、MD、DOCX、XLSX
-                  </p>
-                </div>
-              </>
-            )}
+                );
+              })()}
 
             {selectedId ? (
               <>
-                {/* Channel header */}
-                <div className="px-3 sm:px-5 py-2.5 sm:py-3 border-b border-gray-100 bg-white flex items-center gap-2 sm:gap-3">
-                  {isMobile && (
-                    <button
-                      type="button"
-                      onClick={() => setSidebarOpen(true)}
-                      className="w-8 h-8 flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 flex-shrink-0"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        strokeWidth={1.5}
-                        stroke="currentColor"
-                        className="w-6 h-6"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
-                        />
-                      </svg>
-                    </button>
-                  )}
-                  <span className="text-gray-400 font-medium text-base select-none">
-                    #
-                  </span>
-                  <h1 className="font-semibold text-gray-900 text-base truncate flex-1">
-                    {selectedChannel?.name || ""}
-                  </h1>
-                  {/* Auto-assist toggle */}
-                  <label
-                    className="flex items-center gap-1.5 cursor-pointer select-none"
-                    title={
-                      autoAssist
-                        ? "自动调用内置助手（开启中）"
-                        : "自动调用内置助手（关闭）"
-                    }
-                  >
-                    <span className="text-xs text-gray-500 whitespace-nowrap hidden sm:inline">
-                      自动接管
-                    </span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={autoAssist}
-                      onClick={() => {
-                        const next = !autoAssist;
-                        setAutoAssist(next);
-                        authFetch(`${API}/channels/${selectedId}`, {
-                          method: "PATCH",
-                          body: JSON.stringify({ auto_assist: next }),
-                        })
-                          .then((r) => r.json())
-                          .then((d) => {
-                            if (d.data) {
-                              setChannels((prev) =>
-                                prev.map((c) =>
-                                  c.channel_id === selectedId
-                                    ? { ...c, auto_assist: d.data.auto_assist }
-                                    : c,
-                                ),
-                              );
-                            }
-                          })
-                          .catch(() => setAutoAssist(!next));
-                      }}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${autoAssist ? "bg-[#1264A3]" : "bg-gray-200"}`}
-                    >
-                      <span
-                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${autoAssist ? "translate-x-[18px]" : "translate-x-[3px]"}`}
-                      />
-                    </button>
-                  </label>
-                  {blockPairsForExport.length > 0 && (
-                    <button
-                      type="button"
-                      title="生成问答总结"
-                      onClick={() => {
-                        setSelectedQaIds(
-                          Object.fromEntries(
-                            blockPairsForExport.map((p) => [
-                              p.question.msg_id,
-                              true,
-                            ]),
-                          ),
-                        );
-                        setSummaryPreview("");
-                        setSummaryModalOpen(true);
-                      }}
-                      className="w-8 h-8 hidden sm:flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-                    >
-                      {/* document-text / notes icon */}
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        className="w-4 h-4"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm2 6a.75.75 0 0 1 .75-.75h6.5a.75.75 0 0 1 0 1.5h-6.5A.75.75 0 0 1 6 10Zm.75 2.25a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setMemoryPanelOpen((o) => !o)}
-                    title="频道记忆"
-                    className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
-                      memoryPanelOpen
-                        ? "bg-[#1264A3] text-white"
-                        : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                    }`}
-                  >
-                    {/* brain icon */}
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      className="w-4 h-4"
-                    >
-                      <path d="M13 3a1 1 0 0 1 1-1 6 6 0 0 1 6 6c0 1.08-.29 2.09-.8 2.96A4 4 0 0 1 20 14a4 4 0 0 1-2.22 3.57c.14.43.22.89.22 1.43a1 1 0 1 1-2 0c0-.5-.1-.95-.27-1.37A4 4 0 0 1 14 14v-1h-1v8a1 1 0 1 1-2 0v-8h-1v1a4 4 0 0 1-1.73 3.63C8.1 18.05 8 18.5 8 19a1 1 0 1 1-2 0c0-.54.08-1 .22-1.43A4 4 0 0 1 4 14a4 4 0 0 1 .8-2.96A6 6 0 0 1 4 8a6 6 0 0 1 6-6 1 1 0 1 1 0 2 4 4 0 0 0-4 4c0 .78.22 1.5.6 2.12A4 4 0 0 1 8 14v-1H7a1 1 0 1 1 0-2h1v-1a2 2 0 1 1 4 0v1h1a1 1 0 1 1 0 2h-1v1a4 4 0 0 1 .4-1.88A4 4 0 0 0 16 8a4 4 0 0 0-3-3.87V10a1 1 0 1 1-2 0V3Z" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setManageMembersOpen(true)}
-                    title="成员管理"
-                    className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="w-4 h-4"
-                    >
-                      <path d="M10 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM1.49 15.326a.78.78 0 0 1-.358-.442 3 3 0 0 1 4.308-3.516 6.484 6.484 0 0 0-1.905 3.959c-.023.222-.014.442.025.654a4.97 4.97 0 0 1-2.07-.655ZM16.44 15.98a4.97 4.97 0 0 0 2.07-.654.78.78 0 0 0 .357-.442 3 3 0 0 0-4.308-3.517 6.484 6.484 0 0 1 1.907 3.96 2.32 2.32 0 0 1-.026.654ZM18 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM5.304 16.19a.844.844 0 0 1-.277-.71 5 5 0 0 1 9.947 0 .843.843 0 0 1-.277.71A6.975 6.975 0 0 1 10 18a6.974 6.974 0 0 1-4.696-1.81Z" />
-                    </svg>
-                  </button>
-                  {currentUser && (
-                    <button
-                      type="button"
-                      onClick={() => setChannelProfileOpen(true)}
-                      title="我的频道资料"
-                      className="w-8 h-8 hidden sm:flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        className="w-4 h-4"
-                      >
-                        <path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
+                <ChannelHeader
+                  channel={selectedChannel}
+                  selectedId={selectedId}
+                  activeDm={
+                    selectedId
+                      ? dms.find((d) => d.channel_id === selectedId) ?? null
+                      : null
+                  }
+                  isMobile={isMobile}
+                  onOpenSidebar={() => setSidebarOpen(true)}
+                  autoAssist={autoAssist}
+                  setAutoAssist={setAutoAssist}
+                  authToken={authToken}
+                  setChannels={setChannels}
+                  blockPairsForExport={blockPairsForExport}
+                  onOpenQaSummary={() => {
+                    setSelectedQaIds(
+                      Object.fromEntries(
+                        blockPairsForExport.map((p) => [
+                          p.question.msg_id,
+                          true,
+                        ]),
+                      ),
+                    );
+                    setSummaryPreview("");
+                    setSummaryModalOpen(true);
+                  }}
+                  memoryTab={memoryTab}
+                  onSetMemoryTab={setMemoryTab}
+                  onOpenManageMembers={() => setManageMembersOpen(true)}
+                  currentUser={currentUser}
+                  onOpenChannelProfile={() => setChannelProfileOpen(true)}
+                  onOpenAnnouncementComposer={
+                    // DMs don't get announcements — the megaphone would make
+                    // no sense in a 1:1 conversation.
+                    selectedChannel?.type === "dm"
+                      ? undefined
+                      : () => setAnnouncementOpen(true)
+                  }
+                  topics={topicRoots
+                    .map((r) => {
+                      const replies = topicRepliesOf(r.msg_id);
+                      // Surface if the user explicitly sent this as a 主题
+                      // (msg_type="topic") OR if a plain message has
+                      // accumulated enough replies to promote implicitly.
+                      const isExplicit = r.msg_type === "topic";
+                      if (
+                        !isExplicit &&
+                        replies.length < TOPIC_DISPLAY_THRESHOLD
+                      ) {
+                        return null;
+                      }
+                      const title =
+                        (r.content || "").replace(/\s+/g, " ").trim().slice(0, 60) ||
+                        "(无标题)";
+                      const last = replies[replies.length - 1];
+                      return {
+                        rootId: r.msg_id,
+                        title,
+                        count: replies.length,
+                        lastTime: last?.created_at
+                          ? formatTs(last.created_at)
+                          : undefined,
+                      };
+                    })
+                    .filter((x): x is NonNullable<typeof x> => x !== null)}
+                  onOpenTopic={(rootId) => {
+                    setPageTopicId(rootId);
+                  }}
+                  onJumpToMessage={(id) => {
+                    const el = document.getElementById(`msg-${id}`);
+                    if (!el) return;
+                    el.scrollIntoView({ block: "center", behavior: "smooth" });
+                    const orig = el.style.transition;
+                    el.style.transition = "background 200ms";
+                    const prev = el.style.background;
+                    el.style.background = "var(--accent-muted)";
+                    setTimeout(() => {
+                      el.style.background = prev;
+                      el.style.transition = orig;
+                    }, 1200);
+                  }}
+                />
 
                 <div
                   ref={messagesContainerRef}
@@ -6261,23 +2420,408 @@ export default function App() {
                           — 已加载全部消息 —
                         </div>
                       )}
-                      {threadRoots.map((m) => {
-                        const replies = threadRepliesOf(m.msg_id);
+                      {!loading &&
+                        !loadingMore &&
+                        messages.length === 0 &&
+                        selectedChannel && (
+                          <div className="an-empty">
+                            <div className="an-empty-big">
+                              # {selectedChannel.name}
+                            </div>
+                            <div className="an-empty-sm">
+                              这里还没有消息。@ 调用一个 Bot 或直接开始对话。
+                            </div>
+                            <div className="an-empty-chips">
+                              {[
+                                "@coordinator 总结这个频道最近的进展",
+                                "这个频道的目标是什么？",
+                                "@coordinator 帮我接下来要做什么",
+                              ].map((s) => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  className="an-empty-chip"
+                                  onClick={() => {
+                                    setInput(s);
+                                    setTimeout(
+                                      () => inputRef.current?.focus(),
+                                      0,
+                                    );
+                                  }}
+                                >
+                                  {s}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      {(() => {
+                      const renderedRows = topicRoots.map((m, idx) => {
+                        // isDM gates the "intimate" bubble + self-right
+                        // treatment; channel rendering is Discord-style
+                        // flat, all-left, with sender grouping.
+                        const isDMRender =
+                          selectedChannel?.type === "dm";
+                        // Stack against the previous root if same sender
+                        // within 2 minutes — hide avatar/header row.
+                        const prevRoot =
+                          idx > 0 ? topicRoots[idx - 1] : null;
+                        const prevTs = prevRoot?.created_at
+                          ? new Date(prevRoot.created_at).getTime()
+                          : 0;
+                        const curTs = m.created_at
+                          ? new Date(m.created_at).getTime()
+                          : 0;
+                        const isStacked =
+                          !isDMRender &&
+                          !!prevRoot &&
+                          prevRoot.sender_id === m.sender_id &&
+                          prevRoot.sender_type === m.sender_type &&
+                          prevRoot.msg_type !== "announcement" &&
+                          prevRoot.msg_type !== "routing" &&
+                          prevRoot.msg_type !== "permission" &&
+                          m.msg_type !== "announcement" &&
+                          m.msg_type !== "routing" &&
+                          m.msg_type !== "permission" &&
+                          m.msg_type !== "topic" &&
+                          prevTs > 0 &&
+                          curTs > 0 &&
+                          curTs - prevTs < 2 * 60 * 1000;
+                        // ── routing card: coordinator picks + plan ──────────
+                        if (m.msg_type === "routing") {
+                          const cd = (m.content_data ?? {}) as Record<
+                            string,
+                            unknown
+                          >;
+                          const q = typeof cd.q === "string" ? cd.q : null;
+                          const plan =
+                            typeof cd.plan === "string" ? cd.plan : null;
+                          const picksRaw = Array.isArray(cd.picks)
+                            ? (cd.picks as Array<Record<string, unknown>>)
+                            : [];
+                          const picks = picksRaw.map((p) => ({
+                            agent:
+                              typeof p.agent === "string" ? p.agent : "agent",
+                            score:
+                              typeof p.score === "string" ? p.score : null,
+                            why: typeof p.why === "string" ? p.why : null,
+                            picked: p.picked === true,
+                            secondary: p.secondary === true,
+                          }));
+                          const coordBot = channelBots.find(
+                            (b) =>
+                              // 现行用户名 + 历史名兜底（"channel bot" 老版本数据库）
+                              b.username === "Coordinator" ||
+                              b.username === "channel bot" ||
+                              b.username === "coordinator",
+                          );
+                          const rTime = m.created_at
+                            ? formatTs(m.created_at)
+                            : "";
+                          return (
+                            <div
+                              key={m.msg_id}
+                              id={`msg-${m.msg_id}`}
+                              className="an-chat-msg pl-16 pr-4 pt-2"
+                            >
+                              <div className="flex items-baseline gap-1.5 mb-1 pl-1">
+                                <span className="text-[13px] font-semibold text-gray-900">
+                                  {coordBot?.display_name ||
+                                    coordBot?.username ||
+                                    "Coordinator"}
+                                </span>
+                                <span
+                                  className="an-tag coord"
+                                  style={{
+                                    fontSize: 9,
+                                    fontWeight: 700,
+                                    letterSpacing: "0.6px",
+                                    padding: "1px 5px",
+                                    borderRadius: 3,
+                                    background: "var(--accent-muted)",
+                                    color: "var(--accent)",
+                                  }}
+                                >
+                                  COORDINATOR
+                                </span>
+                                {rTime && (
+                                  <span className="text-[11px] text-gray-400">
+                                    {rTime}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="an-routing">
+                                {q && (
+                                  <div className="an-rq">
+                                    路由: <b>{q}</b>
+                                  </div>
+                                )}
+                                {picks.length > 0 && (
+                                  <div className="an-picks">
+                                    {picks.map((p) => {
+                                      const bot = channelBots.find(
+                                        (b) => b.username === p.agent,
+                                      );
+                                      const color =
+                                        bot?.avatar_url ?? null;
+                                      return (
+                                        <span
+                                          key={p.agent}
+                                          className={
+                                            "an-pick" +
+                                            (p.picked ? " picked" : "")
+                                          }
+                                          title={p.why || undefined}
+                                        >
+                                          <span
+                                            className="an-dot"
+                                            style={{
+                                              background: color
+                                                ? "var(--accent)"
+                                                : "var(--fg-3)",
+                                            }}
+                                          />
+                                          @{p.agent}
+                                          {p.score && (
+                                            <span
+                                              style={{
+                                                color: "var(--fg-3)",
+                                                marginLeft: 2,
+                                                fontSize: 11,
+                                              }}
+                                            >
+                                              {p.score}
+                                            </span>
+                                          )}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {plan && (
+                                  <div className="an-plan">
+                                    <b>计划:</b> {plan}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // ── permission card: Allow/Deny for tool writes ──────
+                        if (m.msg_type === "permission") {
+                          const cd = (m.content_data ?? {}) as Record<
+                            string,
+                            unknown
+                          >;
+                          const tool =
+                            typeof cd.tool === "string" ? cd.tool : null;
+                          const body =
+                            typeof cd.body === "string"
+                              ? cd.body
+                              : m.content || "";
+                          const resolved = cd.resolved === true;
+                          const resolution =
+                            cd.resolution === "allow" ||
+                            cd.resolution === "deny"
+                              ? cd.resolution
+                              : null;
+                          const senderBot =
+                            m.sender_type === "bot"
+                              ? channelBots.find(
+                                  (b) => b.member_id === m.sender_id,
+                                )
+                              : null;
+                          const senderLabel =
+                            senderBot?.display_name ||
+                            senderBot?.username ||
+                            "Bot";
+                          const pTime = m.created_at
+                            ? formatTs(m.created_at)
+                            : "";
+                          const submitResolution = async (
+                            res: "allow" | "deny",
+                          ) => {
+                            try {
+                              const r = await apiFetch(
+                                `/channels/${selectedId}/messages/${m.msg_id}/resolve`,
+                                {
+                                  method: "POST",
+                                  body: { resolution: res },
+                                  token: authToken,
+                                },
+                              );
+                              if (!r.ok) return;
+                              const data = await r.json();
+                              // Optimistic local update — the WS broadcast also
+                              // merges it back in, so this mainly covers the case
+                              // where the user clicks while offline-ish.
+                              if (data?.data?.content_data) {
+                                setMessages((prev) =>
+                                  prev.map((x) =>
+                                    x.msg_id === m.msg_id
+                                      ? {
+                                          ...x,
+                                          content_data:
+                                            data.data.content_data,
+                                        }
+                                      : x,
+                                  ),
+                                );
+                              }
+                            } catch {
+                              /* ignore — UI stays un-resolved so user can retry */
+                            }
+                          };
+                          return (
+                            <div
+                              key={m.msg_id}
+                              id={`msg-${m.msg_id}`}
+                              className="an-chat-msg pl-16 pr-4 pt-2"
+                            >
+                              <div className="flex items-baseline gap-1.5 mb-1 pl-1">
+                                <span className="text-[13px] font-semibold text-gray-900">
+                                  {senderLabel}
+                                </span>
+                                <span
+                                  className="an-tag bot"
+                                  style={{
+                                    fontSize: 9,
+                                    fontWeight: 700,
+                                    letterSpacing: "0.6px",
+                                    padding: "1px 5px",
+                                    borderRadius: 3,
+                                    background: "var(--surface-soft)",
+                                    color: "var(--fg-3)",
+                                    border: "1px solid var(--border)",
+                                  }}
+                                >
+                                  BOT
+                                </span>
+                                {pTime && (
+                                  <span className="text-[11px] text-gray-400">
+                                    {pTime}
+                                  </span>
+                                )}
+                              </div>
+                              <div
+                                className={
+                                  "an-approval" +
+                                  (resolved ? " resolved" : "")
+                                }
+                              >
+                                <div className="an-body">
+                                  <b>Approval needed.</b> {body}
+                                  {tool && (
+                                    <span
+                                      style={{
+                                        fontFamily: "var(--font-mono)",
+                                        fontSize: 11,
+                                        marginLeft: 6,
+                                        color: "var(--fg-3)",
+                                      }}
+                                    >
+                                      ({tool})
+                                    </span>
+                                  )}
+                                  {resolved && resolution && (
+                                    <span
+                                      style={{
+                                        marginLeft: 8,
+                                        color: "var(--fg-3)",
+                                      }}
+                                    >
+                                      ·{" "}
+                                      {resolution === "allow"
+                                        ? "已通过"
+                                        : "已拒绝"}
+                                    </span>
+                                  )}
+                                </div>
+                                {!resolved && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="deny"
+                                      onClick={() => submitResolution("deny")}
+                                    >
+                                      拒绝
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="allow"
+                                      onClick={() => submitResolution("allow")}
+                                    >
+                                      通过
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // ── announcement card: pinned banner, no bubble ──────
+                        if (m.msg_type === "announcement") {
+                          const cd = (m.content_data ?? {}) as Record<
+                            string,
+                            unknown
+                          >;
+                          const title =
+                            typeof cd.title === "string" ? cd.title : null;
+                          const pinnedById =
+                            typeof cd.pinned_by === "string"
+                              ? cd.pinned_by
+                              : null;
+                          const pinnedUser = pinnedById
+                            ? pinnedById === currentUserId
+                              ? { display_name: "我", username: "me" }
+                              : channelUsers.find(
+                                  (u) => u.member_id === pinnedById,
+                                )
+                            : null;
+                          const pinnedLabel =
+                            pinnedUser?.display_name ||
+                            pinnedUser?.username ||
+                            pinnedById ||
+                            "频道管理员";
+                          const annTime = m.created_at
+                            ? formatTs(m.created_at)
+                            : "";
+                          return (
+                            <div
+                              key={m.msg_id}
+                              id={`msg-${m.msg_id}`}
+                              className="an-chat-msg pl-16 pr-4 pt-2"
+                            >
+                              <div className="an-announce">
+                                <div className="an-ann-ico" aria-hidden="true">
+                                  !
+                                </div>
+                                <div className="an-ann-tag">公告 · Announcement</div>
+                                {title && (
+                                  <div className="an-ann-title">{title}</div>
+                                )}
+                                <div className="an-ann-body">{m.content}</div>
+                                <div className="an-ann-foot">
+                                  <span>由 {pinnedLabel} 置顶</span>
+                                  {annTime && (
+                                    <>
+                                      <span>·</span>
+                                      <span>{annTime}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        const replies = topicRepliesOf(m.msg_id);
 
                         // ── helpers shared by root & replies ──────────────────
                         const replyIcon = (
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 16 16"
-                            fill="currentColor"
-                            className="w-3.5 h-3.5"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M1.22 6.53a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 1.06L3.56 5.25H10a5.75 5.75 0 0 1 0 11.5H6a.75.75 0 0 1 0-1.5h4a4.25 4.25 0 0 0 0-8.5H3.56l1.72 1.72a.75.75 0 1 1-1.06 1.06l-3-3Z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
+                          <ArrowUturnLeftIcon className="w-3.5 h-3.5" />
                         );
 
                         // ── root message ───────────────────────────────────────
@@ -6285,7 +2829,7 @@ export default function App() {
                         const effectiveContent = m.is_secret
                           ? (revealedContent ?? m.content)
                           : m.content;
-                        const { text, form, clarify } =
+                        const { text, clarify } =
                           parseGuidePayload(effectiveContent);
                         const clarifyAnswered =
                           !!clarify &&
@@ -6308,16 +2852,19 @@ export default function App() {
                                 ? "answered"
                                 : "form"
                             : null;
-                        const displayContent = isClarifyReplyUserMessage(
-                          effectiveContent,
-                        )
-                          ? effectiveContent
-                              .replace(
-                                /^@(?:channel bot|引导)\s*澄清回答[：:]\s*/i,
-                                "",
-                              )
-                              .trim()
-                          : text || effectiveContent;
+                        const displayContent = (() => {
+                          const base = isClarifyReplyUserMessage(effectiveContent)
+                            ? effectiveContent
+                                .replace(
+                                  /^@(?:Coordinator|channel bot|引导)\s*澄清回答[：:]\s*/i,
+                                  "",
+                                )
+                                .trim()
+                            : text || effectiveContent;
+                          return m.sender_type === "bot"
+                            ? stripLeadingQuotePrefixes(base)
+                            : base;
+                        })();
                         const isOwn =
                           m.sender_type === "user" &&
                           m.sender_id === currentUserId;
@@ -6332,7 +2879,6 @@ export default function App() {
                           senderBot?.display_name ||
                           senderBot?.username ||
                           "Bot";
-                        const botInitials = botLabel.slice(0, 2).toUpperCase();
                         const senderUser =
                           m.sender_type === "user" && !isOwn
                             ? channelUsers.find(
@@ -6372,7 +2918,255 @@ export default function App() {
                           secretSecsLeft !== null && secretSecsLeft <= 0;
                         const isSecretUnrevealed =
                           m.is_secret && !revealedContent && !isSecretExpired;
-                        const rootBubble = isOwn ? (
+                        const rootBubble = !isDMRender ? (
+                          // ── Channel flat render — Discord style ────────
+                          // All-left alignment, no bubble, sender grouping
+                          // (stacked messages hide their avatar + header).
+                          <div
+                            id={`msg-${m.msg_id}`}
+                            className="an-chat-msg group relative px-4 transition-colors"
+                            style={{
+                              paddingTop: isStacked ? 2 : 8,
+                              paddingBottom: 2,
+                            }}
+                          >
+                            {/* subtle hover tint covering the full row width */}
+                            <div
+                              className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+                              style={{ background: "var(--surface-soft)" }}
+                            />
+                            <div className="relative flex gap-3">
+                              <div className="w-9 flex-shrink-0">
+                                {!isStacked ? (
+                                  m.sender_type === "bot" ? (
+                                    <BotAvatar
+                                      label={botLabel}
+                                      avatarUrl={senderBot?.avatar_url}
+                                      size={36}
+                                      className="mt-0.5"
+                                    />
+                                  ) : (
+                                    <div
+                                      className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-bold select-none mt-0.5"
+                                      style={{
+                                        background: isOwn
+                                          ? "var(--accent)"
+                                          : "var(--fg-3)",
+                                      }}
+                                    >
+                                      {isOwn ? "我" : userInitials}
+                                    </div>
+                                  )
+                                ) : (
+                                  // stacked: show the timestamp in the
+                                  // gutter on hover so time is still
+                                  // discoverable without the header row
+                                  <div
+                                    className="text-right pr-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1"
+                                    style={{
+                                      fontSize: 10,
+                                      color: "var(--fg-3)",
+                                      fontVariantNumeric: "tabular-nums",
+                                    }}
+                                  >
+                                    {msgTime
+                                      ? msgTime.split(",").pop()?.trim()
+                                      : ""}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                {!isStacked && (
+                                  <div className="flex items-baseline gap-2 mb-0.5 flex-wrap">
+                                    <span
+                                      className="font-semibold"
+                                      style={{
+                                        fontSize: "var(--fs-chat-name)",
+                                        lineHeight: 1.2,
+                                        color: "var(--fg-1)",
+                                      }}
+                                    >
+                                      {isOwn
+                                        ? "我"
+                                        : m.sender_type === "bot"
+                                          ? botLabel
+                                          : userLabel}
+                                    </span>
+                                    <span
+                                      className="text-[11px]"
+                                      style={{ color: "var(--fg-3)" }}
+                                    >
+                                      {msgTime}
+                                    </span>
+                                  </div>
+                                )}
+                                {m.content_data?.title ? (
+                                  <div
+                                    className="text-[14px] font-semibold mb-1 leading-snug"
+                                    style={{ color: "var(--fg-1)" }}
+                                  >
+                                    {m.content_data.title as string}
+                                  </div>
+                                ) : null}
+                                {/* Unified reply-quote: lifted out of the
+                                    body so all 4 message paths render the
+                                    "回复某条消息" indicator the exact same
+                                    way (.an-reply-quote with elbow connector). */}
+                                {(() => {
+                                  const mq = parseQuotePrefix(displayContent);
+                                  if (!mq || isSecretExpired || isSecretUnrevealed)
+                                    return null;
+                                  return (
+                                    <div
+                                      className="an-reply-quote"
+                                      title={`回复 ${mq.label}`}
+                                    >
+                                      <span className="an-rq-arrow">↪</span>
+                                      <span className="an-rq-name">{mq.label}</span>
+                                      <span className="an-rq-snip">
+                                        {mq.quote.replace(/\s+/g, " ").trim()}
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
+                                {renderFileAttachments(m)}
+                                <div
+                                  style={{
+                                    fontSize: "var(--fs-chat-body)",
+                                    lineHeight: "var(--lh-chat-body)",
+                                    color: "var(--fg-1)",
+                                    wordWrap: "break-word",
+                                  }}
+                                >
+                                  {isSecretExpired ? (
+                                    <div className="an-secret-veil is-expired">
+                                      <span className="an-secret-veil-icon">
+                                        <LockClosedIcon className="w-5 h-5" />
+                                      </span>
+                                      <div className="an-secret-veil-body">
+                                        <span className="an-secret-veil-label">
+                                          加密消息已过期
+                                        </span>
+                                        <span className="an-secret-veil-meta">
+                                          一次性查看窗口已关闭
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ) : isSecretUnrevealed ? (
+                                    <div className="an-secret-veil">
+                                      <span className="an-secret-veil-icon">
+                                        <LockClosedIcon className="w-5 h-5" />
+                                      </span>
+                                      <div className="an-secret-veil-body">
+                                        <span className="an-secret-veil-label">
+                                          加密消息
+                                        </span>
+                                        <span className="an-secret-veil-meta">
+                                          {secretSecsLeft !== null
+                                            ? `剩余 ${secretSecsLeft}s · 仅 Bot 可读`
+                                            : "仅 Bot 可读"}
+                                        </span>
+                                      </div>
+                                      {secretTokens[m.msg_id] && (
+                                        <button
+                                          type="button"
+                                          className="an-secret-veil-reveal"
+                                          onClick={() =>
+                                            revealSecretMessage(m.msg_id)
+                                          }
+                                        >
+                                          查看
+                                        </button>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    renderWithThinkFolding(
+                                      // Strip the `> [Author]: …\n\n` prefix
+                                      // (rendered separately as .an-reply-quote
+                                      // above) so the body shows only the
+                                      // actual content.
+                                      parseQuotePrefix(displayContent)?.rest ??
+                                        displayContent,
+                                      `${m.msg_id}-`,
+                                      !!m._streaming,
+                                      (src) => {
+                                        setLightboxSrc(src);
+                                        const m2 = src.match(
+                                          /\/files\/([^/]+)\/preview/,
+                                        );
+                                        setLightboxFileId(
+                                          m2 ? m2[1] : null,
+                                        );
+                                      },
+                                      (url, name) =>
+                                        setFilePreviewPanel({ url, filename: name }),
+                                    )
+                                  )}
+                                  {m._streaming &&
+                                    !!(parseGuidePayload(displayContent).text ||
+                                      displayContent) && (
+                                      <span
+                                        className="inline-block w-1.5 h-4 rounded-sm animate-pulse align-middle ml-0.5"
+                                        style={{
+                                          background: "var(--fg-3)",
+                                        }}
+                                      />
+                                    )}
+                                  {renderStopStreamButton(m)}
+                                  {renderPartialBadge(m)}
+                                </div>
+                                {clarifyStatus !== null && selectedId && (
+                                  <ClarifyInlineBlock
+                                    msgId={m.msg_id}
+                                    schema={clarify!}
+                                    status={clarifyStatus}
+                                    replyContent={undefined}
+                                    onContinue={(answers) =>
+                                      handleClarifyContinue(
+                                        m.msg_id,
+                                        clarify!,
+                                        answers,
+                                      )
+                                    }
+                                    onSkip={() =>
+                                      handleClarifySkip(m.msg_id)
+                                    }
+                                  />
+                                )}
+                              </div>
+                              <div className="opacity-0 group-hover:opacity-100 transition-opacity self-start flex items-center gap-1 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  title="复制消息内容"
+                                  onClick={() => copyMessageText(m)}
+                                  className="an-chat-action"
+                                >
+                                  <DocumentDuplicateIcon className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  title="回复"
+                                  onClick={() => {
+                                    setReplyingTo(m);
+                                    const mention =
+                                      m.sender_type === "bot" &&
+                                      senderBot?.username
+                                        ? `@${senderBot.username} `
+                                        : "";
+                                    if (mention) setInput(mention);
+                                    (secretMode
+                                      ? secretInputRef.current
+                                      : inputRef.current
+                                    )?.focus();
+                                  }}
+                                  className="an-chat-action"
+                                >
+                                  {replyIcon}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : isOwn ? (
                           <div
                             id={`msg-${m.msg_id}`}
                             className="group flex flex-row-reverse items-end gap-2.5 px-4 py-1 transition-all"
@@ -6403,9 +3197,9 @@ export default function App() {
                               </button>
                               <div className="flex flex-col items-end max-w-[85%] sm:max-w-[72%]">
                                 <div className="flex items-baseline gap-1.5 mb-1 justify-end">
-                                  {m.msg_type === "thread" && (
+                                  {m.msg_type === "topic" && (
                                     <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-500 font-medium leading-none">
-                                      消息串
+                                      主题
                                     </span>
                                   )}
                                   <span className="text-[11px] text-gray-400 mr-0.5">
@@ -6418,93 +3212,93 @@ export default function App() {
                                   </div>
                                 ) : null}
                                 {renderFileAttachments(m, true)}
-                                <div
-                                  className={`${isSecretUnrevealed ? "bg-amber-500" : isSecretExpired ? "bg-gray-400" : "bg-[#1264A3]"} text-white rounded-2xl rounded-tr-sm px-3.5 py-2 text-[14px] leading-relaxed break-words`}
-                                >
-                                  {isSecretExpired ? (
-                                    <span className="opacity-80">
-                                      🔒 加密消息（已过期）
-                                    </span>
-                                  ) : isSecretUnrevealed ? (
-                                    <div className="flex items-center gap-2">
-                                      <span>🔒 加密消息</span>
-                                      {secretSecsLeft !== null && (
-                                        <span className="text-[11px] opacity-70 tabular-nums">
-                                          {secretSecsLeft}s
-                                        </span>
-                                      )}
-                                      {secretTokens[m.msg_id] && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            fetch(
-                                              `${API}/channels/${selectedId}/messages/${m.msg_id}/secret?token=${encodeURIComponent(secretTokens[m.msg_id])}`,
-                                              {
-                                                headers: {
-                                                  Authorization: `Bearer ${authToken}`,
-                                                },
-                                              },
-                                            )
-                                              .then((r) => r.json())
-                                              .then((d) => {
-                                                if (d.data?.content) {
-                                                  setRevealedSecrets(
-                                                    (prev) => ({
-                                                      ...prev,
-                                                      [m.msg_id]:
-                                                        d.data.content,
-                                                    }),
-                                                  );
-                                                } else {
-                                                  alert(
-                                                    d.detail ||
-                                                      "无法查看加密内容",
-                                                  );
-                                                }
-                                              })
-                                              .catch(() => alert("请求失败"));
-                                          }}
-                                          className="text-[12px] underline opacity-80 hover:opacity-100"
-                                        >
-                                          查看
-                                        </button>
-                                      )}
+                                {/* If this user message starts with a "> [X]: ..."
+                                    quote prefix (set when the user used the
+                                    reply UI), surface it as a small-gray
+                                    .an-reply-quote ABOVE the bubble. The
+                                    bubble itself then renders just `q.rest`
+                                    so the parent context doesn't intrude on
+                                    the body. The CSS connector elbow visually
+                                    bridges quote → body. */}
+                                {(() => {
+                                  const q = parseQuotePrefix(displayContent);
+                                  if (!q || isSecretExpired || isSecretUnrevealed)
+                                    return null;
+                                  return (
+                                    <div
+                                      className="an-reply-quote"
+                                      title={`回复 ${q.label}`}
+                                    >
+                                      <span className="an-rq-arrow">↪</span>
+                                      <span className="an-rq-name">{q.label}</span>
+                                      <span className="an-rq-snip">
+                                        {q.quote.replace(/\s+/g, " ").trim()}
+                                      </span>
                                     </div>
-                                  ) : (
-                                    (() => {
+                                  );
+                                })()}
+                                {isSecretExpired ? (
+                                  <div className="an-secret-veil is-expired">
+                                    <span className="an-secret-veil-icon">
+                                      <LockClosedIcon className="w-5 h-5" />
+                                    </span>
+                                    <div className="an-secret-veil-body">
+                                      <span className="an-secret-veil-label">
+                                        加密消息已过期
+                                      </span>
+                                      <span className="an-secret-veil-meta">
+                                        一次性查看窗口已关闭
+                                      </span>
+                                    </div>
+                                  </div>
+                                ) : isSecretUnrevealed ? (
+                                  <div className="an-secret-veil">
+                                    <span className="an-secret-veil-icon">
+                                      <LockClosedIcon className="w-5 h-5" />
+                                    </span>
+                                    <div className="an-secret-veil-body">
+                                      <span className="an-secret-veil-label">
+                                        加密消息
+                                      </span>
+                                      <span className="an-secret-veil-meta">
+                                        {secretSecsLeft !== null
+                                          ? `剩余 ${secretSecsLeft}s · 仅 Bot 可读`
+                                          : "仅 Bot 可读"}
+                                      </span>
+                                    </div>
+                                    {secretTokens[m.msg_id] && (
+                                      <button
+                                        type="button"
+                                        className="an-secret-veil-reveal"
+                                        onClick={() =>
+                                          revealSecretMessage(m.msg_id)
+                                        }
+                                      >
+                                        查看
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div
+                                    className="bg-[#1264A3] text-white rounded-2xl rounded-tr-sm px-3.5 py-2 text-[14px] leading-relaxed break-words"
+                                  >
+                                    {(() => {
+                                      // The quote prefix (if any) is already
+                                      // rendered above as .an-reply-quote;
+                                      // here we render only the body text.
                                       const q =
                                         parseQuotePrefix(displayContent);
-                                      if (q)
-                                        return (
-                                          <>
-                                            <div className="border-l-2 border-white/50 pl-2 mb-2 text-[12px] leading-snug opacity-80">
-                                              <span className="font-semibold block">
-                                                {q.label}
-                                              </span>
-                                              <span className="block line-clamp-2">
-                                                {q.quote}
-                                              </span>
-                                            </div>
-                                            <div className="whitespace-pre-wrap">
-                                              {q.rest
-                                                .replace(
-                                                  /!\[.*?\]\(.*?\)\s*/g,
-                                                  "",
-                                                )
-                                                .trim() || q.rest}
-                                            </div>
-                                          </>
-                                        );
+                                      const body = q ? q.rest : displayContent;
                                       return (
                                         <span className="whitespace-pre-wrap">
-                                          {displayContent
+                                          {body
                                             .replace(/!\[.*?\]\(.*?\)\s*/g, "")
-                                            .trim() || displayContent}
+                                            .trim() || body}
                                         </span>
                                       );
-                                    })()
-                                  )}
-                                </div>
+                                    })()}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -6515,17 +3309,11 @@ export default function App() {
                           >
                             <div className="flex-shrink-0 mt-0.5">
                               {m.sender_type === "bot" ? (
-                                senderBot?.avatar_url ? (
-                                  <img
-                                    src={senderBot.avatar_url}
-                                    alt={botLabel}
-                                    className="w-8 h-8 rounded-xl object-cover"
-                                  />
-                                ) : (
-                                  <div className="w-8 h-8 rounded-xl bg-[#2EB67D] flex items-center justify-center text-white text-xs font-bold select-none">
-                                    {botInitials}
-                                  </div>
-                                )
+                                <BotAvatar
+                                  label={botLabel}
+                                  avatarUrl={senderBot?.avatar_url}
+                                  size={32}
+                                />
                               ) : (
                                 <div className="w-8 h-8 rounded-xl bg-gray-400 flex items-center justify-center text-white text-xs font-bold select-none">
                                   {userInitials}
@@ -6544,9 +3332,9 @@ export default function App() {
                                     Bot
                                   </span>
                                 )}
-                                {m.msg_type === "thread" && (
+                                {m.msg_type === "topic" && (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-500 font-medium leading-none">
-                                    消息串
+                                    主题
                                   </span>
                                 )}
                                 <span className="text-[11px] text-gray-400 leading-none">
@@ -6558,51 +3346,71 @@ export default function App() {
                                   {m.content_data.title as string}
                                 </div>
                               ) : null}
+                              {(() => {
+                                const cq = parseQuotePrefix(text);
+                                if (!cq) return null;
+                                return (
+                                  <div
+                                    className="an-reply-quote"
+                                    title={`回复 ${cq.label}`}
+                                  >
+                                    <span className="an-rq-arrow">↪</span>
+                                    <span className="an-rq-name">
+                                      {cq.label}
+                                    </span>
+                                    <span className="an-rq-snip">
+                                      {cq.quote.replace(/\s+/g, " ").trim()}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                               {renderFileAttachments(m)}
                               <div
-                                className={`${isSecretExpired ? "bg-gray-100" : isSecretUnrevealed ? "bg-amber-100" : "bg-gray-100"} rounded-2xl rounded-tl-sm px-3.5 py-2 text-[14px] leading-relaxed text-gray-800`}
+                                className="rounded-2xl rounded-tl-sm px-3.5 py-2 text-[14px] leading-relaxed"
+                                style={{
+                                  background: isSecretUnrevealed
+                                    ? "var(--orange-muted)"
+                                    : "var(--surface-soft)",
+                                  color: "var(--fg-1)",
+                                  border: "1px solid var(--border)",
+                                }}
                               >
                                 {isSecretExpired ? (
-                                  <span className="text-gray-400">
-                                    🔒 加密消息（已过期）
-                                  </span>
-                                ) : isSecretUnrevealed ? (
-                                  <div className="flex items-center gap-2 text-amber-700">
-                                    <span>🔒 加密消息</span>
-                                    {secretSecsLeft !== null && (
-                                      <span className="text-[11px] opacity-70 tabular-nums">
-                                        {secretSecsLeft}s
+                                  <div className="an-secret-veil is-expired">
+                                    <span className="an-secret-veil-icon">
+                                      <LockClosedIcon className="w-5 h-5" />
+                                    </span>
+                                    <div className="an-secret-veil-body">
+                                      <span className="an-secret-veil-label">
+                                        加密消息已过期
                                       </span>
-                                    )}
+                                      <span className="an-secret-veil-meta">
+                                        一次性查看窗口已关闭
+                                      </span>
+                                    </div>
+                                  </div>
+                                ) : isSecretUnrevealed ? (
+                                  <div className="an-secret-veil">
+                                    <span className="an-secret-veil-icon">
+                                      <LockClosedIcon className="w-5 h-5" />
+                                    </span>
+                                    <div className="an-secret-veil-body">
+                                      <span className="an-secret-veil-label">
+                                        加密消息
+                                      </span>
+                                      <span className="an-secret-veil-meta">
+                                        {secretSecsLeft !== null
+                                          ? `剩余 ${secretSecsLeft}s · 仅 Bot 可读`
+                                          : "仅 Bot 可读"}
+                                      </span>
+                                    </div>
                                     {secretTokens[m.msg_id] && (
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          fetch(
-                                            `${API}/channels/${selectedId}/messages/${m.msg_id}/secret?token=${encodeURIComponent(secretTokens[m.msg_id])}`,
-                                            {
-                                              headers: {
-                                                Authorization: `Bearer ${authToken}`,
-                                              },
-                                            },
-                                          )
-                                            .then((r) => r.json())
-                                            .then((d) => {
-                                              if (d.data?.content) {
-                                                setRevealedSecrets((prev) => ({
-                                                  ...prev,
-                                                  [m.msg_id]: d.data.content,
-                                                }));
-                                              } else {
-                                                alert(
-                                                  d.detail ||
-                                                    "无法查看加密内容",
-                                                );
-                                              }
-                                            })
-                                            .catch(() => alert("请求失败"));
-                                        }}
-                                        className="text-[12px] underline opacity-80 hover:opacity-100"
+                                        className="an-secret-veil-reveal"
+                                        onClick={() =>
+                                          revealSecretMessage(m.msg_id)
+                                        }
                                       >
                                         查看
                                       </button>
@@ -6612,7 +3420,7 @@ export default function App() {
                                   <span className="inline-block w-2 h-4 bg-gray-400 rounded-sm animate-pulse align-middle" />
                                 ) : (
                                   renderWithThinkFolding(
-                                    text,
+                                    parseQuotePrefix(text)?.rest ?? text,
                                     `${m.msg_id}-`,
                                     !!m._streaming,
                                     (src) => {
@@ -6634,26 +3442,9 @@ export default function App() {
                                   !!text && (
                                     <span className="inline-block w-1.5 h-4 bg-gray-400 rounded-sm animate-pulse align-middle ml-0.5" />
                                   )}
+                                {!isSecretUnrevealed && renderStopStreamButton(m)}
+                                {!isSecretUnrevealed && renderPartialBadge(m)}
                               </div>
-                              {form &&
-                                selectedId &&
-                                m.sender_type === "bot" && (
-                                  <GuideFormBlock
-                                    msgId={m.msg_id}
-                                    form={form}
-                                    channelId={selectedId}
-                                    onReply={(newMsg) =>
-                                      setMessages((prev) => [...prev, newMsg])
-                                    }
-                                    onChannelsRefresh={() =>
-                                      refreshChannels(
-                                        setChannels,
-                                        authToken ?? undefined,
-                                      )
-                                    }
-                                    userToken={authToken ?? undefined}
-                                  />
-                                )}
                               {clarifyStatus !== null && selectedId && (
                                 <ClarifyInlineBlock
                                   msgId={m.msg_id}
@@ -6693,17 +3484,34 @@ export default function App() {
                           </div>
                         );
 
-                        // ── thread card ───────────────────────────────────────
-                        const isExpanded = expandedThreads.has(m.msg_id);
+                        // ── topic card ───────────────────────────────────────
+                        // An explicit 主题 (msg_type="topic") should render
+                        // as a topic card regardless of reply count, so the
+                        // user sees the intent reflected immediately. The
+                        // 4-reply threshold only gates implicit promotion of
+                        // a normal message that's accumulated replies.
+                        const isExplicitTopic = m.msg_type === "topic";
+                        // Force expansion when there's nothing to collapse
+                        // (0-reply explicit topic) — otherwise the collapsed
+                        // preview path would blow up on replies[length-1].
+                        const isExpanded =
+                          expandedTopics.has(m.msg_id) ||
+                          (isExplicitTopic && replies.length === 0);
 
-                        // No replies — render as a normal standalone bubble
-                        if (replies.length === 0) {
+                        // No replies and not an explicit topic — render as a
+                        // plain standalone bubble.
+                        if (!isExplicitTopic && replies.length === 0) {
                           return <div key={m.msg_id}>{rootBubble}</div>;
                         }
 
-                        // Single reply — render root bubble + one reply inline (no card)
-                        if (replies.length === 1) {
-                          const r = replies[0];
+                        // 1–3 replies on a plain message — inline render, no
+                        // topic chrome. Explicit 主题 messages fall through
+                        // to the topic-card branch below regardless of count.
+                        if (
+                          !isExplicitTopic &&
+                          replies.length < TOPIC_DISPLAY_THRESHOLD
+                        ) {
+                          const renderReplyRow = (r: Message) => {
                           const rIsOwn =
                             r.sender_type === "user" &&
                             r.sender_id === currentUserId;
@@ -6737,17 +3545,21 @@ export default function App() {
                             : "";
                           const {
                             text: rTextRaw,
-                            form: rForm,
                             clarify: rClarify,
                           } = parseGuidePayload(r.content);
-                          const rDisplay = isClarifyReplyUserMessage(r.content)
-                            ? r.content
-                                .replace(
-                                  /^@(?:channel bot|引导)\s*澄清回答[：:]\s*/i,
-                                  "",
-                                )
-                                .trim()
-                            : rTextRaw || r.content;
+                          const rDisplay = (() => {
+                            const base = isClarifyReplyUserMessage(r.content)
+                              ? r.content
+                                  .replace(
+                                    /^@(?:Coordinator|channel bot|引导)\s*澄清回答[：:]\s*/i,
+                                    "",
+                                  )
+                                  .trim()
+                              : rTextRaw || r.content;
+                            return r.sender_type === "bot"
+                              ? stripLeadingQuotePrefixes(base)
+                              : base;
+                          })();
                           const rClarifyAnswered =
                             !!rClarify &&
                             messages.some(
@@ -6769,55 +3581,166 @@ export default function App() {
                                   ? "answered"
                                   : "form"
                               : null;
+                          // Channel flat-reply render: no bubble, all-left,
+                          // iridescent outline on bot replies. DMs keep the
+                          // bubble treatment below.
+                          const rFlat = !isDMRender;
                           return (
-                            <div key={m.msg_id}>
-                              {rootBubble}
-                              <div
-                                id={`msg-${r.msg_id}`}
-                                className="group flex items-start gap-2.5 px-4 py-1 transition-all"
-                              >
+                            <div
+                              key={r.msg_id}
+                              id={`msg-${r.msg_id}`}
+                              className={
+                                rFlat
+                                  ? "an-chat-msg group flex gap-3 px-4 py-1 items-start transition-colors"
+                                  : `group flex gap-2.5 px-4 py-1 transition-all ${
+                                      rIsOwn
+                                        ? "flex-row-reverse items-end"
+                                        : "items-start"
+                                    }`
+                              }
+                            >
                                 <div className="flex-shrink-0 mt-0.5">
                                   {r.sender_type === "bot" ? (
                                     rBot?.avatar_url ? (
                                       <img
                                         src={rBot.avatar_url}
                                         alt={rLabel}
-                                        className="w-8 h-8 rounded-xl object-cover"
+                                        className={
+                                          rFlat
+                                            ? "w-9 h-9 rounded-xl object-cover"
+                                            : "w-8 h-8 rounded-xl object-cover"
+                                        }
                                       />
                                     ) : (
-                                      <div className="w-8 h-8 rounded-xl bg-[#2EB67D] flex items-center justify-center text-white text-xs font-bold select-none">
+                                      <div
+                                        className={
+                                          rFlat
+                                            ? "w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-bold select-none"
+                                            : "w-8 h-8 rounded-xl bg-[#2EB67D] flex items-center justify-center text-white text-xs font-bold select-none"
+                                        }
+                                        style={
+                                          rFlat
+                                            ? { background: "var(--fg-3)" }
+                                            : undefined
+                                        }
+                                      >
                                         {rInitials}
                                       </div>
                                     )
                                   ) : (
                                     <div
-                                      className={`w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold select-none ${rIsOwn ? "bg-[#1264A3]" : "bg-gray-400"}`}
+                                      className={
+                                        rFlat
+                                          ? "w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-bold select-none"
+                                          : `w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold select-none ${rIsOwn ? "bg-[#1264A3]" : "bg-gray-400"}`
+                                      }
+                                      style={
+                                        rFlat
+                                          ? {
+                                              background: rIsOwn
+                                                ? "var(--accent)"
+                                                : "var(--fg-3)",
+                                            }
+                                          : undefined
+                                      }
                                     >
                                       {rIsOwn ? "我" : rInitials}
                                     </div>
                                   )}
                                 </div>
-                                <div className="flex flex-col max-w-[85%] sm:max-w-[72%]">
-                                  <div className="flex items-baseline gap-1.5 mb-1">
-                                    <span className="font-semibold text-[13px] text-gray-900 leading-none">
-                                      {rLabel}
+                                <div
+                                  className={
+                                    rFlat
+                                      ? "flex-1 min-w-0 flex flex-col"
+                                      : `flex flex-col max-w-[85%] sm:max-w-[72%] ${rIsOwn ? "items-end" : ""}`
+                                  }
+                                >
+                                  <div
+                                    className={
+                                      rFlat
+                                        ? "flex items-baseline gap-2 mb-0.5 flex-wrap"
+                                        : `flex items-baseline gap-1.5 mb-1 ${rIsOwn ? "justify-end" : ""}`
+                                    }
+                                  >
+                                    <span
+                                      className="font-semibold text-[13.5px] leading-none"
+                                      style={{ color: "var(--fg-1)" }}
+                                    >
+                                      {rIsOwn ? "我" : rLabel}
                                     </span>
-                                    {r.sender_type === "bot" && (
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#2EB67D]/10 text-[#2EB67D] font-medium leading-none">
-                                        Bot
-                                      </span>
-                                    )}
-                                    <span className="text-[11px] text-gray-400 leading-none">
+                                    <span
+                                      className="text-[11px] leading-none"
+                                      style={{ color: "var(--fg-3)" }}
+                                    >
                                       {rTime}
                                     </span>
                                   </div>
+                                  {(() => {
+                                    // Unified reply-quote rendering for the
+                                    // rFlat (channel-list reply) path. Source
+                                    // of truth = the `> [Author]: snippet`
+                                    // prefix on the message text, set by the
+                                    // reply UI. We strip it from the body
+                                    // and surface it as .an-reply-quote so
+                                    // the visual exactly matches the topic-
+                                    // view and own-bubble paths.
+                                    const rq = parseQuotePrefix(rDisplay);
+                                    if (!rq) return null;
+                                    return (
+                                      <div
+                                        className="an-reply-quote"
+                                        title={`回复 ${rq.label}`}
+                                      >
+                                        <span className="an-rq-arrow">↪</span>
+                                        <span className="an-rq-name">
+                                          {rq.label}
+                                        </span>
+                                        <span className="an-rq-snip">
+                                          {rq.quote.replace(/\s+/g, " ").trim()}
+                                        </span>
+                                      </div>
+                                    );
+                                  })()}
                                   {renderFileAttachments(r)}
-                                  <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-3.5 py-2 text-[14px] leading-relaxed text-gray-800">
+                                  <div
+                                    className={
+                                      rFlat
+                                        ? ""
+                                        : `rounded-2xl px-3.5 py-2 text-[14px] leading-relaxed ${
+                                            rIsOwn
+                                              ? "text-white rounded-tr-sm"
+                                              : "rounded-tl-sm"
+                                          }`
+                                    }
+                                    style={
+                                      rFlat
+                                        ? {
+                                            fontSize: "var(--fs-chat-body)",
+                                            lineHeight:
+                                              "var(--lh-chat-body)",
+                                            color: "var(--fg-1)",
+                                            wordWrap: "break-word",
+                                          }
+                                        : rIsOwn
+                                          ? { background: "var(--accent)" }
+                                          : {
+                                              background:
+                                                "var(--surface-soft)",
+                                              color: "var(--fg-1)",
+                                              border:
+                                                "1px solid var(--border)",
+                                            }
+                                    }
+                                  >
                                     {r._streaming && !rTextRaw ? (
                                       <span className="inline-block w-2 h-4 bg-gray-400 rounded-sm animate-pulse align-middle" />
                                     ) : (
                                       renderWithThinkFolding(
-                                        rDisplay,
+                                        // Drop the `> [Author]: …\n\n` prefix
+                                        // (now rendered above as an
+                                        // .an-reply-quote) so the body shows
+                                        // only the actual content.
+                                        parseQuotePrefix(rDisplay)?.rest ?? rDisplay,
                                         `${r.msg_id}-`,
                                         !!r._streaming,
                                         (src) => {
@@ -6837,29 +3760,9 @@ export default function App() {
                                     {r._streaming && !!rTextRaw && (
                                       <span className="inline-block w-1.5 h-4 bg-gray-400 rounded-sm animate-pulse align-middle ml-0.5" />
                                     )}
+                                    {renderStopStreamButton(r)}
+                                    {renderPartialBadge(r)}
                                   </div>
-                                  {rForm &&
-                                    selectedId &&
-                                    r.sender_type === "bot" && (
-                                      <GuideFormBlock
-                                        msgId={r.msg_id}
-                                        form={rForm}
-                                        channelId={selectedId}
-                                        onReply={(newMsg) =>
-                                          setMessages((prev) => [
-                                            ...prev,
-                                            newMsg,
-                                          ])
-                                        }
-                                        onChannelsRefresh={() =>
-                                          refreshChannels(
-                                            setChannels,
-                                            authToken ?? undefined,
-                                          )
-                                        }
-                                        userToken={authToken ?? undefined}
-                                      />
-                                    )}
                                   {rClarifyStatus !== null && selectedId && (
                                     <ClarifyInlineBlock
                                       msgId={r.msg_id}
@@ -6877,222 +3780,232 @@ export default function App() {
                                     />
                                   )}
                                 </div>
-                                <button
-                                  type="button"
-                                  title="回复"
-                                  onClick={() => {
-                                    setReplyingTo(r);
-                                    const mention =
-                                      r.sender_type === "bot" && rBot?.username
-                                        ? `@${rBot.username} `
-                                        : "";
-                                    if (mention) setInput(mention);
-                                    (secretMode
-                                      ? secretInputRef.current
-                                      : inputRef.current
-                                    )?.focus();
-                                  }}
-                                  className="opacity-0 group-hover:opacity-100 transition-opacity self-center w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 flex-shrink-0"
-                                >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 16 16"
-                                    fill="currentColor"
-                                    className="w-3.5 h-3.5"
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity self-start flex items-center gap-1 flex-shrink-0">
+                                  <button
+                                    type="button"
+                                    title="复制消息内容"
+                                    onClick={() => copyMessageText(r)}
+                                    className="an-chat-action"
                                   >
-                                    <path
-                                      fillRule="evenodd"
-                                      d="M1.22 6.53a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 1.06L3.56 5.25H10a5.75 5.75 0 0 1 0 11.5H6a.75.75 0 0 1 0-1.5h4a4.25 4.25 0 0 0 0-8.5H3.56l1.72 1.72a.75.75 0 1 1-1.06 1.06l-3-3Z"
-                                      clipRule="evenodd"
-                                    />
-                                  </svg>
-                                </button>
+                                    <DocumentDuplicateIcon className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title="回复"
+                                    onClick={() => {
+                                      setReplyingTo(r);
+                                      const mention =
+                                        r.sender_type === "bot" && rBot?.username
+                                          ? `@${rBot.username} `
+                                          : "";
+                                      if (mention) setInput(mention);
+                                      (secretMode
+                                        ? secretInputRef.current
+                                        : inputRef.current
+                                      )?.focus();
+                                    }}
+                                    className="an-chat-action"
+                                  >
+                                    <ArrowUturnLeftIcon className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </div>
+                          );
+                          };
+                          return (
+                            <div key={m.msg_id}>
+                              {rootBubble}
+                              {replies.map(renderReplyRow)}
                             </div>
                           );
                         }
 
-                        // ≥2 replies — Collapsed thread card (overview) ───────────
+                        // ≥ TOPIC_DISPLAY_THRESHOLD replies — Collapsed topic
+                        // card (overview) ───────────────────────────────────────
+                        // Compact form: stacked participant avatars + summary.
+                        // No full question/last-reply preview — click to expand.
                         if (!isExpanded) {
-                          const qPreview = displayContent
-                            .replace(/\s+/g, " ")
-                            .slice(0, 60);
-                          const qOverflow =
-                            displayContent.replace(/\s+/g, " ").length > 60;
-                          const lastReply = replies[replies.length - 1];
-                          const { text: lastRText } = parseGuidePayload(
-                            lastReply.content,
+                          const titleSummary =
+                            (m.content_data?.title as string | undefined) ||
+                            displayContent
+                              .replace(/\s+/g, " ")
+                              .trim()
+                              .slice(0, 80) ||
+                            "(无标题)";
+                          // Participants = root sender ∪ all unique reply
+                          // senders. Keep insertion order so the root comes
+                          // first and reads as the "owner" of the topic.
+                          type Participant = {
+                            key: string;
+                            kind: "user" | "bot";
+                            label: string;
+                            color: string;
+                            avatarUrl?: string;
+                            initial: string;
+                            isSelf?: boolean;
+                          };
+                          const addParticipant = (
+                            acc: Participant[],
+                            sid: string,
+                            stype: string,
+                          ) => {
+                            const key = `${stype}:${sid}`;
+                            if (acc.some((p) => p.key === key)) return;
+                            if (stype === "bot") {
+                              const b = channelBots.find(
+                                (x) => x.member_id === sid,
+                              );
+                              const label =
+                                b?.display_name || b?.username || "Bot";
+                              acc.push({
+                                key,
+                                kind: "bot",
+                                label,
+                                color: "var(--green)",
+                                avatarUrl: b?.avatar_url,
+                                initial: label.slice(0, 1).toUpperCase(),
+                              });
+                            } else {
+                              const isSelf = sid === currentUserId;
+                              const u = isSelf
+                                ? null
+                                : channelUsers.find(
+                                    (x) => x.member_id === sid,
+                                  );
+                              const label = isSelf
+                                ? "我"
+                                : u?.display_name ||
+                                  u?.username ||
+                                  "用户";
+                              acc.push({
+                                key,
+                                kind: "user",
+                                label,
+                                color: isSelf
+                                  ? "var(--accent)"
+                                  : "var(--fg-3)",
+                                avatarUrl: u?.avatar_url,
+                                initial: isSelf
+                                  ? "我"
+                                  : label.slice(0, 1).toUpperCase(),
+                                isSelf,
+                              });
+                            }
+                          };
+                          const participants: Participant[] = [];
+                          addParticipant(
+                            participants,
+                            m.sender_id,
+                            m.sender_type,
                           );
-                          const lastRDisplay = (
-                            isClarifyReplyUserMessage(lastReply.content)
-                              ? lastReply.content
-                                  .replace(
-                                    /^@(?:channel bot|引导)\s*澄清回答[：:]\s*/i,
-                                    "",
-                                  )
-                                  .trim()
-                              : lastRText || lastReply.content
-                          ).replace(/\s+/g, " ");
-                          const replyBotIds = [
-                            ...new Set(
-                              replies
-                                .filter((r) => r.sender_type === "bot")
-                                .map((r) => r.sender_id),
-                            ),
-                          ];
+                          for (const r of replies) {
+                            addParticipant(
+                              participants,
+                              r.sender_id,
+                              r.sender_type,
+                            );
+                          }
+                          const visibleAvatars = participants.slice(0, 5);
+                          const extraCount =
+                            participants.length - visibleAvatars.length;
+
                           return (
                             <div
                               key={m.msg_id}
                               id={`msg-${m.msg_id}`}
-                              className="mx-3 my-1.5"
+                              className="an-chat-msg pl-16 my-1.5"
                             >
                               <button
                                 type="button"
-                                onClick={() => toggleThread(m.msg_id)}
-                                className="w-full text-left rounded-xl border border-gray-300 bg-gray-100 hover:border-[#1264A3]/50 hover:shadow transition-all overflow-hidden"
+                                onClick={() => toggleTopic(m.msg_id)}
+                                className="an-topic-chip"
+                                title={titleSummary}
                               >
-                                {/* Question row */}
-                                <div className="flex items-center gap-2.5 px-3 pt-2.5 pb-2">
-                                  {isOwn ? (
-                                    <div className="w-7 h-7 rounded-lg bg-[#1264A3] flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 select-none">
-                                      我
-                                    </div>
-                                  ) : m.sender_type === "bot" ? (
-                                    senderBot?.avatar_url ? (
+                                <span className="an-topic-chip-faces">
+                                  {visibleAvatars.map((p) =>
+                                    p.avatarUrl ? (
                                       <img
-                                        src={senderBot.avatar_url}
-                                        alt={botLabel}
-                                        className="w-7 h-7 rounded-lg object-cover flex-shrink-0"
+                                        key={p.key}
+                                        src={p.avatarUrl}
+                                        alt={p.label}
+                                        className="an-topic-chip-face"
                                       />
                                     ) : (
-                                      <div className="w-7 h-7 rounded-lg bg-[#2EB67D] flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 select-none">
-                                        {botInitials}
-                                      </div>
-                                    )
-                                  ) : (
-                                    <div className="w-7 h-7 rounded-lg bg-gray-400 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 select-none">
-                                      {userInitials}
-                                    </div>
-                                  )}
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-1.5 mb-0.5">
-                                      <span className="text-[12px] font-semibold text-gray-600">
-                                        {isOwn
-                                          ? "我"
-                                          : m.sender_type === "bot"
-                                            ? botLabel
-                                            : userLabel}
+                                      <span
+                                        key={p.key}
+                                        className="an-topic-chip-face"
+                                        style={{ background: p.color }}
+                                      >
+                                        {p.initial}
                                       </span>
-                                      <span className="text-[11px] text-gray-400">
-                                        {msgTime}
-                                      </span>
-                                    </div>
-                                    <p className="text-[13px] text-gray-800 truncate leading-snug font-medium">
-                                      {qPreview}
-                                      {qOverflow ? "…" : ""}
-                                    </p>
-                                  </div>
-                                </div>
-                                {/* Bot reply preview row */}
-                                <div className="flex items-center gap-2 px-3 py-2 border-t border-gray-300/50 bg-gray-200/40">
-                                  {replyBotIds.length > 0 && (
-                                    <div className="flex -space-x-1.5 flex-shrink-0">
-                                      {replyBotIds.slice(0, 4).map((bid) => {
-                                        const rb = channelBots.find(
-                                          (b) => b.member_id === bid,
-                                        );
-                                        const rl =
-                                          rb?.display_name ||
-                                          rb?.username ||
-                                          "Bot";
-                                        return rb?.avatar_url ? (
-                                          <img
-                                            key={bid}
-                                            src={rb.avatar_url}
-                                            alt={rl}
-                                            className="w-5 h-5 rounded-md object-cover border-2 border-white"
-                                          />
-                                        ) : (
-                                          <div
-                                            key={bid}
-                                            className="w-5 h-5 rounded-md bg-[#2EB67D] flex items-center justify-center text-white text-[9px] font-bold border-2 border-white select-none"
-                                          >
-                                            {rl.slice(0, 1).toUpperCase()}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
+                                    ),
                                   )}
-                                  <span className="flex-1 min-w-0 text-[12px] text-gray-500 truncate">
-                                    {lastRDisplay.slice(0, 80)}
-                                    {lastRDisplay.length > 80 ? "…" : ""}
+                                  {extraCount > 0 && (
+                                    <span
+                                      className="an-topic-chip-face"
+                                      style={{
+                                        background: "var(--bg-2)",
+                                        color: "var(--fg-2)",
+                                      }}
+                                    >
+                                      +{extraCount}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="an-topic-chip-body">
+                                  <span className="an-topic-chip-title">
+                                    {titleSummary}
                                   </span>
-                                  <span className="text-[11px] font-medium text-[#1264A3] whitespace-nowrap flex-shrink-0">
-                                    {replies.length} 条回复
+                                  <span className="an-topic-chip-meta">
+                                    主题 · {replies.length + 1} 条消息 ·{" "}
+                                    {participants.length} 人参与
                                   </span>
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 16 16"
-                                    fill="currentColor"
-                                    className="w-3.5 h-3.5 text-gray-400 flex-shrink-0"
-                                  >
-                                    <path
-                                      fillRule="evenodd"
-                                      d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
-                                      clipRule="evenodd"
-                                    />
-                                  </svg>
-                                </div>
+                                </span>
+                                <span className="an-topic-chip-open">
+                                  展开 ›
+                                </span>
                               </button>
                             </div>
                           );
                         }
 
-                        // ── Expanded thread card ───────────────────────────────
+                        // ── Expanded topic card ───────────────────────────────
                         return (
                           <div
                             key={m.msg_id}
                             id={`msg-${m.msg_id}`}
-                            className="mx-3 my-1.5 rounded-xl border border-[#1264A3]/30 bg-gray-100 shadow-sm overflow-hidden"
+                            className="an-chat-msg pl-16 my-1.5"
                           >
-                            {/* Thread header */}
+                          <div
+                            className="rounded-xl border border-[#1264A3]/30 bg-gray-100 shadow-sm overflow-hidden"
+                          >
+                            {/* Topic header */}
                             <div className="flex items-center justify-between px-3 py-2 bg-[#1264A3]/5 border-b border-[#1264A3]/10">
                               <div className="flex items-center gap-1.5">
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 16 16"
-                                  fill="currentColor"
-                                  className="w-3.5 h-3.5 text-[#1264A3]"
-                                >
-                                  <path
-                                    fillRule="evenodd"
-                                    d="M1 3.5A1.5 1.5 0 0 1 2.5 2h11A1.5 1.5 0 0 1 15 3.5v6A1.5 1.5 0 0 1 13.5 11H9.25l-2.35 2.35A.75.75 0 0 1 5.5 12.75V11H2.5A1.5 1.5 0 0 1 1 9.5v-6Z"
-                                    clipRule="evenodd"
-                                  />
-                                </svg>
+                                <ChatBubbleLeftIcon className="w-3.5 h-3.5 text-[#1264A3]" />
                                 <span className="text-[12px] font-medium text-[#1264A3]">
-                                  对话串 · {replies.length + 1} 条消息
+                                  主题 · {replies.length + 1} 条消息
                                 </span>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => toggleThread(m.msg_id)}
-                                className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-white/80 transition-colors"
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 16 16"
-                                  fill="currentColor"
-                                  className="w-3 h-3"
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setPageTopicId(m.msg_id)}
+                                  className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-[#1264A3] px-1.5 py-0.5 rounded hover:bg-white/80 transition-colors"
+                                  title="以独立页打开主题"
                                 >
-                                  <path
-                                    fillRule="evenodd"
-                                    d="M11.78 9.78a.75.75 0 0 1-1.06 0L8 7.06 5.28 9.78a.75.75 0 0 1-1.06-1.06l3.25-3.25a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06Z"
-                                    clipRule="evenodd"
-                                  />
-                                </svg>
-                                收起
-                              </button>
+                                  <ArrowTopRightOnSquareIcon className="w-3 h-3" />
+                                  独立页打开
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleTopic(m.msg_id)}
+                                  className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-white/80 transition-colors"
+                                >
+                                  <ChevronUpIcon className="w-3 h-3" />
+                                  收起
+                                </button>
+                              </div>
                             </div>
                             {/* Root message */}
                             {rootBubble}
@@ -7140,19 +4053,21 @@ export default function App() {
                                   : "";
                                 const {
                                   text: rTextRaw,
-                                  form: rForm,
                                   clarify: rClarify,
                                 } = parseGuidePayload(r.content);
-                                const rDisplay = isClarifyReplyUserMessage(
-                                  r.content,
-                                )
-                                  ? r.content
-                                      .replace(
-                                        /^@(?:channel bot|引导)\s*澄清回答[：:]\s*/i,
-                                        "",
-                                      )
-                                      .trim()
-                                  : rTextRaw || r.content;
+                                const rDisplay = (() => {
+                                  const base = isClarifyReplyUserMessage(r.content)
+                                    ? r.content
+                                        .replace(
+                                          /^@(?:Coordinator|channel bot|引导)\s*澄清回答[：:]\s*/i,
+                                          "",
+                                        )
+                                        .trim()
+                                    : rTextRaw || r.content;
+                                  return r.sender_type === "bot"
+                                    ? stripLeadingQuotePrefixes(base)
+                                    : base;
+                                })();
                                 const rClarifyAnswered =
                                   !!rClarify &&
                                   messages.some(
@@ -7253,14 +4168,6 @@ export default function App() {
                                         <span className="text-[11px] text-gray-400">
                                           {rTime}
                                         </span>
-                                        {rParentLabel && (
-                                          <span className="text-[11px] text-gray-400">
-                                            ↩{" "}
-                                            <span className="font-medium text-gray-500">
-                                              {rParentLabel}
-                                            </span>
-                                          </span>
-                                        )}
                                         {rCollapsed && (
                                           <span className="text-[11px] text-gray-400 truncate max-w-[120px]">
                                             {rPreview}
@@ -7274,33 +4181,75 @@ export default function App() {
                                           className="opacity-0 group-hover/tr:opacity-100 transition-opacity ml-0.5 flex items-center justify-center w-4 h-4 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 flex-shrink-0"
                                           title={rCollapsed ? "展开" : "折叠"}
                                         >
-                                          <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            viewBox="0 0 16 16"
-                                            fill="currentColor"
-                                            className="w-3 h-3"
-                                          >
-                                            {rCollapsed ? (
-                                              <path
-                                                fillRule="evenodd"
-                                                d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
-                                                clipRule="evenodd"
-                                              />
-                                            ) : (
-                                              <path
-                                                fillRule="evenodd"
-                                                d="M11.78 9.78a.75.75 0 0 1-1.06 0L8 7.06 5.28 9.78a.75.75 0 0 1-1.06-1.06l3.25-3.25a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06Z"
-                                                clipRule="evenodd"
-                                              />
-                                            )}
-                                          </svg>
+                                          {rCollapsed ? (
+                                            <ChevronDownIcon className="w-3 h-3" />
+                                          ) : (
+                                            <ChevronUpIcon className="w-3 h-3" />
+                                          )}
                                         </button>
                                       </div>
+                                      {!rCollapsed && rDirectParent && rParentLabel && (
+                                        <button
+                                          type="button"
+                                          className="an-reply-quote"
+                                          onClick={() => {
+                                            const el = document.getElementById(
+                                              `msg-${rDirectParent.msg_id}`,
+                                            );
+                                            if (!el) return;
+                                            el.scrollIntoView({
+                                              block: "center",
+                                              behavior: "smooth",
+                                            });
+                                            const origT = el.style.transition;
+                                            const prevBg = el.style.background;
+                                            el.style.transition =
+                                              "background 200ms";
+                                            el.style.background =
+                                              "var(--accent-muted)";
+                                            setTimeout(() => {
+                                              el.style.background = prevBg;
+                                              el.style.transition = origT;
+                                            }, 1200);
+                                          }}
+                                          title="跳转到被回复的消息"
+                                        >
+                                          <span className="an-rq-arrow">↪</span>
+                                          <span className="an-rq-name">
+                                            {rParentLabel}
+                                          </span>
+                                          <span className="an-rq-snip">
+                                            {(
+                                              rDirectParent.content || ""
+                                            )
+                                              .replace(/<think>[\s\S]*?<\/think>/g, "")
+                                              .replace(/\s+/g, " ")
+                                              .trim()
+                                              .slice(0, 80) ||
+                                              "(无内容)"}
+                                          </span>
+                                        </button>
+                                      )}
                                       {!rCollapsed && (
                                         <>
                                           {renderFileAttachments(r)}
                                           <div
-                                            className={`rounded-xl px-2.5 py-1.5 text-[13px] leading-relaxed ${rIsOwn ? "bg-[#1264A3]/10 text-gray-800 whitespace-pre-wrap break-words" : "bg-gray-50 border border-gray-200 text-gray-800"}`}
+                                            className={`rounded-xl px-2.5 py-1.5 text-[13px] leading-relaxed ${rIsOwn ? "whitespace-pre-wrap break-words" : ""}`}
+                                            style={
+                                              rIsOwn
+                                                ? {
+                                                    background:
+                                                      "var(--accent-muted)",
+                                                    color: "var(--fg-1)",
+                                                  }
+                                                : {
+                                                    background:
+                                                      "var(--surface-soft)",
+                                                    color: "var(--fg-1)",
+                                                    border:
+                                                      "1px solid var(--border)",
+                                                  }
+                                            }
                                           >
                                             {r._streaming && !rTextRaw ? (
                                               <span className="inline-block w-2 h-4 bg-gray-400 rounded-sm animate-pulse align-middle" />
@@ -7328,31 +4277,9 @@ export default function App() {
                                             {r._streaming && !!rTextRaw && (
                                               <span className="inline-block w-1.5 h-4 bg-gray-400 rounded-sm animate-pulse align-middle ml-0.5" />
                                             )}
+                                            {renderStopStreamButton(r)}
+                                            {renderPartialBadge(r)}
                                           </div>
-                                          {rForm &&
-                                            selectedId &&
-                                            r.sender_type === "bot" && (
-                                              <GuideFormBlock
-                                                msgId={r.msg_id}
-                                                form={rForm}
-                                                channelId={selectedId}
-                                                onReply={(newMsg) =>
-                                                  setMessages((prev) => [
-                                                    ...prev,
-                                                    newMsg,
-                                                  ])
-                                                }
-                                                onChannelsRefresh={() =>
-                                                  refreshChannels(
-                                                    setChannels,
-                                                    authToken ?? undefined,
-                                                  )
-                                                }
-                                                userToken={
-                                                  authToken ?? undefined
-                                                }
-                                              />
-                                            )}
                                           {rClarifyStatus !== null &&
                                             selectedId && (
                                               <ClarifyInlineBlock
@@ -7393,18 +4320,7 @@ export default function App() {
                                       }}
                                       className="opacity-0 group-hover/tr:opacity-100 transition-opacity self-center w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 flex-shrink-0"
                                     >
-                                      <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        viewBox="0 0 16 16"
-                                        fill="currentColor"
-                                        className="w-3 h-3"
-                                      >
-                                        <path
-                                          fillRule="evenodd"
-                                          d="M1.22 6.53a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 1.06L3.56 5.25H10a5.75 5.75 0 0 1 0 11.5H6a.75.75 0 0 1 0-1.5h4a4.25 4.25 0 0 0 0-8.5H3.56l1.72 1.72a.75.75 0 1 1-1.06 1.06l-3-3Z"
-                                          clipRule="evenodd"
-                                        />
-                                      </svg>
+                                      <ArrowUturnLeftIcon className="w-3 h-3" />
                                     </button>
                                   </div>
                                 );
@@ -7414,27 +4330,41 @@ export default function App() {
                             <div className="flex justify-center py-1.5 border-t border-gray-100">
                               <button
                                 type="button"
-                                onClick={() => toggleThread(m.msg_id)}
+                                onClick={() => toggleTopic(m.msg_id)}
                                 className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 px-2 py-0.5 rounded hover:bg-gray-100 transition-colors"
                               >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 16 16"
-                                  fill="currentColor"
-                                  className="w-3 h-3"
-                                >
-                                  <path
-                                    fillRule="evenodd"
-                                    d="M11.78 9.78a.75.75 0 0 1-1.06 0L8 7.06 5.28 9.78a.75.75 0 0 1-1.06-1.06l3.25-3.25a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06Z"
-                                    clipRule="evenodd"
-                                  />
-                                </svg>
-                                收起对话串
+                                <ChevronUpIcon className="w-3 h-3" />
+                                收起主题
                               </button>
                             </div>
                           </div>
+                          </div>
                         );
-                      })}
+                      });
+                      // Intersperse day dividers between message groups based
+                      // on their created_at calendar day. Purely presentational
+                      // — runs outside the big map callback so none of the
+                      // existing branch logic has to change.
+                      const out: React.ReactNode[] = [];
+                      let lastDay = "";
+                      for (let i = 0; i < topicRoots.length; i++) {
+                        const m = topicRoots[i];
+                        const day = formatDayLabel(m.created_at);
+                        if (day && day !== lastDay) {
+                          out.push(
+                            <div
+                              key={`day-${i}-${day}`}
+                              className="an-day-divider"
+                            >
+                              <span>{day}</span>
+                            </div>,
+                          );
+                          lastDay = day;
+                        }
+                        out.push(renderedRows[i]);
+                      }
+                      return out;
+                      })()}
                       {waitingForBotReply && <ThinkingIndicator />}
                       {Object.entries(processingBots).map(
                         ([botId, username]) => (
@@ -7476,13 +4406,62 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Input area */}
+                {/* Input area — visually floating: rounded, drop shadow, a
+                    little margin so the stream slides past the edges. */}
                 <div
                   className="flex-shrink-0 px-3 sm:px-4 pb-4 pt-2"
                   style={{
                     paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
                   }}
                 >
+                  {/* Kind switcher — hidden in DMs and when replying to a
+                      specific message (that flow forces msg_type="reply"). */}
+                  {!replyingTo && selectedChannel?.type !== "dm" && (
+                    <div className="an-msgkind-switcher">
+                      <button
+                        type="button"
+                        onClick={() => cycleMsgKind(-1)}
+                        className="an-msgkind-arrow"
+                        title="上一种消息类型 (Shift+Tab)"
+                        aria-label="上一种消息类型"
+                      >
+                        ‹
+                      </button>
+                      <span
+                        className={
+                          "an-msgkind-label inline-flex items-center gap-1.5" +
+                          (msgKind === "secret"
+                            ? " is-secret"
+                            : msgKind === "announcement"
+                              ? " is-announcement"
+                              : msgKind === "topic"
+                                ? " is-topic"
+                                : "")
+                        }
+                        title="Tab 切换 · Shift+Tab 反向"
+                      >
+                        {msgKind === "secret" ? (
+                          <LockClosedIcon className="w-3.5 h-3.5" />
+                        ) : msgKind === "announcement" ? (
+                          <MegaphoneIcon className="w-3.5 h-3.5" />
+                        ) : msgKind === "topic" ? (
+                          <ChatBubbleLeftEllipsisIcon className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChatBubbleLeftIcon className="w-3.5 h-3.5" />
+                        )}
+                        {MSG_KIND_LABEL[msgKind]}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => cycleMsgKind(1)}
+                        className="an-msgkind-arrow"
+                        title="下一种消息类型 (Tab)"
+                        aria-label="下一种消息类型"
+                      >
+                        ›
+                      </button>
+                    </div>
+                  )}
                   {/* Reply bar */}
                   {replyingTo &&
                     (() => {
@@ -7503,24 +4482,10 @@ export default function App() {
                         .replace(/\n/g, " ")
                         .slice(0, 80);
                       return (
-                        <div className="flex items-center gap-2 px-3 py-2 mb-1 bg-gray-50 border border-gray-200 rounded-xl text-[13px]">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 16 16"
-                            fill="currentColor"
-                            className="w-3.5 h-3.5 text-[#1264A3] flex-shrink-0"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M1.22 6.53a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 1.06L3.56 5.25H10a5.75 5.75 0 0 1 0 11.5H6a.75.75 0 0 1 0-1.5h4a4.25 4.25 0 0 0 0-8.5H3.56l1.72 1.72a.75.75 0 1 1-1.06 1.06l-3-3Z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          <span className="text-gray-500">回复</span>
-                          <span className="font-semibold text-gray-700">
-                            {refLabel}
-                          </span>
-                          <span className="text-gray-400 truncate flex-1">
+                        <div className="an-reply-quote mb-1" style={{ maxWidth: "none" }}>
+                          <span className="an-rq-arrow">↪</span>
+                          <span className="an-rq-name">{refLabel}</span>
+                          <span className="an-rq-snip">
                             {refPreview}
                             {(
                               parseGuidePayload(replyingTo.content).text ||
@@ -7532,16 +4497,11 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => setReplyingTo(null)}
-                            className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600"
+                            className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full hover:bg-[var(--surface-hover)]"
+                            style={{ color: "var(--fg-3)" }}
+                            title="取消回复"
                           >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 16 16"
-                              fill="currentColor"
-                              className="w-3 h-3"
-                            >
-                              <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
-                            </svg>
+                            <XMarkIcon className="w-3 h-3" />
                           </button>
                         </div>
                       );
@@ -7571,18 +4531,7 @@ export default function App() {
                               className="max-w-[180px] max-h-[140px] object-cover block"
                             />
                             <div className="px-2.5 py-1.5 bg-white text-[11px] text-gray-500 border-t border-gray-100 flex items-center gap-1.5 max-w-[180px]">
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 16 16"
-                                fill="currentColor"
-                                className="w-3 h-3 text-gray-400 flex-shrink-0"
-                              >
-                                <path
-                                  fillRule="evenodd"
-                                  d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm10.5 5.707a.5.5 0 0 0-.146-.353l-2.5-2.5a.5.5 0 0 0-.708 0L7.5 8.5 6.354 7.354a.5.5 0 0 0-.708 0l-3.146 3.15V12a.5.5 0 0 0 .5.5h10a.5.5 0 0 0 .5-.5v-2.293ZM11 5.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"
-                                  clipRule="evenodd"
-                                />
-                              </svg>
+                              <PhotoIcon className="w-3 h-3 text-gray-400 flex-shrink-0" />
                               <span className="truncate">{name}</span>
                             </div>
                             <button
@@ -7599,14 +4548,7 @@ export default function App() {
                             className="relative group flex items-center gap-2.5 px-3 py-2.5 bg-white border border-gray-200 rounded-xl shadow-sm max-w-[240px]"
                           >
                             <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 20 20"
-                                fill="currentColor"
-                                className="w-5 h-5 text-blue-500"
-                              >
-                                <path d="M3 3.5A1.5 1.5 0 0 1 4.5 2h6.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 16 6.622V16.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 16.5v-13Z" />
-                              </svg>
+                              <DocumentIcon className="w-5 h-5 text-blue-500" />
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="text-[13px] font-medium text-gray-700 truncate">
@@ -7629,64 +4571,160 @@ export default function App() {
                     </div>
                   )}
                   <div className="relative">
-                    <div className="border border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm focus-within:border-gray-400 focus-within:shadow-md transition-all">
-                      <div>
-                        <textarea
-                          ref={inputRef}
-                          value={input}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            const pos = e.target.selectionStart ?? v.length;
-                            setInput(v);
-                            if (!secretMode) {
-                              const lastAt = v.lastIndexOf("@", pos - 1);
-                              if (lastAt !== -1) {
-                                const after = v.slice(lastAt + 1, pos);
-                                if (
-                                  !after.includes(" ") &&
-                                  !after.includes("\n")
-                                ) {
-                                  const rect = e.target.getBoundingClientRect();
-                                  const spaceBelow =
-                                    window.innerHeight - rect.bottom;
-                                  const spaceAbove = rect.top;
-                                  if (
-                                    spaceBelow < 180 &&
-                                    spaceAbove > spaceBelow
-                                  ) {
-                                    setMentionDropdownPlacement("top");
-                                  } else {
-                                    setMentionDropdownPlacement("bottom");
-                                  }
-                                  setShowMentionDropdown(true);
-                                  setMentionFilter(after);
-                                  return;
+                    <div
+                      className={
+                        "an-composer overflow-hidden" +
+                        (!replyingTo && msgKind === "secret"
+                          ? " is-secret"
+                          : !replyingTo && msgKind === "announcement"
+                            ? " is-announcement"
+                            : !replyingTo && msgKind === "topic"
+                              ? " is-topic"
+                              : "")
+                      }
+                    >
+                      {/* Top-edge drag handle: pull up to grow taller, pull
+                          down to shrink. Double-click to reset to auto. */}
+                      <div
+                        className="an-composer-resize"
+                        onPointerDown={onComposerResizeDown}
+                        onPointerMove={onComposerResizeMove}
+                        onPointerUp={onComposerResizeUp}
+                        onPointerCancel={onComposerResizeUp}
+                        onDoubleClick={() => setComposerTextareaHeight(null)}
+                        title="拖拽调整高度 · 双击重置"
+                        aria-label="拖拽调整发送框高度"
+                      >
+                        <span className="an-composer-resize-grip" />
+                      </div>
+                      {/* Always render the kindhead so the composer's overall
+                          height stays constant across all 4 kinds — switching
+                          types becomes a pure tint change with no layout shift. */}
+                      {!replyingTo && (
+                        <div className="an-composer-kindhead">
+                          {(msgKind === "announcement" ||
+                            msgKind === "topic") && (
+                            <input
+                              ref={composerTitleRef}
+                              className="an-composer-title"
+                              placeholder={
+                                msgKind === "announcement"
+                                  ? "标题（可选，例如「周五发布窗口」）…"
+                                  : "主题标题（可选，例如「升级计划讨论」）…"
+                              }
+                              value={composerTitle}
+                              onChange={(e) =>
+                                setComposerTitle(e.target.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  inputRef.current?.focus();
                                 }
+                              }}
+                              maxLength={120}
+                            />
+                          )}
+                          {msgKind === "secret" && (
+                            <span className="an-composer-kindhead-hint">
+                              端到端加密 · 仅 @ 的 Bot 可读原文
+                            </span>
+                          )}
+                          {msgKind === "normal" && (
+                            <span className="an-composer-kindhead-hint">
+                              @ 呼叫 Bot · Tab 切换类型 · ↵ 发送
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <textarea
+                        ref={inputRef}
+                        value={input}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          const pos = e.target.selectionStart ?? v.length;
+                          setInput(v);
+                          if (!secretMode) {
+                            const lastAt = v.lastIndexOf("@", pos - 1);
+                            if (lastAt !== -1) {
+                              const after = v.slice(lastAt + 1, pos);
+                              if (
+                                !after.includes(" ") &&
+                                !after.includes("\n")
+                              ) {
+                                const rect = e.target.getBoundingClientRect();
+                                const spaceBelow =
+                                  window.innerHeight - rect.bottom;
+                                const spaceAbove = rect.top;
+                                if (
+                                  spaceBelow < 180 &&
+                                  spaceAbove > spaceBelow
+                                ) {
+                                  setMentionDropdownPlacement("top");
+                                } else {
+                                  setMentionDropdownPlacement("bottom");
+                                }
+                                setShowMentionDropdown(true);
+                                setMentionFilter(after);
+                                return;
                               }
                             }
+                          }
+                          setShowMentionDropdown(false);
+                        }}
+                        onKeyDown={(e) => {
+                          if (showMentionDropdown && e.key === "Escape") {
                             setShowMentionDropdown(false);
-                          }}
-                          onKeyDown={(e) => {
-                            if (showMentionDropdown && e.key === "Escape") {
-                              setShowMentionDropdown(false);
-                              return;
-                            }
-                            if (e.key === "Enter" && e.ctrlKey) {
-                              e.preventDefault();
+                            return;
+                          }
+                          // Tab / Shift-Tab cycles msgKind (normal → 公告 →
+                          // 主题 → normal …). Skip in DMs where only
+                          // "normal" makes sense.
+                          if (
+                            e.key === "Tab" &&
+                            !showMentionDropdown &&
+                            !replyingTo &&
+                            selectedChannel?.type !== "dm"
+                          ) {
+                            e.preventDefault();
+                            cycleMsgKind(e.shiftKey ? -1 : 1);
+                            return;
+                          }
+                          // Enter sends · Shift+Enter inserts newline
+                          if (
+                            e.key === "Enter" &&
+                            !e.shiftKey &&
+                            !e.nativeEvent.isComposing &&
+                            !showMentionDropdown
+                          ) {
+                            e.preventDefault();
+                            if (input.trim() || pendingFileIds.length > 0) {
                               send();
                             }
-                          }}
-                          placeholder={
-                            secretMode
-                              ? "输入加密内容（仅 Bot 可读取原文）…"
-                              : `发消息到 #${selectedChannel?.name || "频道"}，@ 呼叫 Bot…`
                           }
-                          className={`w-full px-4 pt-3 pb-2 min-h-[48px] max-h-48 resize-none outline-none text-[14px] placeholder-gray-400 bg-transparent ${secretMode ? "text-amber-700" : "text-gray-900"}`}
-                          rows={1}
-                        />
-                      </div>
+                        }}
+                        placeholder={
+                          secretMode
+                            ? "输入加密内容（仅 Bot 可读取原文）…"
+                            : msgKind === "announcement"
+                              ? `发布公告到 #${selectedChannel?.name || "频道"}…`
+                              : msgKind === "topic"
+                                ? `开启主题 · 标题将取首行…`
+                                : `发消息到 #${selectedChannel?.name || "频道"}，@ 呼叫 Bot…`
+                        }
+                        className="an-composer-textarea"
+                        style={
+                          composerTextareaHeight !== null
+                            ? {
+                                height: composerTextareaHeight,
+                                maxHeight: composerTextareaHeight,
+                              }
+                            : undefined
+                        }
+                        rows={1}
+                      />
                       {/* Input toolbar */}
-                      <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100">
+                      <div className="an-composer-bar">
                         <div className="flex items-center gap-0.5">
                           {/* 上传文件和图片菜单 */}
                           <input
@@ -7702,38 +4740,25 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={openKeychainPopup}
-                                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${keychainPopupOpen ? "bg-blue-50 text-blue-600" : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"}`}
+                                className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
+                                style={{
+                                  color: keychainPopupOpen ? "var(--accent)" : "var(--fg-3)",
+                                  background: keychainPopupOpen ? "var(--accent-muted)" : "transparent",
+                                }}
                                 title="插入密钥链"
                               >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 20 20"
-                                  fill="currentColor"
-                                  className="w-4 h-4"
-                                >
-                                  <path
-                                    fillRule="evenodd"
-                                    d="M8 7a5 5 0 1 1 3.61 4.804l-1.903 1.903A1 1 0 0 1 9 14H8v1a1 1 0 0 1-1 1H6v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-2a1 1 0 0 1 .293-.707L7.196 10.39A5.002 5.002 0 0 1 8 7Zm5-3a.75.75 0 0 0 0 1.5A1.5 1.5 0 0 1 14.5 7 .75.75 0 0 0 16 7a3 3 0 0 0-3-3Z"
-                                    clipRule="evenodd"
-                                  />
-                                </svg>
+                                <KeyIcon className="w-4 h-4" />
                               </button>
                               {keychainPopupOpen && (
-                                <div className="absolute bottom-10 left-0 z-50 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[200px] max-h-64 overflow-y-auto">
-                                  <p className="px-3 py-1.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide">
-                                    插入密钥
-                                  </p>
+                                <div className="an-menu absolute" style={{ bottom: 40, left: 0, minWidth: 220, maxHeight: 256, overflowY: "auto" }}>
+                                  <div className="an-menu-head">插入密钥</div>
                                   {keychainPopupLoading ? (
-                                    <div className="px-3 py-3 text-xs text-gray-400 text-center">
-                                      加载中…
-                                    </div>
+                                    <div className="an-menu-empty">加载中…</div>
                                   ) : keychainPopupItems.length === 0 ? (
-                                    <div className="px-3 py-3 text-xs text-gray-400 text-center">
+                                    <div className="an-menu-empty">
                                       暂无密钥
                                       <br />
-                                      <span className="text-gray-300">
-                                        点击侧边栏钥匙图标添加
-                                      </span>
+                                      <span style={{ opacity: 0.7 }}>点击侧边栏钥匙图标添加</span>
                                     </div>
                                   ) : (
                                     keychainPopupItems.map((item) => (
@@ -7741,23 +4766,12 @@ export default function App() {
                                         key={item.key_id}
                                         type="button"
                                         onClick={() => insertSecret(item.name)}
-                                        className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50"
+                                        className="an-menu-item"
                                       >
-                                        <svg
-                                          xmlns="http://www.w3.org/2000/svg"
-                                          viewBox="0 0 16 16"
-                                          fill="currentColor"
-                                          className="w-3.5 h-3.5 text-gray-400 flex-shrink-0"
-                                        >
-                                          <path
-                                            fillRule="evenodd"
-                                            d="M6.5 5.5a4 4 0 1 1 2.88 3.838.75.75 0 0 0-.88.72V11h1.25a.75.75 0 0 1 0 1.5H8.5v1.25a.75.75 0 0 1-1.5 0v-3.44a5.5 5.5 0 1 1 5.5-5.31.75.75 0 0 1-1.499.05A4.001 4.001 0 0 0 6.5 5.5Zm.5 0a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1Z"
-                                            clipRule="evenodd"
-                                          />
-                                        </svg>
-                                        <span className="font-mono truncate">
-                                          {item.name}
+                                        <span className="an-mi-ico">
+                                          <QuestionMarkCircleIcon className="w-3.5 h-3.5" />
                                         </span>
+                                        <span className="font-mono truncate">{item.name}</span>
                                       </button>
                                     ))
                                   )}
@@ -7773,80 +4787,71 @@ export default function App() {
                               className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
                               title="上传文件和图片"
                             >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 20 20"
-                                fill="currentColor"
-                                className="w-4.5 h-4.5"
-                              >
-                                <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-                              </svg>
+                              <PlusIcon className="w-[18px] h-[18px]" />
                             </button>
                             {uploadMenuOpen && (
-                              <div className="absolute bottom-10 left-0 z-50 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[160px]">
+                              <div className="an-menu absolute" style={{ bottom: 40, left: 0, minWidth: 180 }}>
                                 <button
                                   type="button"
-                                  className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50 rounded-lg"
+                                  className="an-menu-item"
                                   onClick={() => {
                                     setUploadMenuOpen(false);
                                     fileImgInputRef.current?.click();
                                   }}
                                 >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 16 16"
-                                    fill="currentColor"
-                                    className="w-4 h-4 text-gray-400 flex-shrink-0"
-                                  >
-                                    <path
-                                      fillRule="evenodd"
-                                      d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a3 3 0 0 0 4.241 4.243h.001l.497-.5a.75.75 0 0 1 1.064 1.057l-.498.501-.002.002a4.5 4.5 0 0 1-6.364-6.364l7-7a4.5 4.5 0 0 1 6.368 6.36l-3.455 3.553A2.625 2.625 0 1 1 9.52 9.52l3.45-3.451a.75.75 0 1 1 1.061 1.06l-3.45 3.451a1.125 1.125 0 0 0 1.587 1.595l3.454-3.553a3 3 0 0 0 0-4.242Z"
-                                      clipRule="evenodd"
-                                    />
-                                  </svg>
-                                  上传文件和图片
+                                  <span className="an-mi-ico">
+                                    <LinkIcon className="w-4 h-4" />
+                                  </span>
+                                  <span>上传文件和图片</span>
                                 </button>
                               </div>
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <span className="an-composer-hint hidden sm:inline-flex">
+                          <kbd>@</kbd> 提及
+                          <span style={{ opacity: 0.5 }}>·</span>
+                          <kbd>↵</kbd> 发送
+                          <span style={{ opacity: 0.5 }}>·</span>
+                          <kbd>⇧↵</kbd> 换行
+                        </span>
+                        {/* 加密只对普通对话有意义；公告/主题是面向全频道的，
+                            不允许加密发送。 */}
+                        {(msgKind === "normal" || msgKind === "secret") && (
                           <button
                             type="button"
-                            onClick={() => setSecretMode((v) => !v)}
+                            onClick={() =>
+                              setMsgKind((k) =>
+                                k === "secret" ? "normal" : "secret",
+                              )
+                            }
                             title={
-                              secretMode
+                              msgKind === "secret"
                                 ? "取消加密模式"
                                 : "开启加密模式（仅 Bot 可读原文）"
                             }
-                            className={`w-8 h-8 flex items-center justify-center rounded-lg text-base transition-colors ${
-                              secretMode
-                                ? "bg-amber-100 text-amber-600 hover:bg-amber-200"
-                                : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                            }`}
-                          >
-                            🔒
-                          </button>
-                          <span className="text-[12px] text-gray-400 hidden sm:inline select-none">
-                            Ctrl+Enter
-                          </span>
-                          <button
-                            type="button"
-                            onClick={send}
-                            className={`px-4 py-1.5 rounded-xl text-[13px] font-semibold transition-all ${
-                              input.trim() || pendingFileIds.length > 0
-                                ? secretMode
-                                  ? "bg-amber-500 text-white hover:bg-amber-600 shadow-sm"
-                                  : "bg-[#007a5a] text-white hover:bg-[#006a4d] shadow-sm"
-                                : "bg-gray-100 text-gray-400 cursor-not-allowed"
-                            }`}
-                            disabled={
-                              !input.trim() && pendingFileIds.length === 0
+                            style={
+                              msgKind === "secret"
+                                ? {
+                                    color: "var(--orange)",
+                                    background: "var(--orange-muted)",
+                                  }
+                                : undefined
                             }
                           >
-                            {secretMode ? "加密发送" : "发送"}
+                            <LockClosedIcon className="w-4 h-4" />
                           </button>
-                        </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={send}
+                          className="an-composer-send"
+                          disabled={
+                            !input.trim() && pendingFileIds.length === 0
+                          }
+                        >
+                          {msgKind === "secret" ? "加密发送" : "发送"}
+                        </button>
                       </div>
                     </div>
                     {showMentionDropdown &&
@@ -7877,14 +4882,19 @@ export default function App() {
                             : "top-full mt-1";
                         return (
                           <ul
-                            className={`absolute left-0 right-0 ${placementClass} bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-48 overflow-auto`}
+                            className={`an-menu absolute left-0 right-0 ${placementClass}`}
+                            style={{ maxHeight: 240, overflowY: "auto" }}
                             role="listbox"
                           >
+                            <li className="an-menu-head" style={{ listStyle: "none" }}>
+                              @提及 · {matched.length} 项
+                            </li>
                             {matched.map((item) => (
                               <li
                                 key={item.member_id}
                                 role="option"
-                                className="px-3 py-2 hover:bg-[#F8F8F8] cursor-pointer text-sm flex items-center gap-2"
+                                className="an-menu-item"
+                                style={{ listStyle: "none" }}
                                 onMouseDown={(e) => {
                                   e.preventDefault();
                                   const el = inputRef.current;
@@ -7909,23 +4919,48 @@ export default function App() {
                                   }, 0);
                                 }}
                               >
-                                <div
-                                  className={`w-6 h-6 rounded flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${item.kind === "bot" ? "bg-[#2EB67D]" : "bg-[#1264A3]"}`}
+                                <span
+                                  className="an-mi-ico"
+                                  style={{
+                                    width: 22,
+                                    height: 22,
+                                    borderRadius: 5,
+                                    color: "#fff",
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    background:
+                                      item.kind === "bot"
+                                        ? "var(--green)"
+                                        : "var(--accent)",
+                                  }}
                                 >
                                   {item.username.slice(0, 1).toUpperCase()}
-                                </div>
-                                <div className="flex flex-col min-w-0">
-                                  <span className="font-medium text-gray-800">
+                                </span>
+                                <div className="flex flex-col min-w-0 flex-1">
+                                  <span
+                                    className="font-medium truncate"
+                                    style={{ color: "var(--fg-1)" }}
+                                  >
                                     @{item.username}
                                   </span>
                                   {item.display_name && (
-                                    <span className="text-xs text-gray-400 truncate">
+                                    <span className="an-mi-sub truncate">
                                       {item.display_name}
                                     </span>
                                   )}
                                 </div>
                                 <span
-                                  className={`ml-auto text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${item.kind === "bot" ? "bg-green-50 text-green-700" : "bg-blue-50 text-blue-700"}`}
+                                  className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0"
+                                  style={{
+                                    background:
+                                      item.kind === "bot"
+                                        ? "var(--green-muted)"
+                                        : "var(--accent-muted)",
+                                    color:
+                                      item.kind === "bot"
+                                        ? "var(--green)"
+                                        : "var(--accent)",
+                                  }}
                                 >
                                   {item.kind === "bot" ? "Bot" : "用户"}
                                 </span>
@@ -7937,538 +4972,22 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 文生图 / 图生图 Modal */}
-                {imageGenOpen && (
-                  <div
-                    className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-                    onClick={() => setImageGenOpen(false)}
-                  >
-                    <div
-                      className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                        <h3 className="text-[15px] font-semibold text-gray-800">
-                          AI 图片
-                        </h3>
-                        <button
-                          type="button"
-                          onClick={() => setImageGenOpen(false)}
-                          className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 16 16"
-                            fill="currentColor"
-                            className="w-4 h-4"
-                          >
-                            <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
-                          </svg>
-                        </button>
-                      </div>
-                      {/* Tab 切换 */}
-                      <div className="flex border-b border-gray-100">
-                        <button
-                          type="button"
-                          onClick={() => setImageGenTab("gen")}
-                          className={`flex-1 py-2.5 text-[13px] font-medium text-center transition-colors ${imageGenTab === "gen" ? "text-[#1264A3] border-b-2 border-[#1264A3]" : "text-gray-500 hover:text-gray-700"}`}
-                        >
-                          文生图
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setImageGenTab("edit")}
-                          className={`flex-1 py-2.5 text-[13px] font-medium text-center transition-colors ${imageGenTab === "edit" ? "text-[#1264A3] border-b-2 border-[#1264A3]" : "text-gray-500 hover:text-gray-700"}`}
-                        >
-                          图生图
-                        </button>
-                      </div>
-
-                      {/* ─── 文生图 Tab ─── */}
-                      {imageGenTab === "gen" && (
-                        <>
-                          <div className="px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
-                            <div>
-                              <label className="block text-[13px] font-medium text-gray-600 mb-1.5">
-                                描述词
-                              </label>
-                              <textarea
-                                value={imageGenPrompt}
-                                onChange={(e) =>
-                                  setImageGenPrompt(e.target.value)
-                                }
-                                placeholder="描述你想要生成的图片，例如：一只在星空下奔跑的白色猫咪"
-                                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[14px] resize-none outline-none focus:border-gray-400 min-h-[80px]"
-                                rows={3}
-                              />
-                            </div>
-                            <div className="flex gap-3">
-                              <div className="flex-1">
-                                <label className="block text-[13px] font-medium text-gray-600 mb-1.5">
-                                  模型
-                                </label>
-                                <select
-                                  value={imageGenModel}
-                                  onChange={(e) =>
-                                    setImageGenModel(e.target.value)
-                                  }
-                                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[13px] outline-none focus:border-gray-400 bg-white"
-                                >
-                                  <option value="qwen-image-2.0-pro">
-                                    qwen-image-2.0-pro (推荐)
-                                  </option>
-                                  <option value="qwen-image-2.0-pro-2026-03-03">
-                                    qwen-image-2.0-pro-2026-03-03
-                                  </option>
-                                  <option value="qwen-image-2.0">
-                                    qwen-image-2.0
-                                  </option>
-                                  <option value="qwen-image-2.0-2026-03-03">
-                                    qwen-image-2.0-2026-03-03
-                                  </option>
-                                  <option value="qwen-image-max">
-                                    qwen-image-max
-                                  </option>
-                                  <option value="qwen-image-max-2025-12-30">
-                                    qwen-image-max-2025-12-30
-                                  </option>
-                                  <option value="qwen-image-plus-2026-01-09">
-                                    qwen-image-plus-2026-01-09
-                                  </option>
-                                  <option value="z-image-turbo">
-                                    z-image-turbo (快速)
-                                  </option>
-                                </select>
-                              </div>
-                              <div className="flex-1">
-                                <label className="block text-[13px] font-medium text-gray-600 mb-1.5">
-                                  尺寸
-                                </label>
-                                <select
-                                  value={imageGenSize}
-                                  onChange={(e) =>
-                                    setImageGenSize(e.target.value)
-                                  }
-                                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[13px] outline-none focus:border-gray-400 bg-white"
-                                >
-                                  <option value="1024*1024">1024 x 1024</option>
-                                  <option value="720*1280">
-                                    720 x 1280 (竖版)
-                                  </option>
-                                  <option value="1280*720">
-                                    1280 x 720 (横版)
-                                  </option>
-                                  <option value="768*1024">768 x 1024</option>
-                                  <option value="1024*768">1024 x 768</option>
-                                </select>
-                              </div>
-                            </div>
-                          </div>
-                          {/* 生成结果预览 — 固定在按钮栏上方，不在滚动区域内 */}
-                          {imageGenPreview && (
-                            <div className="px-5 py-3 border-t border-gray-100">
-                              <div className="border border-gray-200 rounded-xl overflow-hidden">
-                                <img
-                                  src={`${API}/files/${imageGenPreview.file_id}/preview`}
-                                  alt="AI generated"
-                                  className="w-full max-h-[300px] object-contain bg-gray-50"
-                                />
-                              </div>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100 bg-gray-50">
-                            {imageGenPreview && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setImageEditSourceFileId(
-                                      imageGenPreview.file_id,
-                                    );
-                                    setImageGenTab("edit");
-                                    setImageEditPreview(null);
-                                    setImageEditPrompt("");
-                                  }}
-                                  className="px-4 py-1.5 rounded-xl text-[13px] font-semibold bg-gray-600 text-white hover:bg-gray-700 shadow-sm transition-all"
-                                >
-                                  用此图编辑
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    if (!selectedId || !imageGenPreview) return;
-                                    try {
-                                      const res = await fetch(
-                                        `${API}/channels/${selectedId}/messages`,
-                                        {
-                                          method: "POST",
-                                          headers: {
-                                            "Content-Type": "application/json",
-                                          },
-                                          body: JSON.stringify({
-                                            content: `[AI 生成图片] ${imageGenPrompt}`,
-                                            sender_id: currentUserId,
-                                            sender_type: "user",
-                                            file_ids: [imageGenPreview.file_id],
-                                          }),
-                                        },
-                                      );
-                                      const d = await res.json();
-                                      if (!res.ok) {
-                                        toast.error(d.detail || "发送失败");
-                                        return;
-                                      }
-                                      if (d.data)
-                                        setMessages((prev) =>
-                                          prev.some(
-                                            (m) => m.msg_id === d.data.msg_id,
-                                          )
-                                            ? prev
-                                            : [...prev, d.data],
-                                        );
-                                      setImageGenOpen(false);
-                                      setImageGenPreview(null);
-                                      setImageGenPrompt("");
-                                    } catch {
-                                      toast.error("发送失败");
-                                    }
-                                  }}
-                                  className="px-4 py-1.5 rounded-xl text-[13px] font-semibold bg-[#007a5a] text-white hover:bg-[#006a4d] shadow-sm transition-all"
-                                >
-                                  发送到频道
-                                </button>
-                              </>
-                            )}
-                            <button
-                              type="button"
-                              disabled={
-                                !imageGenPrompt.trim() || imageGenLoading
-                              }
-                              onClick={async () => {
-                                if (!selectedId || !imageGenPrompt.trim())
-                                  return;
-                                setImageGenLoading(true);
-                                setImageGenPreview(null);
-                                try {
-                                  const res = await fetch(
-                                    `${API}/images/generate`,
-                                    {
-                                      method: "POST",
-                                      headers: {
-                                        "Content-Type": "application/json",
-                                      },
-                                      body: JSON.stringify({
-                                        channel_id: selectedId,
-                                        sender_id: currentUserId,
-                                        prompt: imageGenPrompt.trim(),
-                                        model: imageGenModel,
-                                        size: imageGenSize,
-                                      }),
-                                    },
-                                  );
-                                  const data = await res.json();
-                                  if (!res.ok) {
-                                    toast.error(data.detail || "图片生成失败");
-                                    return;
-                                  }
-                                  setImageGenPreview({
-                                    file_id: data.data.file_id,
-                                    preview_url: data.data.preview_url,
-                                  });
-                                } catch (err) {
-                                  toast.error("图片生成出错");
-                                  console.error(err);
-                                } finally {
-                                  setImageGenLoading(false);
-                                }
-                              }}
-                              className={`px-4 py-1.5 rounded-xl text-[13px] font-semibold transition-all ${imageGenPrompt.trim() && !imageGenLoading ? "bg-[#1264A3] text-white hover:bg-[#0e5a96] shadow-sm" : "bg-gray-200 text-gray-400 cursor-not-allowed"}`}
-                            >
-                              {imageGenLoading
-                                ? "生成中..."
-                                : imageGenPreview
-                                  ? "重新生成"
-                                  : "生成"}
-                            </button>
-                          </div>
-                        </>
-                      )}
-
-                      {/* ─── 图生图 Tab ─── */}
-                      {imageGenTab === "edit" && (
-                        <>
-                          <div className="px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
-                            {/* 源图片 */}
-                            <div>
-                              <label className="block text-[13px] font-medium text-gray-600 mb-1.5">
-                                源图片
-                              </label>
-                              {imageEditSourceFileId ? (
-                                <div className="relative border border-gray-200 rounded-xl overflow-hidden bg-gray-50">
-                                  <img
-                                    src={`${API}/files/${imageEditSourceFileId}/preview`}
-                                    alt="source"
-                                    className="w-full max-h-[200px] object-contain"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setImageEditSourceFileId("");
-                                      setImageEditPreview(null);
-                                    }}
-                                    className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/50 text-white flex items-center justify-center text-xs hover:bg-black/70"
-                                  >
-                                    <svg
-                                      xmlns="http://www.w3.org/2000/svg"
-                                      viewBox="0 0 16 16"
-                                      fill="currentColor"
-                                      className="w-3.5 h-3.5"
-                                    >
-                                      <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
-                                    </svg>
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center text-gray-400 text-[13px] space-y-3">
-                                  {/* 从聊天中选择已有图片 */}
-                                  {(() => {
-                                    const imageFiles = messages.flatMap((m) =>
-                                      (m.files || []).filter((f) =>
-                                        (f.content_type || "").startsWith(
-                                          "image/",
-                                        ),
-                                      ),
-                                    );
-                                    if (imageFiles.length > 0) {
-                                      return (
-                                        <div>
-                                          <p className="text-gray-500 mb-2">
-                                            从聊天中选择图片：
-                                          </p>
-                                          <div className="flex flex-wrap gap-2 justify-center">
-                                            {imageFiles.slice(-8).map((f) => (
-                                              <div
-                                                key={f.file_id}
-                                                className="w-16 h-16 rounded-lg border-2 border-gray-200 overflow-hidden cursor-pointer hover:border-blue-400 transition-colors"
-                                                onClick={() => {
-                                                  setImageEditSourceFileId(
-                                                    f.file_id,
-                                                  );
-                                                  setImageEditPreview(null);
-                                                }}
-                                              >
-                                                <img
-                                                  src={`${API}/files/${f.file_id}/preview`}
-                                                  alt={
-                                                    f.original_filename ||
-                                                    "image"
-                                                  }
-                                                  className="w-full h-full object-cover"
-                                                />
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      );
-                                    }
-                                    return (
-                                      <p>
-                                        当前频道暂无图片，请先上传或生成一张图片
-                                      </p>
-                                    );
-                                  })()}
-                                  <p className="text-[11px] text-gray-300">
-                                    也可在聊天中点击图片放大后选择「编辑此图」
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-                            {/* 编辑提示词 */}
-                            <div>
-                              <label className="block text-[13px] font-medium text-gray-600 mb-1.5">
-                                编辑描述
-                              </label>
-                              <textarea
-                                value={imageEditPrompt}
-                                onChange={(e) =>
-                                  setImageEditPrompt(e.target.value)
-                                }
-                                placeholder="描述你想要如何编辑这张图片，例如：将背景改为夕阳海滩"
-                                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[14px] resize-none outline-none focus:border-gray-400 min-h-[80px]"
-                                rows={3}
-                              />
-                            </div>
-                            <div className="flex gap-3">
-                              <div className="flex-1">
-                                <label className="block text-[13px] font-medium text-gray-600 mb-1.5">
-                                  模型
-                                </label>
-                                <select
-                                  value={imageEditModel}
-                                  onChange={(e) =>
-                                    setImageEditModel(e.target.value)
-                                  }
-                                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[13px] outline-none focus:border-gray-400 bg-white"
-                                >
-                                  <option value="qwen-image-edit-max">
-                                    qwen-image-edit-max (推荐)
-                                  </option>
-                                  <option value="qwen-image-edit-plus">
-                                    qwen-image-edit-plus
-                                  </option>
-                                </select>
-                              </div>
-                              <div className="flex-1">
-                                <label className="block text-[13px] font-medium text-gray-600 mb-1.5">
-                                  尺寸
-                                </label>
-                                <select
-                                  value={imageEditSize}
-                                  onChange={(e) =>
-                                    setImageEditSize(e.target.value)
-                                  }
-                                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[13px] outline-none focus:border-gray-400 bg-white"
-                                >
-                                  <option value="1024*1024">1024 x 1024</option>
-                                  <option value="720*1280">
-                                    720 x 1280 (竖版)
-                                  </option>
-                                  <option value="1280*720">
-                                    1280 x 720 (横版)
-                                  </option>
-                                  <option value="768*1024">768 x 1024</option>
-                                  <option value="1024*768">1024 x 768</option>
-                                </select>
-                              </div>
-                            </div>
-                          </div>
-                          {/* 编辑结果预览 — 固定在按钮栏上方，不在滚动区域内 */}
-                          {imageEditPreview && (
-                            <div className="px-5 py-3 border-t border-gray-100">
-                              <label className="block text-[13px] font-medium text-gray-600 mb-1.5">
-                                编辑结果
-                              </label>
-                              <div className="border border-gray-200 rounded-xl overflow-hidden">
-                                <img
-                                  src={`${API}/files/${imageEditPreview.file_id}/preview`}
-                                  alt="edited"
-                                  className="w-full max-h-[300px] object-contain bg-gray-50"
-                                />
-                              </div>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100 bg-gray-50">
-                            {imageEditPreview && (
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  if (!selectedId || !imageEditPreview) return;
-                                  try {
-                                    const res = await fetch(
-                                      `${API}/channels/${selectedId}/messages`,
-                                      {
-                                        method: "POST",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                        },
-                                        body: JSON.stringify({
-                                          content: `[AI 编辑图片] ${imageEditPrompt}`,
-                                          sender_id: currentUserId,
-                                          sender_type: "user",
-                                          file_ids: [imageEditPreview.file_id],
-                                        }),
-                                      },
-                                    );
-                                    const d = await res.json();
-                                    if (!res.ok) {
-                                      toast.error(d.detail || "发送失败");
-                                      return;
-                                    }
-                                    if (d.data)
-                                      setMessages((prev) =>
-                                        prev.some(
-                                          (m) => m.msg_id === d.data.msg_id,
-                                        )
-                                          ? prev
-                                          : [...prev, d.data],
-                                      );
-                                    setImageGenOpen(false);
-                                    setImageEditPreview(null);
-                                    setImageEditPrompt("");
-                                    setImageEditSourceFileId("");
-                                  } catch {
-                                    toast.error("发送失败");
-                                  }
-                                }}
-                                className="px-4 py-1.5 rounded-xl text-[13px] font-semibold bg-[#007a5a] text-white hover:bg-[#006a4d] shadow-sm transition-all"
-                              >
-                                发送到频道
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              disabled={
-                                !imageEditSourceFileId ||
-                                !imageEditPrompt.trim() ||
-                                imageEditLoading
-                              }
-                              onClick={async () => {
-                                if (
-                                  !selectedId ||
-                                  !imageEditSourceFileId ||
-                                  !imageEditPrompt.trim()
-                                )
-                                  return;
-                                setImageEditLoading(true);
-                                setImageEditPreview(null);
-                                try {
-                                  const res = await fetch(
-                                    `${API}/images/edit`,
-                                    {
-                                      method: "POST",
-                                      headers: {
-                                        "Content-Type": "application/json",
-                                      },
-                                      body: JSON.stringify({
-                                        channel_id: selectedId,
-                                        sender_id: currentUserId,
-                                        source_file_id: imageEditSourceFileId,
-                                        prompt: imageEditPrompt.trim(),
-                                        model: imageEditModel,
-                                        size: imageEditSize,
-                                      }),
-                                    },
-                                  );
-                                  const data = await res.json();
-                                  if (!res.ok) {
-                                    toast.error(data.detail || "图片编辑失败");
-                                    return;
-                                  }
-                                  setImageEditPreview({
-                                    file_id: data.data.file_id,
-                                    preview_url: data.data.preview_url,
-                                  });
-                                } catch (err) {
-                                  toast.error("图片编辑出错");
-                                  console.error(err);
-                                } finally {
-                                  setImageEditLoading(false);
-                                }
-                              }}
-                              className={`px-4 py-1.5 rounded-xl text-[13px] font-semibold transition-all ${imageEditSourceFileId && imageEditPrompt.trim() && !imageEditLoading ? "bg-[#1264A3] text-white hover:bg-[#0e5a96] shadow-sm" : "bg-gray-200 text-gray-400 cursor-not-allowed"}`}
-                            >
-                              {imageEditLoading
-                                ? "编辑中..."
-                                : imageEditPreview
-                                  ? "重新编辑"
-                                  : "开始编辑"}
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
+                <ImageGenModal
+                  open={imageGenOpen}
+                  onClose={() => setImageGenOpen(false)}
+                  channelId={selectedId}
+                  senderId={currentUserId}
+                  messages={messages}
+                  onMessageSent={(msg) =>
+                    setMessages((prev) =>
+                      prev.some((m) => m.msg_id === msg.msg_id)
+                        ? prev
+                        : [...prev, msg],
+                    )
+                  }
+                  initialSourceFileId={imageGenInitialSourceFileId}
+                  initialTab={imageGenInitialTab}
+                />
               </>
             ) : (
               <div className="flex-1 flex flex-col">
@@ -8479,20 +4998,7 @@ export default function App() {
                       onClick={() => setSidebarOpen(true)}
                       className="w-8 h-8 flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 flex-shrink-0"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        strokeWidth={1.5}
-                        stroke="currentColor"
-                        className="w-6 h-6"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
-                        />
-                      </svg>
+                      <Bars3Icon className="w-6 h-6" />
                     </button>
                     <span className="text-sm font-semibold text-gray-700">
                       智枢协作
@@ -8501,18 +5007,7 @@ export default function App() {
                 )}
                 <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
                   <div className="w-20 h-20 rounded-3xl bg-gray-100 flex items-center justify-center mb-5">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      className="w-10 h-10 text-gray-300"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M4.848 2.771A49.144 49.144 0 0 1 12 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 0 1-3.476.383.39.39 0 0 0-.297.17l-2.755 4.133a.75.75 0 0 1-1.248 0l-2.755-4.133a.39.39 0 0 0-.297-.17 48.9 48.9 0 0 1-3.476-.384c-1.978-.29-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.68 3.348-3.97Z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
+                    <ChatBubbleLeftIcon className="w-10 h-10 text-gray-300" />
                   </div>
                   <p className="text-gray-700 text-[15px] font-semibold">
                     选择一个频道
@@ -8546,10 +5041,16 @@ export default function App() {
                 channelId={selectedId}
                 channelName={selectedChannel?.name ?? ""}
                 contextData={contextData}
-                onClose={() => setMemoryPanelOpen(false)}
+                activeLayer={memoryTab ?? undefined}
+                onLayerChange={(l) =>
+                  setMemoryTab(
+                    l as "PROJECT" | "FILES_INDEX" | "MEMBERS" | "TODO",
+                  )
+                }
+                onClose={() => setMemoryTab(null)}
                 onExpand={() => {
                   setMemoryPageOpen(true);
-                  setMemoryPanelOpen(false);
+                  setMemoryTab(null);
                 }}
               />
             </div>
@@ -8590,64 +5091,21 @@ export default function App() {
         />
       )}
 
-      {/* Lightbox 图片放大 */}
-      {lightboxSrc && (
-        <div
-          className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center cursor-zoom-out"
-          onClick={() => {
-            setLightboxSrc(null);
-            setLightboxFileId(null);
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setLightboxSrc(null);
-              setLightboxFileId(null);
-            }}
-            className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white text-xl transition-colors"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="w-6 h-6"
-            >
-              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-            </svg>
-          </button>
-          {lightboxFileId && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setImageEditSourceFileId(lightboxFileId);
-                setImageGenTab("edit");
-                setImageGenOpen(true);
-                setLightboxSrc(null);
-                setLightboxFileId(null);
-              }}
-              className="absolute top-4 left-4 flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-[13px] font-medium transition-colors"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="w-4 h-4"
-              >
-                <path d="m2.695 14.762-1.262 3.155a.5.5 0 0 0 .65.65l3.155-1.262a4 4 0 0 0 1.343-.886L17.5 5.501a2.121 2.121 0 0 0-3-3L3.58 13.42a4 4 0 0 0-.885 1.343Z" />
-              </svg>
-              编辑此图
-            </button>
-          )}
-          <img
-            src={lightboxSrc}
-            alt="preview"
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl cursor-default"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
+      <ImageLightbox
+        src={lightboxSrc}
+        fileId={lightboxFileId}
+        onClose={() => {
+          setLightboxSrc(null);
+          setLightboxFileId(null);
+        }}
+        onEdit={(fileId) => {
+          setImageGenInitialSourceFileId(fileId);
+          setImageGenInitialTab("edit");
+          setImageGenOpen(true);
+          setLightboxSrc(null);
+          setLightboxFileId(null);
+        }}
+      />
     </>
   );
 }

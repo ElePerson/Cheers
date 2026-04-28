@@ -19,11 +19,6 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # OpenClaw Hook 集成（/hooks/agent）
-    openclaw_hook_token: str = ""  # Authorization: Bearer <token>，留空则 hook 端点不校验（需在 .env 中配置）
-    openclaw_agent_id: str = "main"
-    openclaw_session_prefix: str = "nexus:"
-
     # 数据目录（相对项目根或绝对路径）
     data_dir: str = "data"
 
@@ -109,6 +104,11 @@ class Settings(BaseSettings):
     admin_password: str = "admin#Nexus2024"
     admin_display_name: str = "系统管理员"
 
+    # ===== OpenClaw channel plugin bridge =====
+    openclaw_bridge_enabled: bool = True
+    openclaw_bridge_token: str = ""  # 空 = 未配置，bridge 路由返回 503
+    openclaw_bridge_timeout_seconds: int = 60  # 异步 Bot 回复超时（超时后占位消息被标记超时）
+
     model_config = {
         "env_file": [str(_BACKEND_ROOT.parent / ".env"), str(_BACKEND_ROOT / ".env")],
         "env_file_encoding": "utf-8",
@@ -122,6 +122,14 @@ def get_data_dir(base: Path) -> Path:
     if not p.is_absolute():
         p = base / p
     return p
+
+
+def resolve_data_dir() -> Path:
+    """零参数版：以 backend/app/ 为基准解析 data_dir（与历史 adapters 写入位置一致）。"""
+    p = Path(settings.data_dir)
+    if p.is_absolute():
+        return p
+    return _BACKEND_ROOT / "app" / p
 
 
 settings = Settings()

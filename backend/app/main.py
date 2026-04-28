@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.v1.openclaw_bridge.routes import ws_router as openclaw_bridge_ws_router
 from app.api.v1.router import v1_router
 from app.api.v1.ws.handler import router as ws_router
 from app.config import settings
@@ -26,11 +27,6 @@ async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("AgentNexus startup")
 
-    if not (settings.openclaw_hook_token or "").strip():
-        logger.warning(
-            "OPENCLAW_HOOK_TOKEN 未配置，webhook 端点（/hooks/agent）将拒绝所有请求或不校验 token。"
-            "请在 .env 中设置 OPENCLAW_HOOK_TOKEN。"
-        )
     if not (settings.jwt_secret_key or "").strip():
         logger.warning(
             "JWT_SECRET_KEY 未配置，将使用进程内随机密钥（重启后旧 token 全部失效）。"
@@ -116,6 +112,7 @@ app.include_router(v1_router)
 
 # WebSocket 路由（/ws/channels/{id}，nginx location /ws 需要 upgrade 头）
 app.include_router(ws_router)
+app.include_router(openclaw_bridge_ws_router)
 
 # 静态功能路由（不含业务逻辑，保持不变）
 app.include_router(manual_router)
