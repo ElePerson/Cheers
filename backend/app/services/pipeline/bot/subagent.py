@@ -245,7 +245,6 @@ async def _finalize_response(
         await ctx.writer.record_task(bot_id, bot_msg.msg_id)
         ctx.bot_messages.append(bot_msg)
         ctx.triggered_bot_ids.add(bot_id)
-        ctx.bot_msg_by_id[bot_id] = bot_msg
         return None
 
     resp = resp_or_exc
@@ -258,7 +257,6 @@ async def _finalize_response(
         await ctx.writer.record_task(bot_id, bot_msg.msg_id)
         ctx.bot_messages.append(bot_msg)
         ctx.triggered_bot_ids.add(bot_id)
-        ctx.bot_msg_by_id[bot_id] = bot_msg
         return None
 
     if not resp.success:
@@ -275,7 +273,6 @@ async def _finalize_response(
     await ctx.writer.record_task(bot_id, bot_msg.msg_id)
     ctx.bot_messages.append(bot_msg)
     ctx.triggered_bot_ids.add(bot_id)
-    ctx.bot_msg_by_id[bot_id] = bot_msg
 
     if recurse:
         await trigger_sub_bots_from_mentions(
