@@ -48,7 +48,6 @@ def _make_ctx(channel_bots: list[str], bot_id_by_username: dict[str, str]):
     ctx.channel_bot_usernames = channel_bots
     ctx.bot_id_by_username = dict(bot_id_by_username)
     ctx.triggered_bot_ids = set()
-    ctx.bot_msg_by_id = {}
     ctx.bot_messages = []
     ctx.session = MagicMock()
     ctx.writer = MagicMock()

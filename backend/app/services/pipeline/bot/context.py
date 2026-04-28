@@ -66,7 +66,6 @@ class BotRunContext:
 
     # ── shared state across dispatch / auto-takeover / Bot@Bot ──────────
     triggered_bot_ids: set[str] = field(default_factory=set)
-    bot_msg_by_id: dict[str, Message] = field(default_factory=dict)
 
     # ── output ──────────────────────────────────────────────────────────
     bot_messages: list[Message] = field(default_factory=list)
