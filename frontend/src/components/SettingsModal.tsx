@@ -1287,8 +1287,8 @@ function BulletinPane({
 
 /** BotPane — top-level Bot view, segmented into three sub-tabs:
  *  Bot (list+CRUD) / 消息模板 / LLM 模型. Each sub-tab is a self-contained
- *  pane that mirrors the management UI in /admin but uses our card style
- *  for layout consistency. */
+ *  pane that keeps Bot, template, and model setup inside the modal settings
+ *  flow. */
 type BotSubTab = "bots" | "templates" | "models";
 
 function BotPane({
@@ -2596,7 +2596,7 @@ function BotNewPane({
                 className={inputCls}
               >
                 {models.length === 0 ? (
-                  <option value="">（无可用模型，请先到管理后台创建）</option>
+                  <option value="">（无可用模型，请先在设置的 LLM 模型中创建）</option>
                 ) : (
                   models.map((m) => (
                     <option key={m.model_id} value={m.model_id}>
@@ -2613,7 +2613,7 @@ function BotNewPane({
                 className={inputCls}
               >
                 {templates.length === 0 ? (
-                  <option value="">（无可用模板，请先到管理后台创建）</option>
+                  <option value="">（无可用模板，请先在设置的消息模板中创建）</option>
                 ) : (
                   templates.map((t) => (
                     <option key={t.template_id} value={t.template_id}>
@@ -2830,7 +2830,7 @@ function BotEditPane({
           </div>
         </div>
         <div className="an-row-card" style={{ color: "var(--fg-3)", fontSize: 12 }}>
-          高级配置（模型、提示词、Token）请在管理后台调整。
+          高级配置已收敛到设置弹窗；当前详情页仅开放基础信息编辑。
         </div>
       </div>
     </div>

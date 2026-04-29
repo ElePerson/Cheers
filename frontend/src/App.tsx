@@ -1706,9 +1706,7 @@ export default function App() {
       );
       if (!picked || !String(picked.base_url || "").trim()) {
         setQaLlmReady(false);
-        setQaLlmHint(
-          "未配置问答总结 LLM，请到「管理」页绑定问答总结或系统 LLM。",
-        );
+        setQaLlmHint("未配置问答总结 LLM 或系统 LLM。");
         return false;
       }
       setQaLlmReady(true);
@@ -1767,7 +1765,7 @@ export default function App() {
     try {
       const ok = await refreshQaLlmStatus();
       if (!ok) {
-        toast.error("请先在管理页配置并绑定可用 LLM（问答总结或系统 LLM）。");
+        toast.error("请先配置并绑定可用 LLM（问答总结或系统 LLM）。");
         return;
       }
 

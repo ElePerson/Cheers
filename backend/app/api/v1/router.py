@@ -17,7 +17,6 @@ from app.api.v1.messages.routes import router as messages_router
 from app.api.v1.notifications.routes import router as notifications_router
 from app.api.v1.openclaw_bridge.routes import router as openclaw_bridge_router
 from app.api.v1.search.routes import router as search_router
-from app.api.v1.tasks.routes import router as tasks_router
 from app.api.v1.templates.routes import router as templates_router
 from app.api.v1.todos.routes import router as todos_router
 from app.api.v1.workspaces.routes import router as workspaces_router
@@ -34,7 +33,6 @@ v1_router.include_router(auth_router)
 v1_router.include_router(admin_router)
 v1_router.include_router(files_router)
 v1_router.include_router(context_router)
-v1_router.include_router(tasks_router)
 v1_router.include_router(friends_router)
 v1_router.include_router(image_gen_router)
 v1_router.include_router(bulletin_router)
