@@ -176,9 +176,3 @@ class AuthService:
         if updates:
             return await self.user_repo.update(user, **updates)
         return user
-
-    # ---- User Management (admin) ----
-
-    async def list_users(self) -> list[User]:
-        return await self.user_repo.list_all()
-
