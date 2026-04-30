@@ -270,6 +270,21 @@ export function sessionKeyFor(accountId: string, channelId: string): string {
   return `agentnexus:${accountId}:${channelId}`;
 }
 
+function sessionKeyFromInbound(accountId: string, m: InboundMessage): string {
+  const direct = m.event.openclaw_session_key;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const nested = m.event.session?.openclaw_session_key;
+  if (typeof nested === "string" && nested.trim()) return nested.trim();
+  return sessionKeyFor(accountId, m.channelId);
+}
+
+function forgetInboundBySessionKey(
+  cache: Map<string, InboundMessage>, accountId: string, source: InboundMessage,
+): void {
+  cache.delete(sessionKeyFromInbound(accountId, source));
+  cache.delete(sessionKeyFor(accountId, source.channelId));
+}
+
 // ============================================================================
 // Plugin API 共享 —— registerFull 里把 api 存到这里，onMessage 里通过 fetch
 // 把消息 bounce 到 api.registerHttpRoute 注册的路由，从而进入 request scope
@@ -423,7 +438,7 @@ async function startAccount(rawCtx: unknown): Promise<void> {
         log.info?.(`agentnexus: ${accountId} left ${cid} reason=${reason}`);
       },
       onMessage: async (m) => {
-        const sk = sessionKeyFor(accountId, m.channelId);
+        const sk = sessionKeyFromInbound(accountId, m);
         rememberInbound(lastInboundBySessionKey, sk, m);
         rememberInbound(lastInboundByTaskId, m.event.task_id, m);
         log.info?.(
@@ -812,7 +827,7 @@ async function sendMedia(ctx: SendMediaCtx): Promise<SendTextResult> {
   let slot = existingSlot;
   if (!slot && peekedSource) {
     lastInboundByTaskId.delete(peekedSource.event.task_id);
-    lastInboundBySessionKey.delete(`agentnexus:${accountId}:${peekedSource.channelId}`);
+    forgetInboundBySessionKey(lastInboundBySessionKey, accountId, peekedSource);
     const placeholder = peekedSource.event.placeholder_msg_id ?? null;
     slot = {
       source: peekedSource,
@@ -946,7 +961,7 @@ async function sendText(ctx: SendTextCtx): Promise<SendTextResult> {
     // Consume the inbound source so subsequent sendText calls won't try to
     // restart the stream — once the slot exists we keep accumulating into it.
     lastInboundByTaskId.delete(source.event.task_id);
-    lastInboundBySessionKey.delete(`agentnexus:${accountId}:${source.channelId}`);
+    forgetInboundBySessionKey(lastInboundBySessionKey, accountId, source);
 
     const placeholder = source.event.placeholder_msg_id ?? null;
     slot = {
