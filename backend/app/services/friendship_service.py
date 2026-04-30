@@ -176,6 +176,8 @@ class FriendshipService:
         existing = await self.repo.get_by_pair(current_user.user_id, target.user_id)
         now = datetime.now(timezone.utc)
         if existing:
+            if existing.status == "pending":
+                await self._update_notice_message(existing, "blocked", resolved_by=current_user.user_id)
             await self.repo.update(
                 existing,
                 user_id=current_user.user_id,
@@ -188,7 +190,6 @@ class FriendshipService:
             friendship = await self.repo.create(current_user.user_id, target.user_id, status="blocked")
             friendship.responded_at = now
             await self.session.flush()
-        await self._update_notice_message(friendship, "blocked", resolved_by=current_user.user_id)
         await self._notify_friendship_changed(friendship, "blocked")
         return self._request_payload(current_user.user_id, friendship, target)
 
