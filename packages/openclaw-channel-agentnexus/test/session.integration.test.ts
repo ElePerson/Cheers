@@ -2,9 +2,9 @@
  * 端到端集成测试：连接真实 AgentNexus bridge，验证 hello / message / reply 回路。
  *
  * 环境变量（缺任一则跳过）：
- *   AGENTNEXUS_BOT_TOKEN     —— 创建 WS Bot 时返回的 ocw_... token
- *   AGENTNEXUS_CONTROL_URL   —— 例如 ws://localhost:8002/ws/openclaw/control
- *   AGENTNEXUS_DATA_URL      —— 例如 ws://localhost:8002/ws/openclaw/data
+ *   AGENTNEXUS_BOT_TOKEN     —— 创建 Agent Bridge Bot 时返回的 agb_... token
+ *   AGENTNEXUS_CONTROL_URL   —— 例如 ws://localhost:8002/ws/agent-bridge/control
+ *   AGENTNEXUS_DATA_URL      —— 例如 ws://localhost:8002/ws/agent-bridge/data
  *
  * 跑法：先手动 /api/v1/bots 创建 WS bot、加进某频道、导出 env，再：
  *   npm run test -- session.integration

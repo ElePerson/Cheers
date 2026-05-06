@@ -1,4 +1,4 @@
-"""OpenClaw stable session mapping tests."""
+"""Agent Bridge stable session mapping tests."""
 from __future__ import annotations
 
 import pytest
@@ -6,12 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AgentNexusSession, AgentNexusSessionBinding, BotAccount, Channel, Workspace
-from app.services.openclaw_bridge.session_map import (
+from app.features.agent_bridge.session_map import (
     SCOPE_CHANNEL,
     SCOPE_DM,
     SCOPE_TASK,
     SCOPE_TOPIC,
-    build_openclaw_session_key,
+    build_provider_session_key,
     resolve_dispatch_session,
 )
 
@@ -34,7 +34,7 @@ async def _seed_bot_channel(
         username=f"sess_map_bot_{suffix.replace('-', '_')}",
         display_name="Session Bot",
         status="online",
-        binding_type="websocket",
+        binding_type="agent_bridge",
         binding_config={"account_id": f"acct-{suffix}", "agent_id": "agent-main"},
     )
     session.add_all([workspace, channel, bot])
@@ -73,9 +73,9 @@ async def test_channel_scope_reuses_session_and_binds_tasks(db_session: AsyncSes
     )
 
     assert second.session_id == first.session_id
-    assert second.openclaw_session_key == first.openclaw_session_key
+    assert second.provider_session_key == first.provider_session_key
     assert first.primary_scope_type == SCOPE_CHANNEL
-    assert f"account:acct-chan-001:session:{first.session_id}" in first.openclaw_session_key
+    assert f"account:acct-chan-001:session:{first.session_id}" in first.provider_session_key
 
     bindings = await _bindings(db_session, first.session_id)
     assert {(b.scope_type, b.scope_id, b.role) for b in bindings} == {
@@ -116,7 +116,7 @@ async def test_bot_dm_scope_uses_user_bot_identity_not_channel_id(db_session: As
     )
 
     assert second.session_id == first.session_id
-    assert second.openclaw_session_key == first.openclaw_session_key
+    assert second.provider_session_key == first.provider_session_key
     assert first.primary_scope_type == SCOPE_DM
     assert first.primary_scope_id == f"user:{user_id}:bot:{bot.bot_id}"
 
@@ -158,7 +158,7 @@ async def test_bot_dm_reply_topic_context_does_not_split_session(db_session: Asy
     )
 
     assert reply.session_id == first.session_id
-    assert reply.openclaw_session_key == first.openclaw_session_key
+    assert reply.provider_session_key == first.provider_session_key
     assert reply.primary_scope_type == SCOPE_DM
     assert reply.primary_scope_id == f"user:{user_id}:bot:{bot.bot_id}"
 
@@ -173,18 +173,18 @@ async def test_bot_dm_reuses_legacy_channel_scoped_binding(db_session: AsyncSess
     bot, dm = await _seed_bot_channel(db_session, suffix="dm-legacy-001", channel_type="dm")
     user_id = "sess-map-user-dm-legacy-001"
     legacy_session_id = "sess-map-legacy-dm-session-001"
-    legacy_key = build_openclaw_session_key(
-        openclaw_agent_id="agent-main",
-        openclaw_account_id="acct-dm-legacy-001",
+    legacy_key = build_provider_session_key(
+        provider_agent_id="agent-main",
+        provider_account_id="acct-dm-legacy-001",
         session_id=legacy_session_id,
     )
     db_session.add(
         AgentNexusSession(
             session_id=legacy_session_id,
             bot_id=bot.bot_id,
-            openclaw_agent_id="agent-main",
-            openclaw_account_id="acct-dm-legacy-001",
-            openclaw_session_key=legacy_key,
+            provider_agent_id="agent-main",
+            provider_account_id="acct-dm-legacy-001",
+            provider_session_key=legacy_key,
             current_scope_type=SCOPE_DM,
             current_scope_id=dm.channel_id,
         )
@@ -193,8 +193,8 @@ async def test_bot_dm_reuses_legacy_channel_scoped_binding(db_session: AsyncSess
         AgentNexusSessionBinding(
             session_id=legacy_session_id,
             bot_id=bot.bot_id,
-            openclaw_agent_id="agent-main",
-            openclaw_account_id="acct-dm-legacy-001",
+            provider_agent_id="agent-main",
+            provider_account_id="acct-dm-legacy-001",
             scope_type=SCOPE_DM,
             scope_id=dm.channel_id,
             channel_id=dm.channel_id,
@@ -214,7 +214,7 @@ async def test_bot_dm_reuses_legacy_channel_scoped_binding(db_session: AsyncSess
     )
 
     assert resolved.session_id == legacy_session_id
-    assert resolved.openclaw_session_key == legacy_key
+    assert resolved.provider_session_key == legacy_key
     assert resolved.primary_scope_type == SCOPE_DM
     assert resolved.primary_scope_id == f"user:{user_id}:bot:{bot.bot_id}"
 
@@ -323,7 +323,7 @@ async def test_same_channel_is_isolated_by_openclaw_account(db_session: AsyncSes
         username="sess_map_bot_acct_002",
         display_name="Session Bot B",
         status="online",
-        binding_type="websocket",
+        binding_type="agent_bridge",
         binding_config={"account_id": "acct-other", "agent_id": "agent-main"},
     )
     db_session.add(bot_b)
@@ -347,5 +347,5 @@ async def test_same_channel_is_isolated_by_openclaw_account(db_session: AsyncSes
     )
 
     assert other_account.session_id != first.session_id
-    assert other_account.openclaw_session_key != first.openclaw_session_key
-    assert "account:acct-other" in other_account.openclaw_session_key
+    assert other_account.provider_session_key != first.provider_session_key
+    assert "account:acct-other" in other_account.provider_session_key

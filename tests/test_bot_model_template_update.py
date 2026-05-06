@@ -6,7 +6,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AIModel, BotAccount, PromptTemplate
-from app.services.guide.constants import GUIDE_BOT_ID
+from app.features.bot_runtime.builtin_ids import HELPER_BOT_ID
 
 TEST_USER_ID = "a0000000-0000-0000-0000-000000000099"
 
@@ -105,10 +105,10 @@ async def test_system_admin_can_list_and_rebind_builtin_bot(
     template_one = _template("builtin-template-0001", "Builtin Template One")
     template_two = _template("builtin-template-0002", "Builtin Template Two")
     db_session.add_all([model_one, model_two, template_one, template_two])
-    bot = await db_session.get(BotAccount, GUIDE_BOT_ID)
+    bot = await db_session.get(BotAccount, HELPER_BOT_ID)
     if bot is None:
         bot = BotAccount(
-            bot_id=GUIDE_BOT_ID,
+            bot_id=HELPER_BOT_ID,
             username="Coordinator",
             display_name="协调者",
             created_by=None,
@@ -124,13 +124,13 @@ async def test_system_admin_can_list_and_rebind_builtin_bot(
 
     list_resp = await client.get("/api/v1/bots")
     assert list_resp.status_code == 200
-    listed = next(item for item in list_resp.json()["data"] if item["bot_id"] == GUIDE_BOT_ID)
+    listed = next(item for item in list_resp.json()["data"] if item["bot_id"] == HELPER_BOT_ID)
     assert listed["is_builtin"] is True
     assert listed["model_id"] == model_one.model_id
     assert listed["template_id"] == template_one.template_id
 
     update_resp = await client.put(
-        f"/api/v1/bots/{GUIDE_BOT_ID}",
+        f"/api/v1/bots/{HELPER_BOT_ID}",
         json={
             "model_id": model_two.model_id,
             "template_id": template_two.template_id,
@@ -145,7 +145,7 @@ async def test_system_admin_can_list_and_rebind_builtin_bot(
     assert updated["model_name"] == model_two.name
     assert updated["template_name"] == template_two.name
 
-    delete_resp = await client.delete(f"/api/v1/bots/{GUIDE_BOT_ID}")
+    delete_resp = await client.delete(f"/api/v1/bots/{HELPER_BOT_ID}")
     assert delete_resp.status_code == 400
 
 

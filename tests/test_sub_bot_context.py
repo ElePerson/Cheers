@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.adapters.base import AgentPayload, AgentResponse, OpenClawAdapter
-from app.services.pipeline.bot.context import BotRunContext
+from app.features.bot_runtime.adapters.base import AgentPayload, AgentResponse, BotAdapter
+from app.features.bot_runtime.pipeline.bot.context import BotRunContext
 
 
 class _FakeWriter:
@@ -18,7 +18,7 @@ class _FakeWriter:
         pass
 
 
-class _CapturingAdapter(OpenClawAdapter):
+class _CapturingAdapter(BotAdapter):
     def __init__(self) -> None:
         self.payloads: list[AgentPayload] = []
 
@@ -34,7 +34,7 @@ class _CapturingAdapter(OpenClawAdapter):
         return True
 
 
-def _make_run_ctx(*, memory_context: dict[str, str], adapter: OpenClawAdapter) -> BotRunContext:
+def _make_run_ctx(*, memory_context: dict[str, str], adapter: BotAdapter) -> BotRunContext:
     async def adapter_factory(bot_id: str):
         return adapter
 
@@ -84,7 +84,7 @@ async def test_call_bot_passes_memory_context():
         "_run_ctx": run_ctx,
     }
 
-    from app.services.adapters.channel_bot import _make_tools
+    from app.features.bot_runtime.adapters.channel_bot import _make_tools
 
     tools = _make_tools(tool_ctx)
     call_bot_tool = next(t for t in tools if t.name == "call_bot")
@@ -131,7 +131,7 @@ async def test_call_bot_sub_bot_receives_decrypted_secret_parent_text():
         "_run_ctx": run_ctx,
     }
 
-    from app.services.adapters.channel_bot import _make_tools
+    from app.features.bot_runtime.adapters.channel_bot import _make_tools
 
     tools = _make_tools(tool_ctx)
     call_bot_tool = next(t for t in tools if t.name == "call_bot")
@@ -148,7 +148,7 @@ async def test_call_bot_sub_bot_receives_decrypted_secret_parent_text():
 async def test_http_bot_receives_memory_as_template_vars():
     """验证 HTTP Bot 将记忆上下文注入为模板变量。"""
     from app.db.models import AIModel, BotAccount, PromptTemplate
-    from app.services.adapters.http_bot import HttpBotAdapter
+    from app.features.bot_runtime.adapters.http_bot import HttpBotAdapter
 
     # 创建测试 Bot（使用记忆变量的模板）
     model = AIModel(
@@ -186,7 +186,7 @@ async def test_http_bot_receives_memory_as_template_vars():
     }
 
     # 验证_build_messages 会通过 {{memory}} 渲染记忆
-    from app.services.adapters.prompt_template import render_memory_context
+    from app.features.bot_runtime.adapters.prompt_template import render_memory_context
 
     messages = adapter._build_messages("你好", {"memory": render_memory_context(memory_context)})
 

@@ -3,7 +3,7 @@ import asyncio
 import concurrent.futures
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from app.config import settings
@@ -226,7 +226,7 @@ def _load_ai_model_providers() -> list[dict[str, Any]]:
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(asyncio.run, _fetch_ai_models_async())
-            return future.result(timeout=10)
+            return cast(list[dict[str, Any]], future.result(timeout=10))
     except Exception:
         return []
 
@@ -271,34 +271,34 @@ def _get_provider_by_id(provider_id: str) -> dict[str, Any] | None:
 def get_provider_for_scope(scope: str) -> dict[str, Any] | None:
     """
     按功能范围返回当前绑定的 LLM 配置（base_url, model, api_key, temperature, max_tokens）。
-    channel_bot 为频道内置助手的统一 scope，兼容旧版 guide_bot / assistant_bot / builtin_llm。
+    channel_bot 为频道内置助手的统一 scope，兼容旧版 assistant_bot / builtin_llm。
     """
     from app.config import settings
 
     data = load_admin_settings()
     _ensure_llm_structures(data)
 
-    # channel_bot：频道助手统一 scope（兼容旧版 guide_bot / assistant_bot / builtin_llm）
-    if scope in ("channel_bot", "guide_bot", "assistant_bot"):
+    # channel_bot：频道助手统一 scope（兼容旧版 assistant_bot / builtin_llm）
+    if scope in ("channel_bot", "assistant_bot"):
         # 1. 旧版 builtin_llm 直接配置优先（向后兼容，界面已迁移到绑定方式）
         builtin = data.get("builtin_llm", {})
         if builtin.get("base_url") or builtin.get("model"):
             return _normalize_provider_config(builtin)
         # 2. 新版 channel_bot 绑定
         bindings = data.get("llm_bindings") or {}
-        pid = bindings.get("channel_bot") or bindings.get("guide_bot")
+        pid = bindings.get("channel_bot")
         if pid:
             p = _get_provider_by_id(pid)
             if p:
                 return _normalize_provider_config(p)
-        # 3. 回退到 guide_llm_* 环境变量（无需管理界面配置即可使用）
-        if settings.guide_llm_base_url and settings.guide_llm_model:
+        # 3. 回退到 helper_llm_* 环境变量（无需管理界面配置即可使用）
+        if settings.helper_llm_base_url and settings.helper_llm_model:
             return {
-                "base_url": settings.guide_llm_base_url.rstrip("/"),
-                "model": settings.guide_llm_model,
-                "api_key": settings.guide_llm_api_key or None,
-                "temperature": float(settings.guide_llm_temperature),
-                "max_tokens": int(settings.guide_llm_max_tokens),
+                "base_url": settings.helper_llm_base_url.rstrip("/"),
+                "model": settings.helper_llm_model,
+                "api_key": settings.helper_llm_api_key or None,
+                "temperature": float(settings.helper_llm_temperature),
+                "max_tokens": int(settings.helper_llm_max_tokens),
             }
         return None
 
@@ -318,18 +318,7 @@ def get_assist_settings() -> dict[str, Any]:
     _ensure_llm_structures(data)
     bindings = data.get("llm_bindings") or {}
     return {
-        "llm_provider_id": bindings.get("channel_bot") or bindings.get("guide_bot") or "",
+        "llm_provider_id": bindings.get("channel_bot") or "",
         "auto_takeover": bool(data.get("orchestrator_auto_takeover", False)),
         "child_bot_inherit_context": bool(data.get("child_bot_inherit_context", True)),
     }
-
-
-def get_image_gen_effective_config() -> tuple[str, str, str]:
-    """返回生效的 (base_url, api_key, default_model)，历史配置优先于 env。"""
-    data = load_admin_settings()
-    admin = data.get("image_gen", {})
-    base_url = (admin.get("base_url") or "").strip() or settings.image_gen_base_url
-    stored_key = decrypt_value((admin.get("api_key") or "").strip())
-    api_key = stored_key or settings.image_gen_api_key
-    default_model = (admin.get("default_model") or "").strip() or settings.image_gen_default_model
-    return base_url, api_key, default_model

@@ -1,5 +1,5 @@
 /**
- * AgentNexus bridge WebSocket protocol —— 与 backend/app/api/v1/openclaw_bridge/routes.py
+ * AgentNexus bridge WebSocket protocol —— 与 backend/app/api/v1/agent_bridge/routes.py
  * 保持对齐。如果服务端协议变化，这里的类型也要同步更新。
  *
  * Bot 的每个 WS 连接（control / data）只代表一个 AgentNexus bot_id；鉴权用 bot token。
@@ -106,9 +106,9 @@ export interface DataHello {
 
 export interface AgentNexusSessionRef {
   id?: string;
-  openclaw_session_key?: string;
-  openclaw_account_id?: string;
-  openclaw_agent_id?: string;
+  provider_session_key?: string;
+  provider_account_id?: string;
+  provider_agent_id?: string;
   primary_scope_type?: string;
   primary_scope_id?: string;
   task_scope_id?: string;
@@ -129,7 +129,7 @@ export interface MessageEvent {
   attachments: AttachmentInfo[];
   binding_config?: Record<string, unknown>;
   session?: AgentNexusSessionRef;
-  openclaw_session_key?: string;
+  provider_session_key?: string;
 }
 
 export interface SendAckOk {
@@ -252,7 +252,7 @@ export interface DeltaFrame {
  *  Message and broadcasts `message_done`. Idempotent.
  *
  *  `file_ids` lets the plugin attach binary outputs (uploaded via the
- *  /openclaw/bridge/files/upload-binary HTTP route while the stream was in
+ *  /agent-bridge/files/upload-binary HTTP route while the stream was in
  *  flight) to the same finalized message — so a "正在打字 → 文件浮现" UX
  *  shows up as a single bot reply, not text + a separate media message. */
 export interface DoneFrame {

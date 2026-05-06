@@ -20,7 +20,7 @@ from app.db.models import (
     FileRecord,
     Workspace,
 )
-from app.services.openclaw_bridge.tokens import apply_token_to_bot
+from app.features.agent_bridge.tokens import apply_token_to_bot
 
 
 async def _seed_bot_in_channel(
@@ -38,7 +38,7 @@ async def _seed_bot_in_channel(
         username=f"u-{bot_id[-8:]}",
         display_name="BU",
         status="online",
-        binding_type="websocket",
+        binding_type="agent_bridge",
         binding_config={},
         bot_token_hash=None,
         bot_token_prefix=None,
@@ -61,14 +61,14 @@ async def test_upload_binary_happy_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    monkeypatch.setattr(settings, "openclaw_bridge_enabled", True)
-    monkeypatch.setattr(settings, "openclaw_bridge_token", "dummy")
+    monkeypatch.setattr(settings, "agent_bridge_enabled", True)
+    monkeypatch.setattr(settings, "agent_bridge_token", "dummy")
 
     bot_id, ch_id, token = await _seed_bot_in_channel(db_session)
 
     body = b"\x89PNG\r\n\x1a\npayload-bytes"
     resp = await client.post(
-        "/api/v1/openclaw/bridge/files/upload-binary",
+        "/api/v1/agent-bridge/files/upload-binary",
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "image/png",
@@ -108,7 +108,7 @@ async def test_upload_binary_rejects_missing_token(
     _, ch_id, _ = await _seed_bot_in_channel(db_session)
 
     resp = await client.post(
-        "/api/v1/openclaw/bridge/files/upload-binary",
+        "/api/v1/agent-bridge/files/upload-binary",
         headers={
             "Content-Type": "text/plain",
             "X-Channel-Id": ch_id,
@@ -125,7 +125,7 @@ async def test_upload_binary_rejects_bot_not_in_channel(
     tmp_path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    monkeypatch.setattr(settings, "openclaw_bridge_enabled", True)
+    monkeypatch.setattr(settings, "agent_bridge_enabled", True)
 
     _, _, token = await _seed_bot_in_channel(db_session)
     # 另一个频道，bot 不是成员
@@ -136,7 +136,7 @@ async def test_upload_binary_rejects_bot_not_in_channel(
     await db_session.commit()
 
     resp = await client.post(
-        "/api/v1/openclaw/bridge/files/upload-binary",
+        "/api/v1/agent-bridge/files/upload-binary",
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "text/plain",
@@ -154,12 +154,12 @@ async def test_upload_binary_rejects_empty_body(
     tmp_path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    monkeypatch.setattr(settings, "openclaw_bridge_enabled", True)
+    monkeypatch.setattr(settings, "agent_bridge_enabled", True)
 
     _, ch_id, token = await _seed_bot_in_channel(db_session)
 
     resp = await client.post(
-        "/api/v1/openclaw/bridge/files/upload-binary",
+        "/api/v1/agent-bridge/files/upload-binary",
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "text/plain",
@@ -177,13 +177,13 @@ async def test_upload_binary_rejects_oversize(
     tmp_path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    monkeypatch.setattr(settings, "openclaw_bridge_enabled", True)
+    monkeypatch.setattr(settings, "agent_bridge_enabled", True)
     monkeypatch.setattr(settings, "file_upload_max_bytes", 100)
 
     _, ch_id, token = await _seed_bot_in_channel(db_session)
 
     resp = await client.post(
-        "/api/v1/openclaw/bridge/files/upload-binary",
+        "/api/v1/agent-bridge/files/upload-binary",
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/octet-stream",
@@ -208,12 +208,12 @@ async def test_upload_binary_infers_content_type_from_filename(
 ) -> None:
     """Content-Type 缺失或 octet-stream 时用文件名扩展名兜底。"""
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    monkeypatch.setattr(settings, "openclaw_bridge_enabled", True)
+    monkeypatch.setattr(settings, "agent_bridge_enabled", True)
 
     _, ch_id, token = await _seed_bot_in_channel(db_session)
 
     resp = await client.post(
-        "/api/v1/openclaw/bridge/files/upload-binary",
+        "/api/v1/agent-bridge/files/upload-binary",
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/octet-stream",

@@ -1,15 +1,15 @@
-"""OpenClawAdapter 契约测试."""
+"""BotAdapter 契约测试."""
 from unittest.mock import patch
 
 import httpx
 import pytest
 
 from app.db.models import AIModel, BotAccount, PromptTemplate
-from app.services.adapters.base import AgentPayload, AgentResponse
-from app.services.adapters.channel_bot import ChannelBotAdapter
-from app.services.adapters.http_bot import HttpBotAdapter
-from app.services.adapters.mock_bot import MockBotAdapter
-from app.services.pipeline.adapter_events import Final
+from app.features.bot_runtime.adapters.base import AgentPayload, AgentResponse
+from app.features.bot_runtime.adapters.channel_bot import ChannelBotAdapter
+from app.features.bot_runtime.adapters.http_bot import HttpBotAdapter
+from app.features.bot_runtime.adapters.mock_bot import MockBotAdapter
+from app.features.bot_runtime.pipeline.adapter_events import Final
 
 
 def _http_bot_adapter(
@@ -161,7 +161,7 @@ async def test_channel_bot_attachment_fallback_uses_file_content() -> None:
         # keyword-fallback branch (which injects the file content).
         yield Final(content="", success=True)
 
-    with patch("app.services.adapters.channel_bot._run_agent_iter", new=_empty_iter):
+    with patch("app.features.bot_runtime.adapters.channel_bot._run_agent_iter", new=_empty_iter):
         resp = await adapter.execute(payload)
 
     assert resp.success is True

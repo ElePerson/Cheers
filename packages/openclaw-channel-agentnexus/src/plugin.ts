@@ -62,7 +62,7 @@ async function fetchFileContentForBot(
     log?.warn?.(`agentnexus: fetchFileContent no httpBase fileId=${fileId}`);
     return null;
   }
-  const url = `${httpBase}/api/v1/openclaw/bridge/files/${encodeURIComponent(fileId)}/content`;
+  const url = `${httpBase}/api/v1/agent-bridge/files/${encodeURIComponent(fileId)}/content`;
   try {
     const resp = await fetch(url, {
       headers: { Authorization: `Bearer ${botToken}` },
@@ -249,10 +249,24 @@ interface AccountRuntime {
   /** taskId → inbound。session-binding 把 conversationId=taskId 绑到 sessionKey，
    *  deliver 回来时 ctx.to === taskId，据此找回源消息做 session.reply。 */
   lastInboundByTaskId: Map<string, InboundMessage>;
+  /** conversation/task/child id → AgentNexus reply target.
+   *
+   * OpenClaw child runs may deliver outbound chunks with ctx.to equal to a
+   * child conversation id rather than the original AgentNexus task_id. This
+   * map keeps all of those aliases pinned to the original placeholder. */
+  replyTargets: Map<string, ReplyTarget>;
   /** SessionBindingAdapter 的内存 store（sessionKey → records） */
   bindingStore: Map<string, SessionBindingRecord[]>;
   /** 给 stopAccount 解除注册用 */
   bindingAdapter: SessionBindingAdapter;
+}
+
+interface ReplyTarget {
+  taskId: string;
+  placeholderMsgId: string | null;
+  channelId: string;
+  sessionKey?: string;
+  source?: InboundMessage;
 }
 
 const sessionRegistry = new Map<string, AccountRuntime>();
@@ -267,14 +281,25 @@ function rememberInbound(cache: Map<string, InboundMessage>, key: string, m: Inb
   }
 }
 
+function rememberReplyTarget(cache: Map<string, ReplyTarget>, key: string | null | undefined, target: ReplyTarget): void {
+  if (!key) return;
+  if (cache.has(key)) cache.delete(key);
+  cache.set(key, target);
+  while (cache.size > INBOUND_CACHE_MAX * 3) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
+
 export function sessionKeyFor(accountId: string, channelId: string): string {
   return `agentnexus:${accountId}:${channelId}`;
 }
 
 function sessionKeyFromInbound(accountId: string, m: InboundMessage): string {
-  const direct = m.event.openclaw_session_key;
+  const direct = m.event.provider_session_key;
   if (typeof direct === "string" && direct.trim()) return direct.trim();
-  const nested = m.event.session?.openclaw_session_key;
+  const nested = m.event.session?.provider_session_key;
   if (typeof nested === "string" && nested.trim()) return nested.trim();
   return sessionKeyFor(accountId, m.channelId);
 }
@@ -284,6 +309,107 @@ function forgetInboundBySessionKey(
 ): void {
   cache.delete(sessionKeyFromInbound(accountId, source));
   cache.delete(sessionKeyFor(accountId, source.channelId));
+}
+
+function replyTargetFromInbound(accountId: string, m: InboundMessage): ReplyTarget {
+  return {
+    taskId: m.event.task_id,
+    placeholderMsgId: m.event.placeholder_msg_id ?? null,
+    channelId: m.channelId,
+    sessionKey: sessionKeyFromInbound(accountId, m),
+    source: m,
+  };
+}
+
+function readReplyTargetMetadata(value: unknown): Omit<ReplyTarget, "source"> | null {
+  if (!value || typeof value !== "object") return null;
+  const data = value as Record<string, unknown>;
+  const taskId = data.agentnexusTaskId ?? data.taskId;
+  const placeholderMsgId = data.placeholderMsgId ?? data.placeholder_msg_id;
+  const channelId = data.channelId ?? data.channel_id;
+  const sessionKey = data.sessionKey ?? data.provider_session_key;
+  if (typeof taskId !== "string" || !taskId) return null;
+  if (typeof channelId !== "string" || !channelId) return null;
+  return {
+    taskId,
+    placeholderMsgId: typeof placeholderMsgId === "string" && placeholderMsgId ? placeholderMsgId : null,
+    channelId,
+    ...(typeof sessionKey === "string" && sessionKey ? { sessionKey } : {}),
+  };
+}
+
+function completeReplyTarget(
+  target: Omit<ReplyTarget, "source">,
+  parent: ReplyTarget | null,
+  source: InboundMessage | undefined,
+): ReplyTarget {
+  const out: ReplyTarget = {
+    ...target,
+    placeholderMsgId: target.placeholderMsgId ?? parent?.placeholderMsgId ?? null,
+    ...(target.sessionKey ? {} : parent?.sessionKey ? { sessionKey: parent.sessionKey } : {}),
+  };
+  const resolvedSource = source ?? parent?.source;
+  if (resolvedSource) out.source = resolvedSource;
+  return out;
+}
+
+function replyTargetFromBindingRecord(entry: AccountRuntime, rec: SessionBindingRecord): ReplyTarget | null {
+  const own = readReplyTargetMetadata(rec.metadata);
+  const parentId = rec.conversation.parentConversationId;
+  const parent = parentId ? entry.replyTargets.get(parentId) ?? null : null;
+  if (own) {
+    return completeReplyTarget(
+      own,
+      parent,
+      entry.lastInboundByTaskId.get(own.taskId) ?? entry.replyTargets.get(own.taskId)?.source,
+    );
+  }
+  if (parent) return parent;
+  return null;
+}
+
+function findBindingReplyTarget(entry: AccountRuntime, conversationId: string): ReplyTarget | null {
+  for (const arr of entry.bindingStore.values()) {
+    for (const rec of arr) {
+      if (rec.conversation.conversationId !== conversationId) continue;
+      const target = replyTargetFromBindingRecord(entry, rec);
+      if (target) {
+        rememberReplyTarget(entry.replyTargets, conversationId, target);
+        return target;
+      }
+    }
+  }
+  return null;
+}
+
+function resolveReplyTarget(entry: AccountRuntime, to: string): ReplyTarget | null {
+  const direct = entry.replyTargets.get(to);
+  if (direct) return direct;
+
+  const byTask = entry.lastInboundByTaskId.get(to);
+  if (byTask) {
+    const accountId = entry.account.accountId ?? "";
+    const target = replyTargetFromInbound(accountId, byTask);
+    rememberReplyTarget(entry.replyTargets, to, target);
+    return target;
+  }
+
+  const bySession = entry.lastInboundBySessionKey.get(to);
+  if (bySession) {
+    const accountId = entry.account.accountId ?? "";
+    const target = replyTargetFromInbound(accountId, bySession);
+    rememberReplyTarget(entry.replyTargets, to, target);
+    return target;
+  }
+
+  return findBindingReplyTarget(entry, to);
+}
+
+function sourceForReplyTarget(entry: AccountRuntime, target: ReplyTarget | null, to: string): InboundMessage | undefined {
+  return entry.lastInboundByTaskId.get(to)
+    ?? entry.lastInboundBySessionKey.get(to)
+    ?? (target?.taskId ? entry.lastInboundByTaskId.get(target.taskId) : undefined)
+    ?? target?.source;
 }
 
 // ============================================================================
@@ -401,6 +527,32 @@ function clearRunTraceTargetsForAccount(accountId: string): void {
   }
 }
 
+function inferRunTraceTarget(evt: OpenClawAgentEvent): RunTraceTarget | null {
+  const byRun = runTraceByRunId.get(evt.runId);
+  if (byRun) return byRun;
+
+  const sessionKey = typeof evt.sessionKey === "string" ? evt.sessionKey : undefined;
+  if (!sessionKey) return null;
+
+  let newest: RunTraceTarget | null = null;
+  for (const target of runTraceByRunId.values()) {
+    if (target.sessionKey !== sessionKey) continue;
+    if (!newest || target.registeredAt > newest.registeredAt) newest = target;
+  }
+  if (newest) {
+    registerOpenClawRunTrace({
+      runId: evt.runId,
+      accountId: newest.accountId,
+      sessionKey: newest.sessionKey,
+      channelId: newest.channelId,
+      taskId: newest.taskId,
+      placeholderMsgId: newest.placeholderMsgId,
+    });
+    return runTraceByRunId.get(evt.runId) ?? newest;
+  }
+  return null;
+}
+
 export function registerOpenClawRunTrace(target: Omit<RunTraceTarget, "registeredAt"> & { runId: string }): void {
   sweepRunTraceTargets();
   runTraceByRunId.set(target.runId, {
@@ -447,7 +599,7 @@ export function emitRunTrace(runId: string, trace: {
 
 function forwardOpenClawAgentEvent(evt: OpenClawAgentEvent): void {
   if (!evt || typeof evt.runId !== "string" || !evt.runId) return;
-  const target = runTraceByRunId.get(evt.runId);
+  const target = inferRunTraceTarget(evt);
   if (!target) return;
   const summary = summarizeTraceEvent(evt.stream, evt.data);
   emitRunTrace(evt.runId, {
@@ -568,6 +720,7 @@ async function startAccount(rawCtx: unknown): Promise<void> {
 
   const lastInboundBySessionKey = new Map<string, InboundMessage>();
   const lastInboundByTaskId = new Map<string, InboundMessage>();
+  const replyTargets = new Map<string, ReplyTarget>();
   const bindingStore = new Map<string, SessionBindingRecord[]>();
 
   // 注册 SessionBindingAdapter：deliver:true 靠这个把 sessionKey 路由到
@@ -595,6 +748,28 @@ async function startAccount(rawCtx: unknown): Promise<void> {
       const arr = bindingStore.get(input.targetSessionKey) ?? [];
       arr.push(rec);
       bindingStore.set(input.targetSessionKey, arr);
+
+      const metadataTarget = readReplyTargetMetadata(input.metadata);
+      const parentTarget = input.conversation.parentConversationId
+        ? replyTargets.get(input.conversation.parentConversationId) ?? null
+        : null;
+      const target = metadataTarget
+        ? completeReplyTarget(
+          metadataTarget,
+          parentTarget,
+          lastInboundByTaskId.get(metadataTarget.taskId) ?? replyTargets.get(metadataTarget.taskId)?.source,
+        )
+        : parentTarget;
+      if (target) {
+        const fullTarget: ReplyTarget = {
+          ...target,
+          source: lastInboundByTaskId.get(target.taskId)
+            ?? replyTargets.get(target.taskId)?.source,
+        };
+        rememberReplyTarget(replyTargets, input.conversation.conversationId, fullTarget);
+        rememberReplyTarget(replyTargets, target.taskId, fullTarget);
+        if (target.sessionKey) rememberReplyTarget(replyTargets, target.sessionKey, fullTarget);
+      }
       return rec;
     },
     listBySession: (key) => bindingStore.get(key) ?? [],
@@ -664,8 +839,14 @@ async function startAccount(rawCtx: unknown): Promise<void> {
       },
       onMessage: async (m) => {
         const sk = sessionKeyFromInbound(accountId, m);
+        const target = replyTargetFromInbound(accountId, m);
         rememberInbound(lastInboundBySessionKey, sk, m);
         rememberInbound(lastInboundByTaskId, m.event.task_id, m);
+        rememberReplyTarget(replyTargets, m.event.task_id, target);
+        rememberReplyTarget(replyTargets, sk, target);
+        if (m.event.session?.task_scope_id) {
+          rememberReplyTarget(replyTargets, String(m.event.session.task_scope_id), target);
+        }
         log.info?.(
           `agentnexus: ${accountId} inbound channel=${m.channelId} task=${m.event.task_id} attachments=${m.attachments.length} text=${JSON.stringify(m.text).slice(0, 80)}`,
         );
@@ -813,6 +994,7 @@ async function startAccount(rawCtx: unknown): Promise<void> {
     account,
     lastInboundBySessionKey,
     lastInboundByTaskId,
+    replyTargets,
     bindingStore,
     bindingAdapter,
   });
@@ -1043,10 +1225,12 @@ async function flushPendingMedia(to: string, entry: AccountRuntime): Promise<voi
   pendingMediaByTo.delete(to);
   if (slot.fileIds.length === 0) return;
 
-  const { session, lastInboundByTaskId } = entry;
-  const source = lastInboundByTaskId.get(to);
+  const { session, lastInboundByTaskId, lastInboundBySessionKey } = entry;
+  const target = resolveReplyTarget(entry, to);
+  const source = sourceForReplyTarget(entry, target, to);
   if (source) {
     lastInboundByTaskId.delete(source.event.task_id);
+    forgetInboundBySessionKey(lastInboundBySessionKey, entry.account.accountId ?? "", source);
     await session.reply({ source, text: slot.caption, fileIds: slot.fileIds });
     return;
   }
@@ -1059,6 +1243,8 @@ async function flushPendingMedia(to: string, entry: AccountRuntime): Promise<voi
 async function sendMedia(ctx: SendMediaCtx): Promise<SendTextResult> {
   const { accountId, entry } = resolveActiveEntry(ctx.accountId);
   const { session, lastInboundByTaskId, lastInboundBySessionKey } = entry;
+  const target = resolveReplyTarget(entry, ctx.to);
+  const streamKey = target?.taskId ?? ctx.to;
 
   // gateway 运行时传 mediaUrl；旧 docs 示例用 filePath，兼容二者
   const mediaUrl = ctx.mediaUrl || ctx.filePath || "";
@@ -1068,9 +1254,10 @@ async function sendMedia(ctx: SendMediaCtx): Promise<SendTextResult> {
 
   // 解析 channelId 而**不**消费 inbound source —— 上传可能失败，
   // 失败时不能让 source 丢失（否则后续 sendText/sendMedia 也走不到流式）。
-  const existingSlot = pendingStreamByTo.get(ctx.to);
-  const peekedSource = existingSlot ? null : lastInboundByTaskId.get(ctx.to);
+  const existingSlot = pendingStreamByTo.get(streamKey);
+  const peekedSource = existingSlot ? null : sourceForReplyTarget(entry, target, ctx.to);
   const channelId = existingSlot?.source.channelId
+    ?? target?.channelId
     ?? peekedSource?.channelId
     ?? (session.membership.channelIds.has(ctx.to) ? ctx.to : null);
   if (!channelId || !mediaUrl) {
@@ -1099,7 +1286,7 @@ async function sendMedia(ctx: SendMediaCtx): Promise<SendTextResult> {
   if (!slot && peekedSource) {
     lastInboundByTaskId.delete(peekedSource.event.task_id);
     forgetInboundBySessionKey(lastInboundBySessionKey, accountId, peekedSource);
-    const placeholder = peekedSource.event.placeholder_msg_id ?? null;
+    const placeholder = target?.placeholderMsgId ?? peekedSource.event.placeholder_msg_id ?? null;
     slot = {
       source: peekedSource,
       placeholderMsgId: placeholder,
@@ -1110,8 +1297,8 @@ async function sendMedia(ctx: SendMediaCtx): Promise<SendTextResult> {
       fileIds: [],
       doneTimer: null,
     };
-    pendingStreamByTo.set(ctx.to, slot);
-    if (placeholder) taskByPlaceholder.set(placeholder, ctx.to);
+    pendingStreamByTo.set(streamKey, slot);
+    if (placeholder) taskByPlaceholder.set(placeholder, streamKey);
   }
 
   // ── 主路径：把 fileId 投到流式 slot，与 sendText 的 deltas 共用一个 done ──
@@ -1127,7 +1314,7 @@ async function sendMedia(ctx: SendMediaCtx): Promise<SendTextResult> {
       slot.hasDeltas = true;
       session.streamDelta({ msgId: slot.placeholderMsgId, seq: slot.seq, delta: caption });
     }
-    armStreamDoneTimer(ctx.to, entry, slot);
+    armStreamDoneTimer(streamKey, entry, slot);
     return {
       channel: PLUGIN_ID,
       messageId: `${slot.placeholderMsgId}-f${slot.fileIds.length}`,
@@ -1207,16 +1394,16 @@ async function flushStreamDone(to: string, entry: AccountRuntime): Promise<void>
 async function sendText(ctx: SendTextCtx): Promise<SendTextResult> {
   const { accountId, entry } = resolveActiveEntry(ctx.accountId);
   const { session, lastInboundBySessionKey, lastInboundByTaskId } = entry;
+  const target = resolveReplyTarget(entry, ctx.to);
+  const streamKey = target?.taskId ?? ctx.to;
 
-  let slot = pendingStreamByTo.get(ctx.to);
+  let slot = pendingStreamByTo.get(streamKey);
 
   if (!slot) {
     // First chunk for this `to`. Locate the inbound source so we have a
     // placeholder to stream against (and a fallback target if streaming
     // turns out to be unusable).
-    const byTask = lastInboundByTaskId.get(ctx.to);
-    const bySk = lastInboundBySessionKey.get(ctx.to);
-    const source = byTask ?? bySk;
+    const source = sourceForReplyTarget(entry, target, ctx.to);
     if (!source) {
       // 非响应式 send：保留原行为（主动 send 到 channel），不走流式
       const channelId = ctx.to;
@@ -1234,7 +1421,7 @@ async function sendText(ctx: SendTextCtx): Promise<SendTextResult> {
     lastInboundByTaskId.delete(source.event.task_id);
     forgetInboundBySessionKey(lastInboundBySessionKey, accountId, source);
 
-    const placeholder = source.event.placeholder_msg_id ?? null;
+    const placeholder = target?.placeholderMsgId ?? source.event.placeholder_msg_id ?? null;
     slot = {
       source,
       placeholderMsgId: placeholder,
@@ -1245,8 +1432,8 @@ async function sendText(ctx: SendTextCtx): Promise<SendTextResult> {
       fileIds: [],
       doneTimer: null,
     };
-    pendingStreamByTo.set(ctx.to, slot);
-    if (placeholder) taskByPlaceholder.set(placeholder, ctx.to);
+    pendingStreamByTo.set(streamKey, slot);
+    if (placeholder) taskByPlaceholder.set(placeholder, streamKey);
   }
 
   // Cancelled mid-stream: drop further deltas silently. Returning a
@@ -1254,7 +1441,7 @@ async function sendText(ctx: SendTextCtx): Promise<SendTextResult> {
   if (slot.cancelled) {
     return {
       channel: PLUGIN_ID,
-      messageId: `cancelled-${ctx.to}`,
+      messageId: `cancelled-${streamKey}`,
       chatId: slot.source.channelId,
     };
   }
@@ -1267,14 +1454,14 @@ async function sendText(ctx: SendTextCtx): Promise<SendTextResult> {
       // Already replied once for this `to`; ignore subsequent chunks.
       return {
         channel: PLUGIN_ID,
-        messageId: `dup-${ctx.to}`,
+        messageId: `dup-${streamKey}`,
         chatId: slot.source.channelId,
       };
     }
     slot.hasDeltas = true;
     const fileIds = await maybeAutoAttachReplyAsFile(entry, slot.source.channelId, ctx.text);
     const r = await session.reply({ source: slot.source, text: ctx.text, fileIds });
-    pendingStreamByTo.delete(ctx.to);
+    pendingStreamByTo.delete(streamKey);
     if (r.ok && r.messageId) return { channel: PLUGIN_ID, messageId: r.messageId, chatId: slot.source.channelId };
     throw new Error(`agentnexus: session.reply failed (${r.code ?? "?"} ${r.error ?? ""})`);
   }
@@ -1285,11 +1472,11 @@ async function sendText(ctx: SendTextCtx): Promise<SendTextResult> {
     if (slot.placeholderMsgId) {
       session.streamDone({ msgId: slot.placeholderMsgId });
     }
-    pendingStreamByTo.delete(ctx.to);
+    pendingStreamByTo.delete(streamKey);
     if (slot.placeholderMsgId) taskByPlaceholder.delete(slot.placeholderMsgId);
     return {
       channel: PLUGIN_ID,
-      messageId: `truncated-${ctx.to}`,
+      messageId: `truncated-${streamKey}`,
       chatId: slot.source.channelId,
     };
   }
@@ -1307,14 +1494,14 @@ async function sendText(ctx: SendTextCtx): Promise<SendTextResult> {
     // data WS dropped between chunks — abandon the stream and fall back to a
     // single reply with everything we have. We don't have the prior chunks
     // (they went out as deltas), so just send this one as a reply and stop.
-    pendingStreamByTo.delete(ctx.to);
+    pendingStreamByTo.delete(streamKey);
     if (slot.placeholderMsgId) taskByPlaceholder.delete(slot.placeholderMsgId);
     const fileIds = await maybeAutoAttachReplyAsFile(entry, slot.source.channelId, incoming);
     const r = await session.reply({ source: slot.source, text: incoming, fileIds });
     if (r.ok && r.messageId) return { channel: PLUGIN_ID, messageId: r.messageId, chatId: slot.source.channelId };
     throw new Error(`agentnexus: session.reply failed (${r.code ?? "?"} ${r.error ?? ""})`);
   }
-  armStreamDoneTimer(ctx.to, entry, slot);
+  armStreamDoneTimer(streamKey, entry, slot);
   return {
     channel: PLUGIN_ID,
     messageId: `${slot.placeholderMsgId}-d${slot.seq}`,

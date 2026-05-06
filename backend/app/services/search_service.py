@@ -9,6 +9,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.exceptions import BadRequestError, ForbiddenError
 from app.core.schemas import (
+    BotOwnerInResponse,
     SearchBotHit,
     SearchChannelHit,
     SearchMessageHit,
@@ -401,9 +402,8 @@ class SearchService:
             stmt = stmt.join(Channel, Channel.channel_id == Message.channel_id).where(
                 Channel.workspace_id == workspace_id
             )
-        rows = (
-            await self.session.execute(stmt.order_by(Message.created_at.desc()).limit(limit))
-        ).scalars().all()
+        result = await self.session.execute(stmt.order_by(Message.created_at.desc()).limit(limit))
+        rows = list(result.scalars().all())
         return await self._message_hits(rows, q, current_user=current_user)
 
     async def _search_todos(
@@ -620,14 +620,14 @@ class SearchService:
         ).scalars()
         return {u.user_id: u for u in rows}
 
-    def _owner_payload(self, owner: User | None) -> dict | None:
+    def _owner_payload(self, owner: User | None) -> BotOwnerInResponse | None:
         if not owner:
             return None
-        return {
-            "user_id": owner.user_id,
-            "username": owner.username,
-            "display_name": owner.display_name,
-        }
+        return BotOwnerInResponse(
+            user_id=owner.user_id,
+            username=owner.username,
+            display_name=owner.display_name,
+        )
 
     def _snippet(self, text: str | None, needle: str, width: int = 80) -> str:
         if not text:

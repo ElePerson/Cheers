@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from app.config import settings
-from app.services.orchestrator.queue import (
+from app.features.bot_runtime.orchestrator.queue import (
     MemoryOrchestratorQueue,
     OrchestratorJob,
     enqueue_orchestrator_job,

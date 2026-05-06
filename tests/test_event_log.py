@@ -1,6 +1,6 @@
 """Per-bot data stream 事件日志 + seq 计数 + resume 回放单测。
 
-这些测试需要真实 DB（事件写入 openclaw_plugin_events 表）。
+这些测试需要真实 DB（事件写入 agent_bridge_events 表）。
 跑前设 TEST_DATABASE_URL 指向 docker postgres，或依赖 conftest 的 db_engine
 fixture（创建临时 schema）。为避免跨测试相互影响，用 uuid 前缀隔离 bot_id。
 """
@@ -10,7 +10,7 @@ import uuid
 
 import pytest
 
-from app.services.openclaw_bridge.event_log import (
+from app.features.agent_bridge.event_log import (
     BotEventSeq,
     current_seq,
     events_since,

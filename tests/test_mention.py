@@ -3,9 +3,8 @@
 语义：extract_mentions 只识别消息【开头】连续的 @mention，
 遇到非 @ 内容即停止；中间/末尾的 @ 不再被识别。
 """
-import pytest
 
-from app.services.orchestrator.mention import extract_mentions, filter_mentioned_bots
+from app.features.bot_runtime.orchestrator.mention import extract_mentions, filter_mentioned_bots
 
 
 def test_extract_mentions_empty() -> None:

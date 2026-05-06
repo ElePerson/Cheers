@@ -4,7 +4,7 @@ Verifies:
 
 1. The Delta / Final / DispatchedAsync dataclasses round-trip and carry
    their documented fields.
-2. OpenClawAdapter's default ``execute_iter`` wraps a legacy ``execute``
+2. BotAdapter's default ``execute_iter`` wraps a legacy ``execute``
    that returns AgentResponse — a non-streaming adapter still produces a
    single Final via the iterator.
 3. _drain_execute_iter inverts that, reducing a streaming adapter's
@@ -18,8 +18,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from app.services.adapters.base import AgentPayload, AgentResponse, OpenClawAdapter
-from app.services.pipeline.adapter_events import (
+from app.features.bot_runtime.adapters.base import AgentPayload, AgentResponse, BotAdapter
+from app.features.bot_runtime.pipeline.adapter_events import (
     AdapterEvent,
     Delta,
     DispatchedAsync,
@@ -66,7 +66,7 @@ def test_dispatched_async_is_marker() -> None:
 # ── Default execute_iter wraps legacy execute ──────────────────────────
 
 
-class _LegacyAdapter(OpenClawAdapter):
+class _LegacyAdapter(BotAdapter):
     """Adapter that implements only the legacy single-result execute()."""
 
     def __init__(self, resp: AgentResponse) -> None:
@@ -125,7 +125,7 @@ async def test_default_execute_iter_wraps_error() -> None:
 # ── _drain_execute_iter reduces streaming adapter to AgentResponse ─────
 
 
-class _StreamingAdapter(OpenClawAdapter):
+class _StreamingAdapter(BotAdapter):
     """Adapter that yields multiple Delta then a Final natively."""
 
     async def execute(self, payload: AgentPayload) -> AgentResponse:
@@ -154,7 +154,7 @@ async def test_drain_reduces_deltas_into_final_content() -> None:
     assert resp.dispatched_async is False
 
 
-class _NoTerminalAdapter(OpenClawAdapter):
+class _NoTerminalAdapter(BotAdapter):
     """Pathological adapter that yields Delta but never a Final."""
 
     async def execute(self, payload: AgentPayload) -> AgentResponse:
@@ -184,7 +184,7 @@ async def test_drain_falls_back_when_no_terminal() -> None:
 # ── DispatchedAsync conformance ────────────────────────────────────────
 
 
-class _AsyncDispatchAdapter(OpenClawAdapter):
+class _AsyncDispatchAdapter(BotAdapter):
     async def execute(self, payload: AgentPayload) -> AgentResponse:
         return await self._drain_execute_iter(payload)
 

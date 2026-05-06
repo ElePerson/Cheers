@@ -155,6 +155,7 @@ class AuthService:
                 raise BadRequestError("账号未绑定邮箱，无法使用邮箱验证")
             await self._verify_code(user.email, "change_password", email_code)
         else:
+            assert current_password is not None
             if not _verify_password(current_password, user.password_hash):
                 raise UnauthorizedError("当前密码不正确")
         await self.user_repo.update(user, password_hash=_hash_password(new_password))

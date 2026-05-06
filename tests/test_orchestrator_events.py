@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.pipeline.bus import (
+from app.features.bot_runtime.pipeline.bus import (
     NullEventBus,
     SSEEventBus,
     TeeEventBus,
     WSEventBus,
     make_event_bus,
 )
-from app.services.pipeline.events import (
+from app.features.bot_runtime.pipeline.events import (
     BotMessagePlaceholder,
     BotProcessing,
     MessageCreated,
@@ -99,7 +99,7 @@ def test_message_done_wire_format_with_files() -> None:
 
 
 def test_message_done_wire_format_partial_stream() -> None:
-    """OpenClaw bridge's finalize_stream emits is_partial + optional error
+    """Agent Bridge's finalize_stream emits is_partial + optional error
     alongside the standard fields. Key order matches the legacy hand-written
     dict so existing WS clients see byte-identical frames."""
     e = MessageDone(msg_id="m5", content="hi", is_partial=True, error="user_cancelled")
@@ -130,7 +130,7 @@ def test_message_done_wire_format_partial_with_files() -> None:
 
 
 def test_message_done_wire_format_with_content_data() -> None:
-    content_data = {"kind": "websocket_background_task", "status": "running"}
+    content_data = {"kind": "agent_bridge_background_task", "status": "running"}
     e = MessageDone(msg_id="m7", content="", content_data=content_data)
     payload = {"msg_id": "m7", "content": "", "content_data": content_data}
     assert e.to_ws_frame() == {"type": "message_done", "data": payload}

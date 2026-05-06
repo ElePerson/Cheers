@@ -42,7 +42,7 @@ type BotRow = {
   description?: string | null;
   avatar_url?: string | null;
   status?: string;
-  binding_type?: "http" | "websocket" | string;
+  binding_type?: "http" | "agent_bridge" | string;
   connection_status?: string;
   is_online?: boolean;
   control_connected?: boolean | null;
@@ -139,7 +139,7 @@ function botOnlineMeta(bot: BotRow) {
       title: online ? "内置 Bot 使用专用 adapter，不依赖 Bot 的 LLM 绑定" : "Bot 状态为 offline",
     };
   }
-  const isWs = (bot.binding_type || "http") === "websocket";
+  const isWs = (bot.binding_type || "http") === "agent_bridge";
   if (!isWs) {
     const online = bot.is_online !== false && bot.status !== "offline";
     return {
@@ -151,7 +151,7 @@ function botOnlineMeta(bot: BotRow) {
   }
   if (bot.connection_status === "online" && bot.is_online) {
     return {
-      label: "WS 在线",
+      label: "Bridge 在线",
       color: "var(--green)",
       bg: "var(--green-muted)",
       title: "control/data 连接均在线",
@@ -159,17 +159,17 @@ function botOnlineMeta(bot: BotRow) {
   }
   if (bot.connection_status === "partial") {
     return {
-      label: "WS 部分连接",
+      label: "Bridge 部分连接",
       color: "var(--yellow)",
       bg: "rgba(251, 191, 36, 0.16)",
       title: `control: ${bot.control_connected ? "在线" : "离线"} · data: ${bot.data_connected ? "在线" : "离线"}`,
     };
   }
   return {
-    label: "WS 离线",
+    label: "Bridge 离线",
     color: "var(--red)",
     bg: "var(--red-muted)",
-    title: "OpenClaw channel plugin 未连接",
+    title: "Agent Bridge provider 未连接",
   };
 }
 
@@ -1870,7 +1870,7 @@ function BotListSubPane({
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="an-rc-title">{b.display_name || b.username}</div>
                 <div className="an-rc-sub">
-                  @{b.username} · {(b.binding_type || "http") === "websocket" ? "WebSocket" : "HTTP"}
+                  @{b.username} · {(b.binding_type || "http") === "agent_bridge" ? "WebSocket" : "HTTP"}
                   {" · "}
                   {botScopeLabel(b.scope)}
                   {" · "}
@@ -2711,15 +2711,15 @@ function AccountPane({
   );
 }
 
-type BindingType = "http" | "websocket";
+type BindingType = "http" | "agent_bridge";
 
 type ModelItem = { model_id: string; name: string; model_name?: string; provider?: string; is_enabled?: boolean };
 type TemplateItem = { template_id: string; name: string };
 
 /** BotNewPane — two-step wizard.
- *  Step 1: pick the binding type (HTTP / WebSocket).
- *  Step 2: render type-specific fields. HTTP needs a model; both HTTP and
- *  WebSocket can pick a prompt template. */
+ *  Step 1: pick the binding type (HTTP / Agent Bridge).
+ *  Step 2: render type-specific fields. HTTP needs a model; both types can
+ *  pick a prompt template. */
 function BotNewPane({
   authToken,
   onCreated,
@@ -2743,14 +2743,14 @@ function BotNewPane({
   const [modelId, setModelId] = useState("");
   const [templateId, setTemplateId] = useState("");
 
-  // WebSocket-only
+  // Agent Bridge-only
   const [agentId, setAgentId] = useState("");
 
   const [creating, setCreating] = useState(false);
 
-  // Set after a successful WebSocket bot creation: holds the one-shot
+  // Set after a successful Agent Bridge bot creation: holds the one-shot
   // plaintext token returned by the backend so the user can copy it into
-  // their OpenClaw plugin config before we navigate away.
+  // their provider config before we navigate away.
   const [issued, setIssued] = useState<{ token: string; bot: BotRow } | null>(null);
 
   // Lazy-load models/templates when entering step 2.
@@ -2817,7 +2817,7 @@ function BotNewPane({
       if (data?.status === "success") {
         toast.success("Bot 创建成功");
         const created = data.data as BotRow & { bot_token?: string | null };
-        if (bindingType === "websocket" && created?.bot_token) {
+        if (bindingType === "agent_bridge" && created?.bot_token) {
           setIssued({ token: created.bot_token, bot: created });
         } else {
           onCreated(created);
@@ -2837,10 +2837,10 @@ function BotNewPane({
       <div className="an-pane">
         <div className="an-pane-head">
           <div>
-            <div className="an-pane-title">Bot 已创建 · 保存 OpenClaw Token</div>
+            <div className="an-pane-title">Bot 已创建 · 保存 Agent Bridge Token</div>
             <div className="an-pane-sub">
               这是一次性明文 token，关闭此页面后将无法再查看。请立即复制并填入
-              OpenClaw plugin 配置；之后只能通过"轮换 token"重新生成。
+              Agent Bridge provider 配置；之后只能通过"轮换 token"重新生成。
             </div>
           </div>
         </div>
@@ -2892,11 +2892,11 @@ function BotNewPane({
               </code>
               连接
               <code style={{ background: "var(--surface-soft)", padding: "0 4px", borderRadius: 3, margin: "0 2px" }}>
-                /ws/openclaw/control
+                /ws/agent-bridge/control
               </code>
               和
               <code style={{ background: "var(--surface-soft)", padding: "0 4px", borderRadius: 3, margin: "0 2px" }}>
-                /ws/openclaw/data
+                /ws/agent-bridge/data
               </code>
               即可接管该 Bot。
             </div>
@@ -2927,11 +2927,11 @@ function BotNewPane({
             onClick={() => setBindingType("http")}
           />
           <BindingTypeCard
-            id="websocket"
-            active={bindingType === "websocket"}
-            title="WebSocket Bot"
-            sub="由 OpenClaw plugin 反向连接，能力由 plugin 提供，可绑定 Prompt 模板。"
-            onClick={() => setBindingType("websocket")}
+            id="agent_bridge"
+            active={bindingType === "agent_bridge"}
+            title="Agent Bridge Bot"
+            sub="由外部 provider 反向连接并异步回推，可绑定 Prompt 模板。"
+            onClick={() => setBindingType("agent_bridge")}
           />
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <PrimaryButton onClick={() => setStep(2)}>下一步 →</PrimaryButton>
@@ -2946,7 +2946,7 @@ function BotNewPane({
       <div className="an-pane-head">
         <div>
           <div className="an-pane-title">
-            新建 Bot · {bindingType === "http" ? "HTTP" : "WebSocket"} 配置
+            新建 Bot · {bindingType === "http" ? "HTTP" : "Agent Bridge"} 配置
           </div>
           <div className="an-pane-sub">
             <button
@@ -3040,7 +3040,7 @@ function BotNewPane({
 
         <div className="an-row-card" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
           <div className="an-rc-title">Prompt 模板</div>
-          <Field label={bindingType === "websocket" ? "发送给 plugin 的任务模板" : "Prompt 模板"}>
+          <Field label={bindingType === "agent_bridge" ? "发送给 plugin 的任务模板" : "Prompt 模板"}>
             <select
               value={templateId}
               onChange={(e) => setTemplateId(e.target.value)}
@@ -3057,28 +3057,28 @@ function BotNewPane({
               )}
             </select>
           </Field>
-          {bindingType === "websocket" && (
+          {bindingType === "agent_bridge" && (
             <div className="an-rc-sub" style={{ marginTop: 0 }}>
-              模板会在后端渲染成最终任务文本，再通过 WebSocket 下发给 OpenClaw plugin。
+              模板会在后端渲染成最终任务文本，再通过 Agent Bridge 下发给 provider。
             </div>
           )}
         </div>
 
-        {bindingType === "websocket" && (
+        {bindingType === "agent_bridge" && (
           <div className="an-row-card" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
-            <div className="an-rc-title">OpenClaw 绑定</div>
+            <div className="an-rc-title">Agent Bridge 绑定</div>
             <div className="an-rc-sub" style={{ marginTop: 0 }}>
               创建后将得到一次性的 bot token，把它填到 plugin 配置里，plugin 连
               <code style={{ background: "var(--surface-soft)", padding: "0 4px", borderRadius: 3, margin: "0 2px" }}>
-                /ws/openclaw/control
+                /ws/agent-bridge/control
               </code>
               和
               <code style={{ background: "var(--surface-soft)", padding: "0 4px", borderRadius: 3, margin: "0 2px" }}>
-                /ws/openclaw/data
+                /ws/agent-bridge/data
               </code>
               即可接管该 Bot。
             </div>
-            <Field label="OpenClaw agent id（可选）">
+            <Field label="Provider agent id（可选）">
               <input
                 value={agentId}
                 onChange={(e) => setAgentId(e.target.value)}
@@ -3383,9 +3383,9 @@ function BotEditPane({
             </PrimaryButton>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
-            <div className="an-rc-sub">类型：{(bot.binding_type || "http") === "websocket" ? "WebSocket" : "HTTP"}</div>
+            <div className="an-rc-sub">类型：{(bot.binding_type || "http") === "agent_bridge" ? "Agent Bridge" : "HTTP"}</div>
             <div className="an-rc-sub">状态：{bot.status || "online"}</div>
-            {(bot.binding_type || "http") === "websocket" && (
+            {(bot.binding_type || "http") === "agent_bridge" && (
               <>
                 <div className="an-rc-sub">Control：{bot.control_connected ? "在线" : "离线"}</div>
                 <div className="an-rc-sub">Data：{bot.data_connected ? "在线" : "离线"}</div>
@@ -3473,7 +3473,7 @@ function BotEditPane({
           </Field>
           {!isHttpBot && (
             <div className="an-rc-sub" style={{ marginTop: 0 }}>
-              模板会在后端渲染成最终任务文本，再通过 WebSocket 下发给 OpenClaw plugin。
+              模板会在后端渲染成最终任务文本，再通过 Agent Bridge 下发给 provider。
             </div>
           )}
         </div>
@@ -3574,7 +3574,7 @@ function BotEditPane({
           </div>
         </div>
         <div className="an-row-card" style={{ color: "var(--fg-3)", fontSize: 12 }}>
-          高级配置已收敛到设置弹窗；HTTP Bot 可在此切换模型与模板，WebSocket Bot 可切换任务模板。
+          高级配置已收敛到设置弹窗；HTTP Bot 可在此切换模型与模板，Agent Bridge Bot 可切换任务模板。
         </div>
       </div>
     </div>

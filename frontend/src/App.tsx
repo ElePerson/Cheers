@@ -33,7 +33,6 @@ import { InviteWorkspaceMemberModal } from "./components/InviteWorkspaceMemberMo
 import { CreateChannelModal } from "./components/CreateChannelModal";
 import { OpenClawQcModal } from "./components/OpenClawQcModal";
 import { ChannelSettingsModal } from "./components/ChannelSettingsModal";
-import { ImageGenModal } from "./components/ImageGenModal";
 import { Sidebar } from "./components/Sidebar";
 import { HelpModal } from "./components/HelpModal";
 import {
@@ -50,9 +49,9 @@ import { Modal } from "./components/Modal";
 import { WorkspaceRail } from "./components/WorkspaceRail";
 import { apiFetch, buildWsUrl } from "./api";
 import {
-  parseGuidePayload,
+  parseHelperPayload,
   isClarifyReplyUserMessage,
-} from "./lib/guide";
+} from "./lib/helper";
 import {
   isMsgReply,
   parseQuotePrefix,
@@ -75,26 +74,26 @@ import type {
   ChannelBot,
   ChannelUser,
   BotItem,
-  WebsocketTaskContentData,
+  AgentBridgeTaskContentData,
   MemoryLoadDetail,
 } from "./types";
 import { OTHER_CHOICE_ID } from "./types";
 
 const API = "/api/v1";
 const DEV_USER_ID = "a0000000-0000-0000-0000-000000000001";
-const WEBSOCKET_TASK_KIND = "websocket_background_task";
-type WebsocketTaskMessage = Message & {
-  content_data: WebsocketTaskContentData;
+const AGENT_BRIDGE_TASK_KIND = "agent_bridge_background_task";
+type AgentBridgeTaskMessage = Message & {
+  content_data: AgentBridgeTaskContentData;
 };
 const API_DOCS_URL = "/docs";
 
 function botInlineStatus(bot: Pick<BotItem, "binding_type" | "connection_status" | "is_online" | "status">) {
-  if ((bot.binding_type || "http") !== "websocket") {
+  if ((bot.binding_type || "http") !== "agent_bridge") {
     return bot.is_online === false || bot.status === "offline" ? "已停用" : "HTTP 已启用";
   }
-  if (bot.connection_status === "online" && bot.is_online) return "WS 在线";
-  if (bot.connection_status === "partial") return "WS 部分连接";
-  return "WS 离线";
+  if (bot.connection_status === "online" && bot.is_online) return "Bridge 在线";
+  if (bot.connection_status === "partial") return "Bridge 部分连接";
+  return "Bridge 离线";
 }
 
 function botTraceStatusText(trace: BotTraceEvent): string {
@@ -107,19 +106,19 @@ function botTraceStatusText(trace: BotTraceEvent): string {
       received: "插件已收到消息",
       hydrating_attachments: "正在读取附件",
       attachments_ready: "附件已准备好",
-      loopback_start: "正在启动 OpenClaw",
-      loopback_accepted: "OpenClaw 已接收任务",
-      loopback_error: "OpenClaw 路由异常",
-      subagent_run_started: "OpenClaw run 已启动",
-      subagent_run_error: "OpenClaw run 启动失败",
+      loopback_start: "正在启动 provider",
+      loopback_accepted: "provider 已接收任务",
+      loopback_error: "provider 路由异常",
+      subagent_run_started: "provider run 已启动",
+      subagent_run_error: "provider run 启动失败",
     };
     return [labels[phase] || title || "插件处理中", message].filter(Boolean).join(" · ");
   }
   if (stream === "lifecycle") {
-    if (phase === "start") return "OpenClaw 开始执行";
-    if (phase === "end") return "OpenClaw 执行完成";
-    if (phase === "error") return message || "OpenClaw 执行异常";
-    return [title || "OpenClaw 生命周期", message].filter(Boolean).join(" · ");
+    if (phase === "start") return "provider 开始执行";
+    if (phase === "end") return "provider 执行完成";
+    if (phase === "error") return message || "provider 执行异常";
+    return [title || "provider 生命周期", message].filter(Boolean).join(" · ");
   }
   if (stream === "assistant") return message ? `正在生成回复 · ${message}` : "正在生成回复";
   if (stream === "thinking") return message ? `思考中 · ${message}` : "思考中";
@@ -129,7 +128,7 @@ function botTraceStatusText(trace: BotTraceEvent): string {
   }
   if (stream === "command_output") return [title || "命令执行中", message].filter(Boolean).join(" · ");
   if (stream === "approval") return [title || "等待审批", trace.status || message].filter(Boolean).join(" · ");
-  if (stream === "error") return message || title || "OpenClaw 内部错误";
+  if (stream === "error") return message || title || "provider 内部错误";
   return [title || stream, message].filter(Boolean).join(" · ");
 }
 
@@ -379,13 +378,6 @@ export default function App() {
   const [mentionDropdownPlacement, setMentionDropdownPlacement] = useState<
     "top" | "bottom"
   >("bottom");
-  // 文生图 / 图生图 Modal 打开状态 + 初始参数
-  const [imageGenOpen, setImageGenOpen] = useState(false);
-  const [imageGenInitialSourceFileId, setImageGenInitialSourceFileId] =
-    useState("");
-  const [imageGenInitialTab, setImageGenInitialTab] = useState<"gen" | "edit">(
-    "gen",
-  );
   // 加密消息状态。Bound to msgKind === "secret" via the effect below — the
   // 🔒 toolbar button and the kind switcher both flip this through msgKind,
   // and downstream send/render code keeps reading `secretMode` unchanged.
@@ -938,11 +930,11 @@ export default function App() {
                 m.msg_id === msg_id
                   ? (() => {
                       const taskData =
-                        m.content_data?.kind === WEBSOCKET_TASK_KIND
-                          ? (m.content_data as WebsocketTaskContentData)
-                          : m._websocket_task;
+                        m.content_data?.kind === AGENT_BRIDGE_TASK_KIND
+                          ? (m.content_data as AgentBridgeTaskContentData)
+                          : m._agent_bridge_task;
                       const switchingFromTaskCard =
-                        m.content_data?.kind === WEBSOCKET_TASK_KIND;
+                        m.content_data?.kind === AGENT_BRIDGE_TASK_KIND;
                       return {
                         ...m,
                         content: switchingFromTaskCard
@@ -951,13 +943,13 @@ export default function App() {
                         content_data: switchingFromTaskCard
                           ? null
                           : m.content_data,
-                        _websocket_task: taskData
+                        _agent_bridge_task: taskData
                           ? {
                               ...taskData,
                               status: "streaming",
-                              message: "正在接收 OpenClaw 输出。",
+                              message: "正在接收 provider 输出。",
                             }
-                          : m._websocket_task,
+                          : m._agent_bridge_task,
                         _streaming: true,
                       };
                     })()
@@ -993,12 +985,12 @@ export default function App() {
                 m.msg_id === msg_id
                   ? (() => {
                       const priorTask =
-                        m.content_data?.kind === WEBSOCKET_TASK_KIND
-                          ? (m.content_data as WebsocketTaskContentData)
-                          : m._websocket_task;
+                        m.content_data?.kind === AGENT_BRIDGE_TASK_KIND
+                          ? (m.content_data as AgentBridgeTaskContentData)
+                          : m._agent_bridge_task;
                       const nextTask =
-                        nextContentData?.kind === WEBSOCKET_TASK_KIND
-                          ? (nextContentData as WebsocketTaskContentData)
+                        nextContentData?.kind === AGENT_BRIDGE_TASK_KIND
+                          ? (nextContentData as AgentBridgeTaskContentData)
                           : priorTask
                             ? {
                                 ...priorTask,
@@ -1013,17 +1005,17 @@ export default function App() {
                                     ? "任务已中断，已保留当前输出。"
                                     : "任务已完成。",
                               }
-                            : m._websocket_task;
+                            : m._agent_bridge_task;
                       return {
                         ...m,
                         content,
                         content_data:
                           nextContentData !== undefined
                             ? nextContentData
-                            : m.content_data?.kind === WEBSOCKET_TASK_KIND
+                            : m.content_data?.kind === AGENT_BRIDGE_TASK_KIND
                               ? null
                               : m.content_data,
-                        _websocket_task: nextTask,
+                        _agent_bridge_task: nextTask,
                         _streaming: false,
                         _bot_status: undefined,
                         ...(files ? { files } : {}),
@@ -1482,10 +1474,10 @@ export default function App() {
       .catch(() => toast.error("请求失败"));
   };
 
-  // Copy a message's rendered text (stripping think-folds / guide payload
+  // Copy a message's rendered text (stripping think-folds / helper payload
   // JSON) to the system clipboard. Best-effort — silently toasts failure.
   const copyMessageText = async (m: Message) => {
-    const raw = parseGuidePayload(m.content || "").text || m.content || "";
+    const raw = parseHelperPayload(m.content || "").text || m.content || "";
     try {
       await navigator.clipboard.writeText(raw);
       toast.success("已复制");
@@ -1613,37 +1605,37 @@ export default function App() {
     );
   };
 
-  const activeWebsocketTaskData = (m: Message): WebsocketTaskContentData | null => {
+  const activeAgentBridgeTaskData = (m: Message): AgentBridgeTaskContentData | null => {
     const data = m.content_data;
-    return data?.kind === WEBSOCKET_TASK_KIND
-      ? (data as WebsocketTaskContentData)
+    return data?.kind === AGENT_BRIDGE_TASK_KIND
+      ? (data as AgentBridgeTaskContentData)
       : null;
   };
 
-  const websocketTaskData = (m: Message): WebsocketTaskContentData | null => {
-    const activeTask = activeWebsocketTaskData(m);
+  const agentBridgeTaskData = (m: Message): AgentBridgeTaskContentData | null => {
+    const activeTask = activeAgentBridgeTaskData(m);
     if (activeTask) return activeTask;
-    if (m._websocket_task) return m._websocket_task;
+    if (m._agent_bridge_task) return m._agent_bridge_task;
     if (m._bot_trace?.length) {
       return {
-        kind: WEBSOCKET_TASK_KIND,
+        kind: AGENT_BRIDGE_TASK_KIND,
         status: m._streaming ? "running" : "done",
-        title: "OpenClaw 过程",
-        message: m._streaming ? "OpenClaw 正在执行。" : "任务已完成。",
+        title: "Agent Bridge 过程",
+        message: m._streaming ? "provider 正在执行。" : "任务已完成。",
         task_id: m.task_id || null,
       };
     }
     return null;
   };
 
-  const websocketTaskMessages = useMemo(
+  const agentBridgeTaskMessages = useMemo(
     () =>
       messages
         .map((m) => {
-          const task = websocketTaskData(m);
-          return task ? ({ ...m, content_data: task } as WebsocketTaskMessage) : null;
+          const task = agentBridgeTaskData(m);
+          return task ? ({ ...m, content_data: task } as AgentBridgeTaskMessage) : null;
         })
-        .filter((m): m is WebsocketTaskMessage => m !== null),
+        .filter((m): m is AgentBridgeTaskMessage => m !== null),
     [messages],
   );
 
@@ -1661,15 +1653,15 @@ export default function App() {
     }, 1200);
   }, []);
 
-  const renderWebsocketTaskCard = (m: Message) => {
-    const task = activeWebsocketTaskData(m);
+  const renderAgentBridgeTaskCard = (m: Message) => {
+    const task = activeAgentBridgeTaskData(m);
     if (!task) return null;
     const title =
       typeof task.title === "string" ? task.title : "后台任务进行中";
     const message =
       typeof task.message === "string"
         ? task.message
-        : "OpenClaw 已接收任务，完成后会自动更新这条回复。";
+        : "Agent Bridge 已接收任务，完成后会自动更新这条回复。";
     const taskId =
       typeof task.task_id === "string" ? task.task_id : m.task_id || null;
     const timeout =
@@ -2589,7 +2581,7 @@ export default function App() {
                   }}
                 >
                   <TaskPage
-                    tasks={websocketTaskMessages}
+                    tasks={agentBridgeTaskMessages}
                     selectedMsgId={pageTaskMsgId}
                     channel={selectedChannel}
                     channelBots={channelBots}
@@ -2702,12 +2694,12 @@ export default function App() {
                     setPageTopicId(rootId);
                   }}
                   onJumpToMessage={jumpToMessage}
-                  taskCount={websocketTaskMessages.length}
+                  taskCount={agentBridgeTaskMessages.length}
                   taskActive={taskPageOpen}
                   onOpenTasks={() => {
                     setMemoryTab(null);
                     setPageTopicId(null);
-                    setPageTaskMsgId(websocketTaskMessages[0]?.msg_id ?? null);
+                    setPageTaskMsgId(agentBridgeTaskMessages[0]?.msg_id ?? null);
                     setTaskPageOpen(true);
                   }}
                 />
@@ -3240,7 +3232,7 @@ export default function App() {
                           ? (revealedContent ?? m.content)
                           : m.content;
                         const { text, clarify } =
-                          parseGuidePayload(effectiveContent);
+                          parseHelperPayload(effectiveContent);
                         const clarifyAnswered =
                           !!clarify &&
                           messages.some(
@@ -3478,8 +3470,8 @@ export default function App() {
                                         </button>
                                       )}
                                     </div>
-                                  ) : activeWebsocketTaskData(m) ? (
-                                    renderWebsocketTaskCard(m)
+                                  ) : activeAgentBridgeTaskData(m) ? (
+                                    renderAgentBridgeTaskCard(m)
                                   ) : (
                                     renderWithThinkFolding(
                                       // Strip the `> [Author]: …\n\n` prefix
@@ -3504,7 +3496,7 @@ export default function App() {
                                     )
                                   )}
                                   {m._streaming &&
-                                    !!(parseGuidePayload(displayContent).text ||
+                                    !!(parseHelperPayload(displayContent).text ||
                                       displayContent) && (
                                       <span
                                         className="inline-block w-1.5 h-4 rounded-sm animate-pulse align-middle ml-0.5"
@@ -3825,8 +3817,8 @@ export default function App() {
                                       </button>
                                     )}
                                   </div>
-                                ) : activeWebsocketTaskData(m) ? (
-                                  renderWebsocketTaskCard(m)
+                                ) : activeAgentBridgeTaskData(m) ? (
+                                  renderAgentBridgeTaskCard(m)
                                 ) : m._streaming && !text ? (
                                   <span className="inline-block w-2 h-4 bg-gray-400 rounded-sm animate-pulse align-middle" />
                                 ) : (
@@ -3961,7 +3953,7 @@ export default function App() {
                           const {
                             text: rTextRaw,
                             clarify: rClarify,
-                          } = parseGuidePayload(r.content);
+                          } = parseHelperPayload(r.content);
                           const rDisplay = (() => {
                             const base = isClarifyReplyUserMessage(r.content)
                               ? r.content
@@ -4147,8 +4139,8 @@ export default function App() {
                                             }
                                     }
                                   >
-                                    {activeWebsocketTaskData(r) ? (
-                                      renderWebsocketTaskCard(r)
+                                    {activeAgentBridgeTaskData(r) ? (
+                                      renderAgentBridgeTaskCard(r)
                                     ) : r._streaming && !rTextRaw ? (
                                       <span className="inline-block w-2 h-4 bg-gray-400 rounded-sm animate-pulse align-middle" />
                                     ) : (
@@ -4475,7 +4467,7 @@ export default function App() {
                                 const {
                                   text: rTextRaw,
                                   clarify: rClarify,
-                                } = parseGuidePayload(r.content);
+                                } = parseHelperPayload(r.content);
                                 const rDisplay = (() => {
                                   const base = isClarifyReplyUserMessage(r.content)
                                     ? r.content
@@ -4900,7 +4892,7 @@ export default function App() {
                           ? refBot?.display_name || refBot?.username || "Bot"
                           : "我";
                       const refPreview = (
-                        parseGuidePayload(replyingTo.content).text ||
+                        parseHelperPayload(replyingTo.content).text ||
                         replyingTo.content
                       )
                         .replace(/\n/g, " ")
@@ -4912,7 +4904,7 @@ export default function App() {
                           <span className="an-rq-snip">
                             {refPreview}
                             {(
-                              parseGuidePayload(replyingTo.content).text ||
+                              parseHelperPayload(replyingTo.content).text ||
                               replyingTo.content
                             ).length > 80
                               ? "…"
@@ -5410,23 +5402,6 @@ export default function App() {
                       })()}
                   </div>
                 </div>
-
-                <ImageGenModal
-                  open={imageGenOpen}
-                  onClose={() => setImageGenOpen(false)}
-                  channelId={selectedId}
-                  senderId={currentUserId}
-                  messages={messages}
-                  onMessageSent={(msg) =>
-                    setMessages((prev) =>
-                      prev.some((m) => m.msg_id === msg.msg_id)
-                        ? prev
-                        : [...prev, msg],
-                    )
-                  }
-                  initialSourceFileId={imageGenInitialSourceFileId}
-                  initialTab={imageGenInitialTab}
-                />
               </>
             ) : (
               <div className="flex-1 flex flex-col">
@@ -5521,13 +5496,6 @@ export default function App() {
         src={lightboxSrc}
         fileId={lightboxFileId}
         onClose={() => {
-          setLightboxSrc(null);
-          setLightboxFileId(null);
-        }}
-        onEdit={(fileId) => {
-          setImageGenInitialSourceFileId(fileId);
-          setImageGenInitialTab("edit");
-          setImageGenOpen(true);
           setLightboxSrc(null);
           setLightboxFileId(null);
         }}

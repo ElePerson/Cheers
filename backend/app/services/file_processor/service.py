@@ -117,6 +117,8 @@ class FilePipelineService:
         ), metadata
 
     async def write_upload_metadata(self, file_id: str, metadata: dict[str, str]) -> None:
+        if self.storage is None:
+            return
         await self.storage.put_metadata_if_needed(file_id, metadata)
 
     async def validate_message_files(

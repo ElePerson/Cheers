@@ -13,9 +13,9 @@ from app.core.dependencies import get_current_user, get_session
 from app.core.exceptions import BadRequestError, NotFoundError
 from app.core.responses import APIResponse
 from app.db.models import User
+from app.features.memory.channel_memory import ChannelMemory
 from app.repositories.channel_repo import ChannelRepository
 from app.services.channel_service import ChannelService
-from app.services.memory.channel_memory import ChannelMemory
 
 router = APIRouter(prefix="/channels", tags=["context"])
 
@@ -62,7 +62,7 @@ async def update_context(
     if not channel:
         raise NotFoundError("channel not found")
     await ChannelService(session).require_channel_admin(channel_id, current_user)
-    from app.services.memory.context_store import init_context_db, set_layer
+    from app.features.memory.context_store import init_context_db, set_layer
     await init_context_db()
     await set_layer(channel_id, layer_upper, body.content)
     return APIResponse.ok(None)

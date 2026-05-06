@@ -70,7 +70,7 @@ class WorkspaceRepository:
             .join(User, WorkspaceMembership.user_id == User.user_id)
             .where(WorkspaceMembership.workspace_id == workspace_id)
         )
-        return list(result.all())
+        return [(membership, user) for membership, user in result.all()]
 
     async def list_channels(self, workspace_id: str) -> list[Channel]:
         result = await self.session.execute(

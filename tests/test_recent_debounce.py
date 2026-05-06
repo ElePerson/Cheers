@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from app.config import settings
-from app.services.memory import recent_update
+from app.features.memory import recent_update
 
 
 @pytest.mark.asyncio

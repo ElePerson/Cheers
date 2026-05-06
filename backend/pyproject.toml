@@ -41,6 +41,7 @@ dependencies = [
     # Web tools
     "beautifulsoup4>=4.12.0",
     "duckduckgo-search>=3.9.0",
+    "langchain-core>=1.2.21",
 ]
 
 [project.optional-dependencies]

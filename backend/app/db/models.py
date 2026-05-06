@@ -82,10 +82,11 @@ class BotAccount(Base):
     scope: Mapped[str] = mapped_column(String(16), nullable=False, server_default="friend", default="friend")
     intro: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: capabilities, description
     # 绑定类型：'http'=OpenAI 兼容 HTTP（默认，HttpBotAdapter）；
-    #           'websocket'=经 OpenClaw bridge 异步回推（新接入形式，对应 OpenClaw channel plugin）
+    #           'agent_bridge'=经 Agent Bridge 异步回推
     binding_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="http", default="http")
+    bridge_provider: Mapped[str] = mapped_column(String(32), nullable=False, server_default="generic", default="generic")
     binding_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # e.g. {"agent_id": "...", "gateway": "..."}
-    # WebSocket Bot 凭证：明文 token 仅在创建/轮换时返回一次，此后只存哈希
+    # Agent Bridge Bot 凭证：明文 token 仅在创建/轮换时返回一次，此后只存哈希
     bot_token_hash: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     bot_token_prefix: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
     bot_token_rotated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -95,21 +96,6 @@ class BotAccount(Base):
     # Relationships
     ai_model: Mapped[Optional["AIModel"]] = relationship("AIModel", lazy="joined")
     prompt_template: Mapped[Optional["PromptTemplate"]] = relationship("PromptTemplate", lazy="joined")
-
-
-class BotRegistrationRequest(Base):
-    """外部 OpenClaw 注册申请（待管理员审核）- 保留兼容旧版。"""
-    __tablename__ = "bot_registration_requests"
-
-    request_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
-    username: Mapped[str] = mapped_column(String(64), nullable=False)
-    display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    openclaw_endpoint: Mapped[str] = mapped_column(String(512), nullable=False)
-    intro: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
-    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
-    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_bot_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
 
 class Workspace(Base):
@@ -326,6 +312,32 @@ class AgentTask(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class BotRun(Base):
+    """Bot 回复生命周期状态。"""
+    __tablename__ = "bot_runs"
+
+    bot_run_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    task_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    trigger_msg_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    bot_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    placeholder_msg_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    binding_type: Mapped[str] = mapped_column(String(32), nullable=False, default="http")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="placeholder_created")
+    last_event_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("placeholder_msg_id", name="uq_bot_runs_placeholder_msg_id"),
+        Index("ix_bot_runs_task_bot", "task_id", "bot_id"),
+        Index("ix_bot_runs_channel_status", "channel_id", "status"),
+    )
+
+
 class ChannelProfile(Base):
     """用户在频道内的个性化资料（昵称、简介）."""
     __tablename__ = "channel_profiles"
@@ -448,9 +460,9 @@ class KeychainItem(Base):
     owner: Mapped["User"] = relationship("User", lazy="joined")
 
 
-class OpenClawPluginEvent(Base):
-    """per-bot WS 派发事件日志，用于 plugin 重连时按 last_event_seq 回放。"""
-    __tablename__ = "openclaw_plugin_events"
+class AgentBridgeEvent(Base):
+    """per-bot Agent Bridge 派发事件日志，用于 plugin 重连时按 last_event_seq 回放。"""
+    __tablename__ = "agent_bridge_events"
 
     event_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     bot_id: Mapped[str] = mapped_column(String(36), nullable=False)
@@ -460,24 +472,25 @@ class OpenClawPluginEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     __table_args__ = (
-        UniqueConstraint("bot_id", "stream", "seq", name="uq_openclaw_event_bot_stream_seq"),
+        UniqueConstraint("bot_id", "stream", "seq", name="uq_agent_bridge_event_bot_stream_seq"),
     )
 
 
 class AgentNexusSession(Base):
-    """AgentNexus-owned stable session mapped to an OpenClaw sessionKey.
+    """AgentNexus-owned stable session mapped to a provider session key.
 
-    OpenClaw's sessionId is an implementation detail of the current
-    transcript. This row is the durable product-level session identity.
+    Provider session ids are implementation details of the current transcript.
+    This row is the durable product-level session identity.
     """
     __tablename__ = "agentnexus_sessions"
 
     session_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
     bot_id: Mapped[str] = mapped_column(String(36), ForeignKey("bot_accounts.bot_id"), nullable=False, index=True)
-    openclaw_account_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    openclaw_agent_id: Mapped[str] = mapped_column(String(128), nullable=False, server_default="main", default="main")
-    openclaw_session_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
-    openclaw_session_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, server_default="generic", default="generic")
+    provider_account_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider_agent_id: Mapped[str] = mapped_column(String(128), nullable=False, server_default="main", default="main")
+    provider_session_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    provider_session_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     current_scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
     current_scope_id: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="active", default="active")
@@ -499,8 +512,9 @@ class AgentNexusSession(Base):
         Index(
             "ix_agentnexus_sessions_bot_agent_account",
             "bot_id",
-            "openclaw_agent_id",
-            "openclaw_account_id",
+            "provider",
+            "provider_agent_id",
+            "provider_account_id",
         ),
     )
 
@@ -514,8 +528,9 @@ class AgentNexusSessionBinding(Base):
         String(36), ForeignKey("agentnexus_sessions.session_id"), nullable=False, index=True
     )
     bot_id: Mapped[str] = mapped_column(String(36), ForeignKey("bot_accounts.bot_id"), nullable=False, index=True)
-    openclaw_account_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    openclaw_agent_id: Mapped[str] = mapped_column(String(128), nullable=False, server_default="main", default="main")
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, server_default="generic", default="generic")
+    provider_account_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider_agent_id: Mapped[str] = mapped_column(String(128), nullable=False, server_default="main", default="main")
     scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
     scope_id: Mapped[str] = mapped_column(String(128), nullable=False)
     channel_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("channels.channel_id"), nullable=True)
@@ -532,8 +547,9 @@ class AgentNexusSessionBinding(Base):
     __table_args__ = (
         UniqueConstraint(
             "bot_id",
-            "openclaw_agent_id",
-            "openclaw_account_id",
+            "provider",
+            "provider_agent_id",
+            "provider_account_id",
             "scope_type",
             "scope_id",
             name="uq_agentnexus_session_binding_scope",
@@ -547,8 +563,9 @@ class AgentNexusSessionBinding(Base):
         Index(
             "ix_agentnexus_session_bindings_lookup",
             "bot_id",
-            "openclaw_agent_id",
-            "openclaw_account_id",
+            "provider",
+            "provider_agent_id",
+            "provider_account_id",
             "scope_type",
             "scope_id",
         ),

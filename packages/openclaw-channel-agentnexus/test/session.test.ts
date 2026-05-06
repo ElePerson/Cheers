@@ -8,7 +8,7 @@ import type { ChannelInfo } from "../src/types.js";
 
 import { MockBridge } from "./mock-bridge.js";
 
-const TOKEN = "ocw_test_token";
+const TOKEN = "agb_test_token";
 
 async function makeSession(
   bridge: MockBridge,
@@ -247,7 +247,7 @@ describe("BotSession with mock bridge", () => {
     const fatals: string[] = [];
     const s = new BotSession(
       {
-        botToken: "ocw_wrong",
+        botToken: "agb_wrong",
         controlUrl: bridge.controlUrl,
         dataUrl: bridge.dataUrl,
         advanced: { reconnectBaseMs: 30, reconnectMaxMs: 60, sendAckTimeoutMs: 500 },

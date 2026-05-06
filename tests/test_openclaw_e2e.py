@@ -1,7 +1,7 @@
 """端到端集成测试：OpenClaw WS 协议 + 消息派发 + 文件回传.
 
 测试策略：
-  - 每次测试会话创建一个临时 websocket bot（隔离），结束后删除
+  - 每次测试会话创建一个临时 agent bridge bot（隔离），结束后删除
   - 不触碰任何生产 bot 的 token，避免破坏正在运行的 plugin 连接
   - 临时 bot 被加入 cafe 频道，测试完毕后从频道移除 + 删除 bot
 
@@ -23,8 +23,10 @@ import pytest
 import pytest_asyncio
 import websockets
 
-BASE = os.getenv("TEST_BASE_URL", "http://localhost:8002")
-WS_BASE = BASE.replace("http://", "ws://").replace("https://", "wss://")
+BASE = os.getenv("TEST_BASE_URL")
+DEFAULT_BASE = "http://localhost:8002"
+E2E_BASE = BASE or DEFAULT_BASE
+WS_BASE = E2E_BASE.replace("http://", "ws://").replace("https://", "wss://")
 
 
 def _backend_reachable(url: str, timeout: float = 0.5) -> bool:
@@ -40,8 +42,11 @@ def _backend_reachable(url: str, timeout: float = 0.5) -> bool:
 
 
 pytestmark = pytest.mark.skipif(
-    not _backend_reachable(BASE),
-    reason=f"E2E backend not reachable at {BASE}; set TEST_BASE_URL to a live server to enable",
+    not BASE or not _backend_reachable(E2E_BASE),
+    reason=(
+        "Agent Bridge live E2E is disabled unless TEST_BASE_URL points to a live server "
+        f"(default hint: {DEFAULT_BASE})"
+    ),
 )
 
 CHANNEL_ID = "ba30fc1a-8324-4a30-86fe-102214114ea0"
@@ -60,14 +65,14 @@ async def _login(client: httpx.AsyncClient) -> str:
 
 
 async def _create_test_bot(client: httpx.AsyncClient, jwt: str) -> tuple[str, str, str]:
-    """创建临时 websocket bot，返回 (bot_id, username, bot_token)."""
+    """创建临时 agent bridge bot，返回 (bot_id, username, bot_token)."""
     name = f"e2e-tmp-{uuid.uuid4().hex[:8]}"
     resp = await client.post(
         "/api/v1/bots",
         json={
             "username": name,
             "display_name": name,
-            "binding_type": "websocket",
+            "binding_type": "agent_bridge",
             "binding_config": {"agent_id": "test"},
             "status": "online",
         },
@@ -126,7 +131,7 @@ async def _upload_binary(
     client: httpx.AsyncClient, bot_token: str, channel_id: str, filename: str, content: bytes,
 ) -> str:
     resp = await client.post(
-        "/api/v1/openclaw/bridge/files/upload-binary",
+        "/api/v1/agent-bridge/files/upload-binary",
         content=content,
         headers={
             "Authorization": f"Bearer {bot_token}",
@@ -167,8 +172,8 @@ async def _wait_for_dispatch(ws: websockets.WebSocketClientProtocol, bot_id: str
 
 @pytest_asyncio.fixture(scope="module")
 async def tmp_bot():
-    """创建测试专用临时 websocket bot，模块结束后清理。"""
-    async with httpx.AsyncClient(base_url=BASE, follow_redirects=True, timeout=30) as client:
+    """创建测试专用临时 agent bridge bot，模块结束后清理。"""
+    async with httpx.AsyncClient(base_url=E2E_BASE, follow_redirects=True, timeout=30) as client:
         jwt = await _login(client)
         bot_id, username, bot_token = await _create_test_bot(client, jwt)
         await _add_bot_to_channel(client, jwt, bot_id)
@@ -178,7 +183,7 @@ async def tmp_bot():
 
 @pytest_asyncio.fixture
 async def http_client():
-    async with httpx.AsyncClient(base_url=BASE, follow_redirects=True, timeout=30) as client:
+    async with httpx.AsyncClient(base_url=E2E_BASE, follow_redirects=True, timeout=30) as client:
         yield client
 
 
@@ -188,7 +193,7 @@ async def http_client():
 @pytest.mark.asyncio
 async def test_control_ws_hello(tmp_bot: dict) -> None:
     """control WS 连接后应立刻收到 hello 帧，包含 bot_id 和 memberships."""
-    uri = f"{WS_BASE}/ws/openclaw/control"
+    uri = f"{WS_BASE}/ws/agent-bridge/control"
     async with websockets.connect(
         uri,
         additional_headers={"Authorization": f"Bearer {tmp_bot['bot_token']}"},
@@ -210,7 +215,7 @@ async def test_control_ws_hello(tmp_bot: dict) -> None:
 @pytest.mark.asyncio
 async def test_data_ws_hello(tmp_bot: dict) -> None:
     """data WS 连接后应收到 hello 帧，stream=data."""
-    uri = f"{WS_BASE}/ws/openclaw/data"
+    uri = f"{WS_BASE}/ws/agent-bridge/data"
     async with websockets.connect(
         uri,
         additional_headers={"Authorization": f"Bearer {tmp_bot['bot_token']}"},
@@ -235,7 +240,7 @@ async def test_message_dispatch_and_reply(tmp_bot: dict, http_client: httpx.Asyn
     jwt = tmp_bot["jwt"]
     channel_id = tmp_bot["channel_id"]
 
-    uri = f"{WS_BASE}/ws/openclaw/data"
+    uri = f"{WS_BASE}/ws/agent-bridge/data"
     async with websockets.connect(
         uri,
         additional_headers={"Authorization": f"Bearer {bot_token}"},
@@ -283,7 +288,7 @@ async def test_file_upload_and_reply_with_file(tmp_bot: dict, http_client: httpx
     file_id = await _upload_binary(http_client, bot_token, channel_id, "e2e_report.md", file_content)
     assert file_id
 
-    uri = f"{WS_BASE}/ws/openclaw/data"
+    uri = f"{WS_BASE}/ws/agent-bridge/data"
     async with websockets.connect(
         uri,
         additional_headers={"Authorization": f"Bearer {bot_token}"},
@@ -329,7 +334,7 @@ async def test_streaming_delta_reply(tmp_bot: dict, http_client: httpx.AsyncClie
     jwt = tmp_bot["jwt"]
     channel_id = tmp_bot["channel_id"]
 
-    uri = f"{WS_BASE}/ws/openclaw/data"
+    uri = f"{WS_BASE}/ws/agent-bridge/data"
     async with websockets.connect(
         uri,
         additional_headers={"Authorization": f"Bearer {bot_token}"},

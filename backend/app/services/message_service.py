@@ -5,8 +5,8 @@ import secrets as _secrets
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.contracts.messages import MessageFileDTO
 from app.core.exceptions import BadRequestError, NotFoundError
-from app.core.schemas import MessageFileInResponse
 from app.db.models import Message
 from app.repositories.channel_repo import ChannelRepository
 from app.repositories.file_repo import FileRepository
@@ -27,8 +27,8 @@ class MessageService:
         channel_id: str,
         limit: int = 50,
         before_id: str | None = None,
-    ) -> tuple[list[Message], dict[str, MessageFileInResponse]]:
-        """返回消息列表及 file_map {file_id: MessageFileInResponse}."""
+    ) -> tuple[list[Message], dict[str, MessageFileDTO]]:
+        """返回消息列表及 file_map {file_id: MessageFileDTO}."""
         ch = await self.channel_repo.get_by_id(channel_id)
         if not ch:
             raise NotFoundError("channel not found")
@@ -37,7 +37,7 @@ class MessageService:
         records = await self.file_repo.get_many_by_ids(file_ids)
 
         file_map = {
-            fid: MessageFileInResponse(
+            fid: MessageFileDTO(
                 file_id=rec.file_id,
                 original_filename=rec.original_filename,
                 content_type=rec.content_type,
@@ -59,7 +59,7 @@ class MessageService:
         mention_bot_ids: list[str] | None = None,
         in_reply_to_msg_id: str | None = None,
         is_secret: bool = False,
-    ) -> tuple[Message, dict[str, MessageFileInResponse]]:
+    ) -> tuple[Message, dict[str, MessageFileDTO]]:
         """持久化一条消息，返回 (Message, file_map)。不触发 orchestrator（由路由层负责）."""
         ch = await self.channel_repo.get_by_id(channel_id)
         if not ch:
@@ -106,7 +106,7 @@ class MessageService:
 
         records = await self.file_repo.get_many_by_ids(file_ids)
         file_map = {
-            fid: MessageFileInResponse(
+            fid: MessageFileDTO(
                 file_id=rec.file_id,
                 original_filename=rec.original_filename,
                 content_type=rec.content_type,

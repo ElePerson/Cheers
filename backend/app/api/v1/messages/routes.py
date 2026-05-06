@@ -10,24 +10,25 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.chat.message_assembler import MessageAssembler
+from app.contracts.messages import MessageDTO
 from app.core.dependencies import get_current_user
 from app.core.responses import APIResponse
 from app.core.schemas import (
     MessageCreate,
-    MessageInResponse,
     MessageStreamCreate,
     PermissionResolveRequest,
 )
 from app.db.models import Message, User
 from app.db.session import async_session_factory, get_session
+from app.features.bot_runtime.orchestrator.adapter_resolver import get_adapter_for_bot
+from app.features.bot_runtime.orchestrator.queue import enqueue_orchestrator_job
+from app.features.bot_runtime.orchestrator.service import run_orchestrator
+from app.features.bot_runtime.pipeline.bus import EventBus, WSEventBus, make_event_bus
+from app.features.bot_runtime.pipeline.events import BotProcessing
+from app.features.bot_runtime.pipeline.ingest import IngestContext, make_ingest_pipeline
 from app.services.channel_service import ChannelService
 from app.services.message_service import MessageService
-from app.services.orchestrator.adapter_resolver import get_adapter_for_bot
-from app.services.orchestrator.queue import enqueue_orchestrator_job
-from app.services.orchestrator.service import run_orchestrator
-from app.services.pipeline.bus import EventBus, WSEventBus, make_event_bus
-from app.services.pipeline.events import BotProcessing
-from app.services.pipeline.ingest import IngestContext, make_ingest_pipeline
 from app.services.realtime_broker import get_realtime_broker
 from app.utils.crypto import decrypt_value
 
@@ -37,21 +38,19 @@ router = APIRouter(prefix="/channels/{channel_id}/messages", tags=["messages"])
 
 
 def _serialize(msg: Message, file_map: dict) -> dict:
-    payload = MessageInResponse.model_validate(msg).model_dump()
-    if msg.created_at:
-        payload["created_at"] = msg.created_at.isoformat()
-    if msg.file_ids:
-        payload["files"] = [
-            file_map[fid].model_dump()
-            for fid in msg.file_ids
-            if fid in file_map
-        ]
-    else:
-        payload["files"] = []
-    return payload
+    return MessageAssembler.assemble(msg, file_map).to_wire()
 
 
-def _format_sse(event: str, payload: dict) -> str:
+def _wire_payload(payload) -> dict:
+    if hasattr(payload, "to_wire"):
+        return payload.to_wire()
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump(mode="json")
+    return dict(payload or {})
+
+
+def _format_sse(event: str, payload) -> str:
+    payload = _wire_payload(payload)
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
@@ -67,7 +66,7 @@ def _normalize_file_ids(file_ids: list[str] | None, file_id: str | None = None) 
 
 
 def _schedule_recent_update(channel_id: str) -> None:
-    from app.services.memory.recent_update import schedule_recent_update
+    from app.features.memory.recent_update import schedule_recent_update
     schedule_recent_update(channel_id)
 
 
@@ -161,7 +160,7 @@ async def _handle_send_message(
     body: MessageCreate,
     current_user: User,
     background_tasks: BackgroundTasks | None = None,
-) -> tuple[dict, str | None]:
+) -> tuple[MessageDTO, str | None]:
     """持久化消息、广播、调度 orchestrator。返回 (payload_dict, secret_token)。"""
     await ChannelService(session).require_can_send_message(channel_id, current_user)
     raw_content_data = getattr(body, "content_data", None)
@@ -207,7 +206,7 @@ async def send_message(
         current_user=current_user,
         background_tasks=background_tasks,
     )
-    response_data = dict(d)
+    response_data = d.to_wire()
     if secret_token:
         response_data["secret_token"] = secret_token
     return APIResponse.ok(response_data)
@@ -227,8 +226,8 @@ async def send_message_stream(
     async def event_generator() -> AsyncGenerator[str, None]:
         queue: asyncio.Queue[tuple[str, dict]] = asyncio.Queue()
 
-        async def emit(event: str, payload: dict) -> None:
-            await queue.put((event, payload))
+        async def emit(event: str, payload) -> None:
+            await queue.put((event, _wire_payload(payload)))
 
         async with async_session_factory() as session:
             orchestrator_task = None
@@ -321,9 +320,9 @@ async def cancel_streaming_message(
 
     from app.core.exceptions import ForbiddenError, NotFoundError
     from app.db.models import ChannelMembership
-    from app.services.openclaw_bridge.registry import bot_session_registry
-    from app.services.openclaw_bridge.service import cancel_stream as bridge_cancel_stream
-    from app.services.openclaw_bridge.streams import stream_registry
+    from app.features.agent_bridge.registry import bot_session_registry
+    from app.features.agent_bridge.service import cancel_stream as bridge_cancel_stream
+    from app.features.agent_bridge.streams import stream_registry
 
     membership = (
         await session.execute(
@@ -403,8 +402,7 @@ async def resolve_permission(
     cd = dict(msg.content_data or {})
     if cd.get("resolved"):
         # 已处理过的请求直接回传当前状态。
-        payload = _serialize(msg, {})
-        return APIResponse.ok(payload)
+        return APIResponse.ok(_serialize(msg, {}))
 
     cd["resolved"] = True
     cd["resolution"] = body.resolution
@@ -415,14 +413,14 @@ async def resolve_permission(
     await session.commit()
     await session.refresh(msg)
 
-    payload = _serialize(msg, {})
+    payload = MessageAssembler.assemble(msg, {})
     # Permission resolve is a "modify + re-broadcast" of an existing message;
     # it doesn't fit IngestPipeline (no new row, no envelope, no fanout).
     # Publish the updated row through the same EventBus the rest of the
     # pipeline uses so subscribers see one consistent wire format.
-    from app.services.pipeline.events import MessageCreated
+    from app.features.bot_runtime.pipeline.events import MessageCreated
     await WSEventBus(channel_id).publish(MessageCreated(data=payload))
-    return APIResponse.ok(payload)
+    return APIResponse.ok(payload.to_wire())
 
 
 @router.get("/{msg_id}/secret", response_model=APIResponse[dict])

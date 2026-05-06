@@ -26,7 +26,7 @@ export function HelpModal({ open, onClose, apiDocsUrl }: HelpModalProps) {
         <li>@Coordinator 怎么用</li>
         <li>@Coordinator 怎么创建项目</li>
         <li>@Coordinator 怎么加入项目</li>
-        <li>@Coordinator 怎么接入 OpenClaw</li>
+        <li>@Helper 怎么接入 Agent Bridge</li>
         <li>@Coordinator 入口</li>
       </ul>
       <p className="text-xs mb-2" style={{ color: "var(--fg-3)" }}>

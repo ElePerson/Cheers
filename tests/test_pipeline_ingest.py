@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from app.services.pipeline.events import Event, MessageCreated
-from app.services.pipeline.ingest.context import IngestContext
-from app.services.pipeline.ingest.stages import (
+from app.features.bot_runtime.pipeline.events import Event, MessageCreated
+from app.features.bot_runtime.pipeline.ingest.context import IngestContext
+from app.features.bot_runtime.pipeline.ingest.stages import (
     SECRET_PLACEHOLDER,
     EmitStage,
     SecretEnvelopeStage,

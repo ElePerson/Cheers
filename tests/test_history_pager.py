@@ -9,13 +9,13 @@ from sqlalchemy import asc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Channel, HistoryPage, Message, User, Workspace
-from app.repositories.message_repo import MessageRepository
-from app.services.memory.channel_memory import ChannelMemory
-from app.services.memory.history_pager import (
+from app.features.memory.channel_memory import ChannelMemory
+from app.features.memory.history_pager import (
     compact_channel_history,
     get_current_page,
     render_current_page_summary,
 )
+from app.repositories.message_repo import MessageRepository
 
 
 async def _seed_channel(session: AsyncSession, suffix: str) -> str:

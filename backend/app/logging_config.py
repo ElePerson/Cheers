@@ -2,6 +2,7 @@
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 from app.config import settings
 from app.core.log_context import LogContextFilter
@@ -44,7 +45,7 @@ class _JsonFormatter(logging.Formatter):
         import json as _json
         import traceback as _tb
 
-        payload = {
+        payload: dict[str, Any] = {
             "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
             "level": record.levelname,
             "logger": record.name,

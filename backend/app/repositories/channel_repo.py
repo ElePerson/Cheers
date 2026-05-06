@@ -1,6 +1,8 @@
 """Channel 与 ChannelMembership 数据访问层."""
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,7 +82,7 @@ class ChannelRepository:
         allow_member_invites: bool | None = None,
         allow_bot_adds: bool | None = None,
     ) -> Channel:
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "workspace_id": workspace_id,
             "name": name,
             "type": type,

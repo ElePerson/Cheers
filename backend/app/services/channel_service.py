@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import cast
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
@@ -115,7 +116,7 @@ class ChannelService:
 
         if other_type == "bot":
             await BotService(self.session).assert_can_use(
-                other,
+                cast(BotAccount, other),
                 current_user,
                 "无权与该 Bot 发起私信",
             )
@@ -282,9 +283,10 @@ class ChannelService:
 
         added_user_ids = set()
         if type != "dm":
-            # 内置 Bot 自动加入普通频道；DM 保持一对一，不注入 Coordinator / Helper。
-            from app.services.guide.constants import GUIDE_BOT_ID, GUIDE_HELPER_BOT_ID
-            for bot_id in (GUIDE_BOT_ID, GUIDE_HELPER_BOT_ID):
+            # 内置 Bot 自动加入普通频道；DM 保持一对一，不注入 Helper。
+            from app.features.bot_runtime.builtin_ids import BUILTIN_BOT_IDS
+
+            for bot_id in BUILTIN_BOT_IDS:
                 if not await self.repo.get_membership(ch.channel_id, bot_id):
                     await self.repo.add_member(ch.channel_id, bot_id, "bot")
 
@@ -556,8 +558,8 @@ class ChannelService:
                     else None
                 )
                 item["binding_type"] = getattr(bot_entity, "binding_type", None) or "http"
-                if item["binding_type"] == "websocket":
-                    from app.services.openclaw_bridge.registry import bot_session_registry
+                if item["binding_type"] == "agent_bridge":
+                    from app.features.agent_bridge.registry import bot_session_registry
 
                     live_state = bot_session_registry.connection_state(bot_entity.bot_id)
                     item.update(live_state)
@@ -603,7 +605,7 @@ class ChannelService:
 
         m = await self.repo.add_member(channel_id, member_id, member_type, added_by=current_user.user_id)
         if member_type == "bot":
-            from app.services.openclaw_bridge.membership import emit_channel_joined
+            from app.features.agent_bridge.membership import emit_channel_joined
             await emit_channel_joined(
                 self.session, bot_id=member_id, channel_id=channel_id,
                 invited_by=current_user.user_id,
@@ -644,8 +646,9 @@ class ChannelService:
             raise NotFoundError("membership not found")
 
         if not is_admin(current_user):
-            from app.services.guide.constants import GUIDE_BOT_ID
-            if member_id == GUIDE_BOT_ID:
+            from app.features.bot_runtime.builtin_ids import BUILTIN_BOT_IDS
+
+            if member_id in BUILTIN_BOT_IDS:
                 raise ForbiddenError("内置助手只能由管理员移除")
 
         if m.member_type == "user" and (m.role or "member") in CHANNEL_ADMIN_ROLES:
@@ -653,7 +656,7 @@ class ChannelService:
 
         await self.repo.remove_member(m)
         if m.member_type == "bot":
-            from app.services.openclaw_bridge.membership import emit_channel_left
+            from app.features.agent_bridge.membership import emit_channel_left
             reason = "kicked" if current_user.user_id != member_id else "left"
             await emit_channel_left(
                 self.session, bot_id=member_id, channel_id=channel_id, reason=reason,
@@ -762,7 +765,7 @@ class ChannelService:
                     and_(Friendship.user_id == user_id, Friendship.status == "accepted"),
                     and_(Friendship.friend_id == user_id, Friendship.status == "accepted"),
                 ),
-                User.user_id.notin_(member_ids) if member_ids else True,
+                User.user_id.notin_(member_ids) if member_ids else true(),
             )
         )
         return [

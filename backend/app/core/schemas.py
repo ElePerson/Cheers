@@ -91,12 +91,12 @@ class PromptTemplateInResponse(BaseModel):
 # ==================== Bot Schemas ====================
 
 class BotCreate(BaseModel):
-    """创建 Bot：选择模型 + 选择模板（HTTP Bot），或绑定到 OpenClaw channel plugin（WebSocket Bot）."""
+    """创建 Bot：选择模型 + 选择模板（HTTP Bot），或绑定到 Agent Bridge provider。"""
     bot_id: str | None = None
     username: str = Field(..., min_length=1, max_length=64, description="@ 用的名字")
     display_name: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, description="Bot 描述")
-    # HTTP Bot 必填；WebSocket Bot 不使用 model，但可使用 template 渲染发送给 plugin 的任务
+    # HTTP Bot 必填；Agent Bridge Bot 不使用 model，但可使用 template 渲染发送给 plugin 的任务
     model_id: str | None = Field(default=None, description="关联的 AI 模型 ID（HTTP Bot 必填）")
     template_id: str | None = Field(default=None, description="关联的提示词模板 ID")
     custom_system_prompt: str | None = Field(default=None, description="可选：覆盖模板的系统提示词")
@@ -109,12 +109,13 @@ class BotCreate(BaseModel):
     avatar_url: str | None = Field(default=None)
     binding_type: str = Field(
         default="http",
-        pattern="^(http|websocket)$",
-        description="绑定类型：'http'=OpenAI 兼容 HTTP（默认）；'websocket'=OpenClaw channel plugin 异步回推",
+        pattern="^(http|agent_bridge)$",
+        description="绑定类型：'http'=OpenAI 兼容 HTTP（默认）；'agent_bridge'=外部 provider 异步回推",
     )
+    bridge_provider: str = Field(default="generic", description="Agent Bridge provider，如 generic/openclaw")
     binding_config: dict | None = Field(
         default=None,
-        description="绑定相关配置，例如 WebSocket Bot 的 {agent_id, gateway}",
+        description="绑定相关配置，例如 Agent Bridge Bot 的 {agent_id, gateway}",
     )
 
 
@@ -130,7 +131,8 @@ class BotUpdate(BaseModel):
     scope: Literal["private", "friend", "everyone"] | None = Field(default=None)
     intro: str | None = Field(default=None)
     avatar_url: str | None = Field(default=None)
-    binding_type: str | None = Field(default=None, pattern="^(http|websocket)$")
+    binding_type: str | None = Field(default=None, pattern="^(http|agent_bridge)$")
+    bridge_provider: str | None = Field(default=None)
     binding_config: dict | None = Field(default=None)
 
 
@@ -155,9 +157,10 @@ class BotInResponse(BaseModel):
     custom_system_prompt: str | None = None
     created_at: datetime | None = None
     binding_type: str = "http"
+    bridge_provider: str = "generic"
     binding_config: dict | None = None
     is_builtin: bool = False
-    # WebSocket Bot token 元信息：常规响应只回前缀与轮换时间，明文 bot_token
+    # Agent Bridge Bot token 元信息：常规响应只回前缀与轮换时间，明文 bot_token
     # 只在 create / rotate 接口一次性返回
     bot_token_prefix: str | None = None
     bot_token_rotated_at: datetime | None = None
@@ -167,7 +170,7 @@ class BotInResponse(BaseModel):
     control_connected: bool | None = None
     data_connected: bool | None = None
 
-    # 关联信息（WebSocket Bot 可能没有）
+    # 关联信息（Agent Bridge Bot 可能没有）
     model_id: str | None = None
     template_id: str | None = None
     model_name: str | None = None  # AIModel.name
@@ -615,27 +618,3 @@ class KeychainItemInResponse(BaseModel):
     value_masked: str | None = None  # 掩码显示，如 "****abcd"
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
-
-# ==================== Legacy Schemas (for compatibility) ====================
-
-class BotRegisterRequest(BaseModel):
-    """外部 OpenClaw 提交的注册申请（遗留兼容）."""
-    username: str
-    display_name: str | None = None
-    openclaw_endpoint: str
-    intro: str | None = None
-
-
-class BotRegistrationRequestInResponse(BaseModel):
-    """注册申请单条响应."""
-    model_config = ConfigDict(from_attributes=True)
-    request_id: str
-    username: str
-    display_name: str | None = None
-    openclaw_endpoint: str
-    intro: str | None = None
-    status: str
-    requested_at: datetime | None = None
-    decided_at: datetime | None = None
-    created_bot_id: str | None = None

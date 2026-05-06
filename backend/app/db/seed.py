@@ -1,7 +1,7 @@
 """种子数据：默认工作空间、提示词模板、Bot、测试用户."""
 import asyncio
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -16,8 +16,8 @@ from app.db.models import (
     WorkspaceMembership,
 )
 from app.db.session import async_session_factory
+from app.features.bot_runtime.builtin_ids import BUILTIN_BOT_IDS, HELPER_BOT_ID
 from app.services.auth.password_utils import hash_password, verify_password
-from app.services.guide.constants import GUIDE_BOT_ID, GUIDE_HELPER_BOT_ID
 
 # 固定 ID，便于文档与脚本引用
 WORKSPACE_ID = "ws-default-001"
@@ -27,28 +27,42 @@ ADMIN_USER_ID = "admin-0000-0000-0000-000000000001"
 TEMPLATE_GENERAL_ID = "template-general-001"
 TEMPLATE_CODE_REVIEW_ID = "template-codereview-001"
 TEMPLATE_CREATIVE_ID = "template-creative-001"
-BUILTIN_BOT_IDS = (GUIDE_BOT_ID, GUIDE_HELPER_BOT_ID)
+REMOVED_HELP_BOT_IDS = ("bot-guide-001", "bot-guide-helper-001")
 
 
-async def _seed_unified_bot(session: AsyncSession) -> bool:
-    """创建统一内置 Bot（@Coordinator）：引导 + 助手 + 记忆管理三合一。"""
-    r = await session.execute(select(BotAccount).where(BotAccount.bot_id == GUIDE_BOT_ID))
+async def _remove_removed_help_bots(session: AsyncSession) -> bool:
+    """删除旧帮助类内置 Bot，避免和 Helper 重复。"""
+    did_write = False
+    result = await session.execute(
+        delete(ChannelMembership).where(ChannelMembership.member_id.in_(REMOVED_HELP_BOT_IDS))
+    )
+    did_write = did_write or bool(getattr(result, "rowcount", 0))
+    result = await session.execute(
+        delete(BotAccount).where(BotAccount.bot_id.in_(REMOVED_HELP_BOT_IDS))
+    )
+    did_write = did_write or bool(getattr(result, "rowcount", 0))
+    return did_write
+
+
+async def _seed_helper_bot(session: AsyncSession) -> bool:
+    """创建统一内置 Bot（@Helper）：帮助 + 协作 + 记忆管理三合一。"""
+    r = await session.execute(select(BotAccount).where(BotAccount.bot_id == HELPER_BOT_ID))
     existing = r.scalar_one_or_none()
     if existing is not None:
-        # 迁移旧用户名 → 现在统一叫 Coordinator
-        if existing.username in ("引导", "channel bot"):
-            existing.username = "Coordinator"
+        if existing.username in ("引导", "channel bot", "guide-helper", "Coordinator"):
+            existing.username = "Helper"
+            existing.display_name = "协作助手"
         existing.scope = "everyone"
         await session.flush()
         return False
 
     session.add(
         BotAccount(
-            bot_id=GUIDE_BOT_ID,
-            username="Coordinator",
-            display_name="协调者",
+            bot_id=HELPER_BOT_ID,
+            username="Helper",
+            display_name="协作助手",
             description=(
-                "系统内置协调者（Coordinator），集引导、项目助手、记忆管理三合一。"
+                "系统内置协作助手（Helper），集使用帮助、项目助手、记忆管理三合一。"
                 "可回答系统使用问题、结合项目记忆回答业务问题、"
                 "读写四层项目记忆、并在需要时建议路由到专业 Bot。"
             ),
@@ -57,57 +71,11 @@ async def _seed_unified_bot(session: AsyncSession) -> bool:
             status="online",
             scope="everyone",
             intro=(
-                '{"capabilities":["系统引导","项目问答","记忆读写","澄清弹窗","Bot路由建议"],'
-                '"description":"内置协调者，@Coordinator 即可使用"}'
+                '{"capabilities":["系统帮助","项目问答","记忆读写","澄清弹窗","Bot路由建议"],'
+                '"description":"内置协作助手，@Helper 即可使用"}'
             ),
         )
     )
-    return True
-
-
-async def _seed_guide_helper_bot(session: AsyncSession) -> bool:
-    """创建操作指引助手 Bot（@Helper）：加载 docs/help/ 下所有帮助文档，回答 AgentNexus 使用问题."""
-    r = await session.execute(select(BotAccount).where(BotAccount.bot_id == GUIDE_HELPER_BOT_ID))
-    existing = r.scalar_one_or_none()
-    if existing is not None:
-        # 迁移旧用户名 → 现在统一叫 Helper
-        if existing.username == "guide-helper":
-            existing.username = "Helper"
-        existing.scope = "everyone"
-        await session.flush()
-        return False
-
-    session.add(
-        BotAccount(
-            bot_id=GUIDE_HELPER_BOT_ID,
-            username="Helper",
-            display_name="操作指引助手",
-            description="操作指引助手，加载所有帮助文档，回答平台使用问题。",
-            model_id=None,
-            template_id=None,
-            status="online",
-            scope="everyone",
-            intro='{"capabilities":["使用说明","功能问答","操作指南"],"description":"输入 @Helper 即可获得操作指引"}',
-        )
-    )
-    await session.flush()
-
-    # 将该 Bot 加入默认频道
-    r2 = await session.execute(
-        select(ChannelMembership).where(
-            ChannelMembership.channel_id == CHANNEL_ID,
-            ChannelMembership.member_id == GUIDE_HELPER_BOT_ID,
-        )
-    )
-    if r2.scalar_one_or_none() is None:
-        session.add(
-            ChannelMembership(
-                channel_id=CHANNEL_ID,
-                member_id=GUIDE_HELPER_BOT_ID,
-                member_type="bot",
-            )
-        )
-
     return True
 
 
@@ -239,7 +207,7 @@ async def _seed_memberships(session: AsyncSession) -> bool:
     did_write = False
 
     # session 配置为 autoflush=False，先手动 flush 一次，
-    # 让前面 _seed_guide_helper_bot 已 session.add 的 membership 对下面的 SELECT 可见，
+    # 让前面已 session.add 的 membership 对下面的 SELECT 可见，
     # 否则会造成同一事务内重复插入 → UniqueViolation → 整个 seed 回滚
     await session.flush()
 
@@ -322,8 +290,8 @@ async def seed(session: AsyncSession) -> bool:
     did_write = False
 
     did_write |= await _seed_templates(session)
-    did_write |= await _seed_unified_bot(session)
-    did_write |= await _seed_guide_helper_bot(session)
+    did_write |= await _remove_removed_help_bots(session)
+    did_write |= await _seed_helper_bot(session)
     did_write |= await _seed_workspace_and_users(session)
     did_write |= await _seed_memberships(session)
 
@@ -354,17 +322,17 @@ async def _sync_admin_credentials(session: AsyncSession) -> None:
 
 
 async def ensure_builtin_bot() -> None:
-    """每次启动时无条件确保内置 Bot 存在，并加入所有现有普通频道。
+    """每次启动时无条件确保内置 Helper 存在，并加入所有现有普通频道。
 
     不依赖 SEED_DATA 环境变量，保证升级后旧库也能自动补齐内置 Bot。
     """
     async with async_session_factory() as session:
         try:
-            await _seed_unified_bot(session)
-            await _seed_guide_helper_bot(session)
+            await _remove_removed_help_bots(session)
+            await _seed_helper_bot(session)
             await _sync_admin_credentials(session)
 
-            # 确保内置 Bot 只补齐到普通频道；DM 私聊不自动添加 Coordinator / Helper。
+            # 确保内置 Bot 只补齐到普通频道；DM 私聊不自动添加 Helper。
             await _ensure_builtin_bot_memberships(session)
 
             await session.commit()
@@ -380,5 +348,5 @@ if __name__ == "__main__":
         f"  Workspace: {WORKSPACE_ID}\n"
         f"  Channel: {CHANNEL_ID}\n"
         f"  Templates: 通用助手, 代码审查, 创意写作\n"
-        f"  Bots: @Coordinator（内置协调者）, @Helper（操作指引助手）"
+        f"  Bots: @Helper（内置协作助手）"
     )

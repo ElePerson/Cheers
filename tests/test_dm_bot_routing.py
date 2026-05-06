@@ -5,9 +5,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BotAccount, Channel, ChannelMembership, Message, User, Workspace
-from app.services.pipeline.bot import BotRunContext, IngestStage, RouteStage
-from app.services.pipeline.bus import NullEventBus
-from app.services.pipeline.ingest.stages import SECRET_PLACEHOLDER
+from app.features.bot_runtime.pipeline.bot import BotRunContext, IngestStage, RouteStage
+from app.features.bot_runtime.pipeline.bus import NullEventBus
+from app.features.bot_runtime.pipeline.ingest.stages import SECRET_PLACEHOLDER
 
 
 async def _unused_adapter_factory(bot_id: str):  # pragma: no cover - route-only tests
