@@ -22,12 +22,12 @@ interface ChannelMembersModalProps {
 }
 
 function botOnlineText(bot: Pick<Bot, "binding_type" | "connection_status" | "is_online" | "status">) {
-  if ((bot.binding_type || "http") !== "websocket") {
+  if ((bot.binding_type || "http") !== "agent_bridge") {
     return bot.is_online === false || bot.status === "offline" ? "已停用" : "HTTP 已启用";
   }
-  if (bot.connection_status === "online" && bot.is_online) return "WS 在线";
-  if (bot.connection_status === "partial") return "WS 部分连接";
-  return "WS 离线";
+  if (bot.connection_status === "online" && bot.is_online) return "Bridge 在线";
+  if (bot.connection_status === "partial") return "Bridge 部分连接";
+  return "Bridge 离线";
 }
 
 function BotOnlinePill({ bot }: { bot: Pick<Bot, "binding_type" | "connection_status" | "is_online" | "status"> }) {
@@ -154,11 +154,11 @@ export default function ChannelMembersModal({
       toast.error("请先选择好友");
       return;
     }
-    
+
     setInviteLoading(true);
     let successCount = 0;
     let failCount = 0;
-    
+
     for (const friendId of selectedFriends) {
       try {
         const res = await fetch(`${API}/channels/${channelId}/members`, {
@@ -179,7 +179,7 @@ export default function ChannelMembersModal({
         failCount++;
       }
     }
-    
+
     setInviteLoading(false);
     if (successCount > 0) {
       toast.success(`成功邀请 ${successCount} 位好友`);
@@ -200,7 +200,7 @@ export default function ChannelMembersModal({
     } else {
       if (!confirm("确定要移除这个成员吗？")) return;
     }
-    
+
     try {
       const res = await fetch(
         `${API}/channels/${channelId}/members/${encodeURIComponent(memberId)}`,
@@ -293,8 +293,8 @@ export default function ChannelMembersModal({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div 
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden" 
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

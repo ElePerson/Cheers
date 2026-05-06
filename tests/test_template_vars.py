@@ -8,10 +8,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.core.prompt_templates import DEFAULT_USER_TEMPLATE
-from app.services.adapters.base import AgentPayload, AgentResponse, OpenClawAdapter
-from app.services.adapters.http_bot import HttpBotAdapter
-from app.services.pipeline.bot.context import BotRunContext
-from app.services.pipeline.process_config import ProcessConfig
+from app.features.bot_runtime.adapters.base import AgentPayload, AgentResponse, BotAdapter
+from app.features.bot_runtime.adapters.http_bot import HttpBotAdapter
+from app.features.bot_runtime.pipeline.bot.context import BotRunContext
+from app.features.bot_runtime.pipeline.process_config import ProcessConfig
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -239,7 +239,7 @@ async def _execute_and_capture_body(adapter: HttpBotAdapter, payload: AgentPaylo
     mock_client = MagicMock()
     mock_client.stream = _fake_stream
 
-    with patch("app.services.adapters.http_bot.get_http_client", return_value=mock_client):
+    with patch("app.features.bot_runtime.adapters.http_bot.get_http_client", return_value=mock_client):
         resp = await adapter.execute(payload)
 
     assert resp.success is True
@@ -472,13 +472,13 @@ async def test_vision_request_renders_memory_template_in_text_part() -> None:
 async def test_call_bot_passes_context_to_sub_bot() -> None:
     """验证 call_bot 构建的 sub_payload 包含 channel_name 和 sender_name，
     使子 bot 的模板变量能正确渲染。"""
-    from app.services.adapters.channel_bot import _make_tools
+    from app.features.bot_runtime.adapters.channel_bot import _make_tools
 
     captured_payload: list[AgentPayload] = []
 
     async def _fake_adapter_factory(bot_id: str):
         """返回一个捕获 payload 的假 adapter。"""
-        class _CapturingAdapter(OpenClawAdapter):
+        class _CapturingAdapter(BotAdapter):
             async def execute(self, payload: AgentPayload) -> AgentResponse:
                 captured_payload.append(payload)
                 return AgentResponse(content="子bot回复", task_id=payload.task_id, success=True)
@@ -547,7 +547,7 @@ async def test_call_bot_passes_context_to_sub_bot() -> None:
 @pytest.mark.asyncio
 async def test_call_bot_end_to_end_renders_all_vars() -> None:
     """call_bot 调用 HttpBotAdapter 子 bot 时，模板中所有变量均被正确渲染。"""
-    from app.services.adapters.channel_bot import _make_tools
+    from app.features.bot_runtime.adapters.channel_bot import _make_tools
 
     all_vars_template = (
         "频道={{channel_name}} 发送者={{sender_name}} Bot={{bot_name}} "
@@ -617,7 +617,7 @@ async def test_call_bot_end_to_end_renders_all_vars() -> None:
     tools = _make_tools(ctx)
     call_bot_tool = next(t for t in tools if t.name == "call_bot")
 
-    with patch("app.services.adapters.http_bot.get_http_client", return_value=mock_client):
+    with patch("app.features.bot_runtime.adapters.http_bot.get_http_client", return_value=mock_client):
         result = await call_bot_tool.ainvoke({"username": "child_bot", "message": "端到端测试"})
 
     assert "子bot执行成功" in result

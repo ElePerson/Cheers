@@ -7,7 +7,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.v1.openclaw_bridge.routes import ws_router as openclaw_bridge_ws_router
+from app.agent_bridge_docs_routes import router as agent_bridge_docs_router
+from app.api.v1.agent_bridge.routes import ws_router as agent_bridge_ws_router
 from app.api.v1.router import v1_router
 from app.api.v1.ws.handler import router as ws_router
 from app.config import settings
@@ -15,7 +16,6 @@ from app.core.exceptions import AppError
 from app.core.middleware import AccessLogMiddleware, RequestIDMiddleware
 from app.logging_config import setup_logging
 from app.manual_routes import router as manual_router
-from app.openclaw_docs_routes import router as openclaw_docs_router
 from app.public_routes import router as public_router
 from app.services.storage.bootstrap import initialize_storage, is_storage_enabled
 
@@ -40,9 +40,13 @@ async def lifespan(app: FastAPI):
     from app.services.realtime_broker import init_realtime_broker
     await init_realtime_broker()
 
-    from app.services.orchestrator.jobs import run_orchestrator_job
-    from app.services.orchestrator.queue import start_orchestrator_workers
+    from app.features.bot_runtime.orchestrator.jobs import run_orchestrator_job
+    from app.features.bot_runtime.orchestrator.queue import start_orchestrator_workers
     await start_orchestrator_workers(run_orchestrator_job)
+
+    from app.features.bot_runtime.bot_events.jobs import run_bot_event_job
+    from app.features.bot_runtime.bot_events.queue import start_bot_event_workers
+    await start_bot_event_workers(run_bot_event_job)
 
     if is_storage_enabled():
         app.state.storage = await initialize_storage()
@@ -64,8 +68,11 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    from app.services.orchestrator.queue import stop_orchestrator_workers
+    from app.features.bot_runtime.orchestrator.queue import stop_orchestrator_workers
     await stop_orchestrator_workers()
+
+    from app.features.bot_runtime.bot_events.queue import stop_bot_event_workers
+    await stop_bot_event_workers()
 
     from app.services.realtime_broker import close_realtime_broker
     await close_realtime_broker()
@@ -126,12 +133,12 @@ app.include_router(v1_router)
 
 # WebSocket 路由（/ws/channels/{id}，nginx location /ws 需要 upgrade 头）
 app.include_router(ws_router)
-app.include_router(openclaw_bridge_ws_router)
+app.include_router(agent_bridge_ws_router)
 
 # 静态功能路由（不含业务逻辑，保持不变）
 app.include_router(manual_router)
 app.include_router(public_router)
-app.include_router(openclaw_docs_router)
+app.include_router(agent_bridge_docs_router)
 
 
 @app.get("/health")

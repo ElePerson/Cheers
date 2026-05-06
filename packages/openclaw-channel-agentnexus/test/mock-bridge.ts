@@ -59,7 +59,7 @@ export class MockBridge {
 
     this.server.on("upgrade", (req, socket, head) => {
       const path = (req.url || "").split("?")[0];
-      if (path !== "/ws/openclaw/control" && path !== "/ws/openclaw/data") {
+      if (path !== "/ws/agent-bridge/control" && path !== "/ws/agent-bridge/data") {
         socket.destroy();
         return;
       }
@@ -71,7 +71,7 @@ export class MockBridge {
         return;
       }
       this.wss.handleUpgrade(req, socket, head, (ws) => {
-        const stream: "control" | "data" = path === "/ws/openclaw/control" ? "control" : "data";
+        const stream: "control" | "data" = path === "/ws/agent-bridge/control" ? "control" : "data";
         this.onConnection(ws, stream);
       });
     });
@@ -81,8 +81,8 @@ export class MockBridge {
     });
     const addr = this.server.address() as AddressInfo;
     this.port = addr.port;
-    this.controlUrl = `ws://127.0.0.1:${this.port}/ws/openclaw/control`;
-    this.dataUrl = `ws://127.0.0.1:${this.port}/ws/openclaw/data`;
+    this.controlUrl = `ws://127.0.0.1:${this.port}/ws/agent-bridge/control`;
+    this.dataUrl = `ws://127.0.0.1:${this.port}/ws/agent-bridge/data`;
   }
 
   private onConnection(ws: WebSocket, stream: "control" | "data"): void {

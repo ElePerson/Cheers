@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.db.models import Base
 from app.main import app
 
-
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
     "postgresql+asyncpg://agentnexus:agentnexus@localhost:5433/agentnexus_test",
@@ -33,7 +32,17 @@ async def db_engine():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+
+    import app.features.agent_bridge.event_log as _agent_bridge_event_log
+
+    original_event_log_factory = _agent_bridge_event_log.async_session_factory
+    _agent_bridge_event_log.async_session_factory = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False, autocommit=False, autoflush=False
+    )
+    _agent_bridge_event_log.bot_event_seq.reset()
     yield engine
+    _agent_bridge_event_log.async_session_factory = original_event_log_factory
+    _agent_bridge_event_log.bot_event_seq.reset()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
@@ -57,10 +66,12 @@ async def client(db_session: AsyncSession, db_engine) -> AsyncGenerator[AsyncCli
     同时将 messages.py 中的 async_session_factory 替换为测试用工厂，
     确保 _run_orchestrator_bg 后台任务也写入同一块测试 DB。
     """
-    from app.core.dependencies import get_current_user, get_session as get_session_core
-    from app.db.session import get_session as get_session_db
-    from app.db.models import User
     import app.api.v1.messages.routes as _messages_mod
+    import app.features.bot_runtime.orchestrator.jobs as _orchestrator_jobs_mod
+    from app.core.dependencies import get_current_user
+    from app.core.dependencies import get_session as get_session_core
+    from app.db.models import User
+    from app.db.session import get_session as get_session_db
 
     test_session_factory = async_sessionmaker(
         db_engine, class_=AsyncSession, expire_on_commit=False, autocommit=False, autoflush=False
@@ -86,7 +97,9 @@ async def client(db_session: AsyncSession, db_engine) -> AsyncGenerator[AsyncCli
         return test_user
 
     original_factory = _messages_mod.async_session_factory
+    original_jobs_factory = _orchestrator_jobs_mod.async_session_factory
     _messages_mod.async_session_factory = test_session_factory
+    _orchestrator_jobs_mod.async_session_factory = test_session_factory
     app.dependency_overrides[get_session_core] = override_get_session
     app.dependency_overrides[get_session_db] = override_get_session
     app.dependency_overrides[get_current_user] = override_get_current_user
@@ -96,4 +109,5 @@ async def client(db_session: AsyncSession, db_engine) -> AsyncGenerator[AsyncCli
         yield ac
 
     _messages_mod.async_session_factory = original_factory
+    _orchestrator_jobs_mod.async_session_factory = original_jobs_factory
     app.dependency_overrides.clear()

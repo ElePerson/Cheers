@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, get_session
 from app.db.models import MemoryEntry, User
+from app.features.memory.channel_memory import ENTRY_LAYERS
 from app.services.channel_service import ChannelService
-from app.services.memory.channel_memory import ENTRY_LAYERS
 
 router = APIRouter(prefix="/channels/{channel_id}/memory", tags=["memory"])
 

@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AIModel, BotAccount, PromptTemplate
-from app.services.guide.constants import GUIDE_BOT_ID
+from app.features.bot_runtime.builtin_ids import HELPER_BOT_ID
 
 
 @pytest.mark.asyncio
@@ -111,7 +111,7 @@ async def test_builtin_bot_connection_test_uses_builtin_adapter(
     db_session: AsyncSession,
 ) -> None:
     bot = BotAccount(
-        bot_id=GUIDE_BOT_ID,
+        bot_id=HELPER_BOT_ID,
         username="Coordinator",
         status="online",
         binding_type="http",
@@ -145,7 +145,7 @@ async def test_websocket_bot_connection_test_reports_registry_state(
         bot_id="conn-bot-0002",
         username="conn_bot_ws",
         status="online",
-        binding_type="websocket",
+        binding_type="agent_bridge",
         created_by="someone-else",
     )
     db_session.add(bot)
@@ -156,6 +156,6 @@ async def test_websocket_bot_connection_test_reports_registry_state(
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["reachable"] is False
-    assert data["binding_type"] == "websocket"
+    assert data["binding_type"] == "agent_bridge"
     assert data["connection_status"] == "offline"
-    assert data["message"] == "WebSocket Bot 未完整连接"
+    assert data["message"] == "Agent Bridge Bot 未完整连接"

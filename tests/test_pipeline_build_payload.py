@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import MagicMock
 
-from app.services.pipeline.bot.capabilities import Capabilities
-from app.services.pipeline.bot.subagent import build_payload
+from app.features.bot_runtime.pipeline.bot.capabilities import Capabilities
+from app.features.bot_runtime.pipeline.bot.subagent import build_payload
 
 
 @dataclass

@@ -13,7 +13,7 @@
   "channelConfigs": {
     "agentnexus": {
       "label": "AgentNexus",
-      "description": "Connect to AgentNexus via per-bot WebSocket bridge. One account = one AgentNexus WebSocket Bot.",
+      "description": "Connect to AgentNexus via per-bot WebSocket bridge. One account = one AgentNexus Agent Bridge Bot.",
       "schema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -30,15 +30,15 @@
                 "enabled": { "type": "boolean", "default": true },
                 "botToken": {
                   "type": "string",
-                  "description": "Per-bot token issued by AgentNexus when the WebSocket Bot is created (ocw_...)."
+                  "description": "Per-bot token issued by AgentNexus when the Agent Bridge Bot is created (agb_...)."
                 },
                 "controlUrl": {
                   "type": "string",
-                  "description": "AgentNexus control WS URL, e.g. ws://localhost:8002/ws/openclaw/control"
+                  "description": "AgentNexus control WS URL, e.g. ws://localhost:8002/ws/agent-bridge/control"
                 },
                 "dataUrl": {
                   "type": "string",
-                  "description": "AgentNexus data WS URL, e.g. ws://localhost:8002/ws/openclaw/data"
+                  "description": "AgentNexus data WS URL, e.g. ws://localhost:8002/ws/agent-bridge/data"
                 },
                 "advanced": {
                   "type": "object",

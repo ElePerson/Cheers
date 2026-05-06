@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     orchestrator_queue_backend: str = "redis"  # redis | memory
     orchestrator_worker_concurrency: int = 4
     orchestrator_bot_concurrency_per_message: int = 3
+    bot_event_queue_backend: str = ""  # "" = follow orchestrator_queue_backend; redis | memory
+    bot_event_worker_concurrency: int = 4
     realtime_broker_backend: str = "redis"  # redis | memory
     ws_outbound_queue_size: int = 256
     ws_send_timeout_seconds: float = 5.0
@@ -71,12 +73,12 @@ class Settings(BaseSettings):
     log_max_bytes: int = 5 * 1024 * 1024  # 5MB
     log_backup_count: int = 3
 
-    # 引导 Bot 使用的 LLM（可选；不配置则用关键词匹配；默认连本地 Ollama）
-    guide_llm_base_url: str = ""
-    guide_llm_model: str = ""
-    guide_llm_api_key: str = ""
-    guide_llm_temperature: float = 0.7
-    guide_llm_max_tokens: int = 1000
+    # Helper Bot 使用的 LLM（可选；不配置则用关键词匹配）
+    helper_llm_base_url: str = ""
+    helper_llm_model: str = ""
+    helper_llm_api_key: str = ""
+    helper_llm_temperature: float = 0.7
+    helper_llm_max_tokens: int = 1000
     llm_localhost_alias: str = ""
 
     # 系统 LLM（RECENT 压缩、文件摘要等；不配置则简单截断）
@@ -88,11 +90,6 @@ class Settings(BaseSettings):
     memory_history_page_max_chars: int = 50000
     memory_recent_direct_message_count: int = 30
     memory_recent_summary_max_chars: int = 1500
-
-    # 文生图（DashScope 原生 API）
-    image_gen_base_url: str = "https://dashscope.aliyuncs.com"
-    image_gen_api_key: str = ""
-    image_gen_default_model: str = "qwen-image-2.0-pro"
 
     # 邮件 SMTP 配置（留空则仅打印验证码到日志，适合开发环境）
     smtp_host: str = ""
@@ -120,10 +117,10 @@ class Settings(BaseSettings):
     admin_password: str = "admin#Nexus2024"
     admin_display_name: str = "系统管理员"
 
-    # ===== OpenClaw channel plugin bridge =====
-    openclaw_bridge_enabled: bool = True
-    openclaw_bridge_token: str = ""  # 空 = 未配置，bridge 路由返回 503
-    openclaw_bridge_timeout_seconds: int = 300  # 异步 Bot 慢回复阈值（超时后占位消息转后台任务）
+    # ===== Agent Bridge =====
+    agent_bridge_enabled: bool = True
+    agent_bridge_token: str = ""  # 空 = 未配置，bridge 路由返回 503
+    agent_bridge_timeout_seconds: int = 300  # 异步 Bot 慢回复阈值（超时后占位消息转后台任务）
 
     model_config = {
         "env_file": [str(_BACKEND_ROOT.parent / ".env"), str(_BACKEND_ROOT / ".env")],

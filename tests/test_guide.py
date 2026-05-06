@@ -1,5 +1,5 @@
 """帮助索引（find_help）单测。"""
-from app.services.guide.help_index import find_help
+from app.features.bot_runtime.adapters.help_catalog import find_help
 
 
 def test_find_help_creation() -> None:

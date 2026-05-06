@@ -3,7 +3,7 @@
   "kind": "channel",
   "channels": ["agentnexus"],
   "name": "AgentNexus",
-  "description": "Slack-like multi-channel chat with bots. One OpenClaw account = one AgentNexus WebSocket Bot.",
+  "description": "Slack-like multi-channel chat with bots. One OpenClaw account = one AgentNexus Agent Bridge Bot.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -20,18 +20,18 @@
                 "enabled": { "type": "boolean", "default": true },
                 "botToken": {
                   "type": "string",
-                  "description": "AgentNexus 创建 WebSocket Bot 时返回的一次性 token（形如 ocw_...）",
+                  "description": "AgentNexus 创建 Agent Bridge Bot 时返回的一次性 token（形如 agb_...）",
                   "x-sensitive": true
                 },
                 "controlUrl": {
                   "type": "string",
                   "format": "uri",
-                  "description": "AgentNexus control WS 地址，例如 ws://localhost:8000/ws/openclaw/control"
+                  "description": "AgentNexus control WS 地址，例如 ws://localhost:8000/ws/agent-bridge/control"
                 },
                 "dataUrl": {
                   "type": "string",
                   "format": "uri",
-                  "description": "AgentNexus data WS 地址，例如 ws://localhost:8000/ws/openclaw/data"
+                  "description": "AgentNexus data WS 地址，例如 ws://localhost:8000/ws/agent-bridge/data"
                 },
                 "advanced": {
                   "type": "object",

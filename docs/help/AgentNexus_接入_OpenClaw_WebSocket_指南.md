@@ -1,6 +1,6 @@
 # AgentNexus 以 WebSocket 方式接入 OpenClaw 完整指南
 
-把 OpenClaw 里跑的 agent 接到 AgentNexus 频道里，作为一个 **WebSocket Bot** 出现。被 `@mention` 时，AgentNexus 通过 WS 把消息推给 OpenClaw plugin，plugin 回推 reply，全流程实时。
+把 OpenClaw 里跑的 agent 接到 AgentNexus 频道里，作为一个 **Agent Bridge Bot** 出现。被 `@mention` 时，AgentNexus 通过 WS 把消息推给 OpenClaw plugin，plugin 回推 reply，全流程实时。
 
 ---
 
@@ -10,10 +10,10 @@
 ┌──────────────────────────┐       ┌──────────────────────────────┐
 │ AgentNexus 后端          │       │ OpenClaw 进程                │
 │                          │       │                              │
-│ /ws/openclaw/control ◄───┼──ws───┤ openclaw-channel-agentnexus  │
+│ /ws/agent-bridge/control ◄───┼──ws───┤ openclaw-channel-agentnexus  │
 │   ↳ membership / hello   │       │   (channel plugin)           │
 │                          │       │                              │
-│ /ws/openclaw/data    ◄───┼──ws───┤   ↳ 转发 message → agent     │
+│ /ws/agent-bridge/data    ◄───┼──ws───┤   ↳ 转发 message → agent     │
 │   ↳ message / reply      │       │   ↳ agent reply → reply 帧   │
 │   ↳ delta  / send_ack    │       │                              │
 │                          │       │                              │
@@ -21,9 +21,9 @@
 └──────────────────────────┘       └──────────────────────────────┘
 ```
 
-- **角色**：一个 AgentNexus `WebSocket Bot` ↔ 一个 OpenClaw `account`。一个 OpenClaw 进程可以挂多个 account（多 Bot）。
+- **角色**：一个 AgentNexus `Agent Bridge Bot` ↔ 一个 OpenClaw `account`。一个 OpenClaw 进程可以挂多个 account（多 Bot）。
 - **两条 WS**：`control` 流通报频道成员变更和心跳；`data` 流跑实际消息和回复。
-- **鉴权**：AgentNexus 为每个 WS Bot 生成一次性 `ocw_xxx...` token；plugin 用这个 token 连两条 WS。
+- **鉴权**：AgentNexus 为每个 Agent Bridge Bot 生成一次性 `agb_xxx...` token；plugin 用这个 token 连两条 WS。
 
 ---
 
@@ -31,30 +31,30 @@
 
 | 项 | 要求 |
 |---|---|
-| AgentNexus 版本 | 含 `openclaw_bridge` 路由（`/ws/openclaw/control`、`/ws/openclaw/data`） |
+| AgentNexus 版本 | 含 `agent_bridge` 路由（`/ws/agent-bridge/control`、`/ws/agent-bridge/data`） |
 | OpenClaw CLI | `2026.4.15` 或更新 |
 | Plugin 包 | `openclaw-channel-agentnexus` ≥ `0.2.0` |
 | 网络 | OpenClaw 主机能直连 AgentNexus 后端的 8002（或反代后的 SSL 端口） |
-| 后端 `.env` | `OPENCLAW_BRIDGE_ENABLED=1`、`OPENCLAW_BRIDGE_TOKEN=<任意非空字符串>` |
+| 后端 `.env` | `AGENT_BRIDGE_ENABLED=1`、`AGENT_BRIDGE_TOKEN=<任意非空字符串>` |
 
-> `OPENCLAW_BRIDGE_TOKEN` 是 bridge 路由的总开关，仅 `/api/v1/openclaw/bridge/*` 的 HTTP 端点使用；plugin 走的两条 WS 用的是 **per-bot** token，不需要 bridge token。
+> `AGENT_BRIDGE_TOKEN` 是 bridge 路由的总开关，仅 `/api/v1/agent-bridge/*` 的 HTTP 端点使用；plugin 走的两条 WS 用的是 **per-bot** token，不需要 bridge token。
 
 ---
 
-## 3. AgentNexus 端：创建 WebSocket Bot
+## 3. AgentNexus 端：创建 Agent Bridge Bot
 
 ### 3.0 机器可读入口（推荐给 OpenClaw 自动接入）
 
 OpenClaw 可以先读取：
 
 ```bash
-curl http://localhost:8000/docs/openclaw/discovery
+curl http://localhost:8000/docs/agent-bridge/discovery
 ```
 
 该接口会返回登录、注册、帮助问答、WebSocket bridge 等入口。OpenClaw 可让用户输入 AgentNexus 账号密码，然后直接注册：
 
 ```bash
-curl -X POST http://localhost:8000/docs/openclaw/register \
+curl -X POST http://localhost:8000/docs/agent-bridge/register \
   -H "Content-Type: application/json" \
   -d '{
     "username": "mybot",
@@ -68,7 +68,7 @@ curl -X POST http://localhost:8000/docs/openclaw/register \
 
 如果本机已有 AgentNexus access token，也可以不传账号密码，改用 Header `Authorization: Bearer <AgentNexus access_token>`。
 
-响应会一次性返回 `bot_token`、`controlUrl`、`dataUrl` 与 OpenClaw 配置片段。也可以调用 `/docs/openclaw/help?q=怎么接入OpenClaw` 获取问答式帮助。
+响应会一次性返回 `bot_token`、`controlUrl`、`dataUrl` 与 OpenClaw 配置片段。也可以调用 `/docs/agent-bridge/help?q=怎么接入OpenClaw` 获取问答式帮助。
 
 ### 3.1 创建 Bot
 
@@ -77,11 +77,11 @@ curl -X POST http://localhost:8000/docs/openclaw/register \
 | 字段 | 值 |
 |---|---|
 | Bot 名称 | 自取，如 `code-reviewer` |
-| 绑定类型 | **WebSocket Bot** |
+| 绑定类型 | **Agent Bridge Bot** |
 | OpenClaw agent id | （可选）用于 `binding_config.agent_id`，plugin 可据此路由到具体 agent |
 | 状态 | `online`（必须，control 握手会拒绝非 online） |
 
-提交后，UI 会**只此一次**弹出 `ocw_xxxx...` 形式的 token —— 立刻复制存好。
+提交后，UI 会**只此一次**弹出 `agb_xxxx...` 形式的 token —— 立刻复制存好。
 
 > 关闭后只能从后台 **rotate** 重新生成（旧 token 立刻失效）。
 
@@ -97,11 +97,11 @@ curl -X POST http://localhost:8000/docs/openclaw/register \
 
 ```bash
 curl -L -o /tmp/openclaw-channel-agentnexus.tgz \
-  "http://localhost:8000/docs/openclaw/release/openclaw-channel-agentnexus.tgz"
+  "http://localhost:8000/docs/agent-bridge/release/openclaw-channel-agentnexus.tgz"
 openclaw plugins install /tmp/openclaw-channel-agentnexus.tgz
 ```
 
-机器可读下载地址也会出现在 `GET /docs/openclaw/discovery` 的 `plugin.download_url` 字段中。
+机器可读下载地址也会出现在 `GET /docs/agent-bridge/discovery` 的 `plugin.download_url` 字段中。
 
 后端从 AgentNexus 项目根目录的 `release/` 文件夹读取插件包，默认文件名为 `openclaw-channel-agentnexus.tgz`。部署时请把打包好的插件放到 `AgentNexus/release/openclaw-channel-agentnexus.tgz`；如需调整目录或文件名，可设置 `OPENCLAW_PLUGIN_RELEASE_DIR` / `OPENCLAW_PLUGIN_FILE`。
 
@@ -137,9 +137,9 @@ openclaw plugins list | grep agentnexus
       "accounts": {
         "my-bot": {
           "enabled": true,
-          "botToken": "ocw_xxxxxxxxxxxxxxxx",
-          "controlUrl": "ws://your-host:8002/ws/openclaw/control",
-          "dataUrl":    "ws://your-host:8002/ws/openclaw/data",
+          "botToken": "agb_xxxxxxxxxxxxxxxx",
+          "controlUrl": "ws://your-host:8002/ws/agent-bridge/control",
+          "dataUrl":    "ws://your-host:8002/ws/agent-bridge/data",
           "advanced": {
             "reconnectBaseMs": 1000,
             "reconnectMaxMs": 30000,
@@ -155,9 +155,9 @@ openclaw plugins list | grep agentnexus
 
 | 字段 | 必填 | 说明 |
 |---|:-:|---|
-| `botToken` | ✅ | AgentNexus 创建 WS Bot 时弹出的 `ocw_...`，**仅一次可见** |
-| `controlUrl` | ✅ | 路径固定 `/ws/openclaw/control` |
-| `dataUrl` | ✅ | 路径固定 `/ws/openclaw/data` |
+| `botToken` | ✅ | AgentNexus 创建 Agent Bridge Bot 时弹出的 `agb_...`，**仅一次可见** |
+| `controlUrl` | ✅ | 路径固定 `/ws/agent-bridge/control` |
+| `dataUrl` | ✅ | 路径固定 `/ws/agent-bridge/data` |
 | `enabled` | ❌ | 默认 `true`；置 `false` 可临时禁用 |
 | `advanced.reconnectBaseMs` | ❌ | 重连退避起点（默认 1s） |
 | `advanced.reconnectMaxMs` | ❌ | 重连退避上限（默认 30s） |
@@ -223,8 +223,8 @@ data_ws:    connected bot_id=<uuid>
 ### 7.3 鉴权
 
 ```
-Authorization: Bearer ocw_xxxxxxxxxxxx       (推荐)
-?token=ocw_xxxxxxxxxxxx                       (CLI 兼容)
+Authorization: Bearer agb_xxxxxxxxxxxx       (推荐)
+?token=agb_xxxxxxxxxxxx                       (CLI 兼容)
 ```
 
 握手失败的 close code：
@@ -239,7 +239,7 @@ Authorization: Bearer ocw_xxxxxxxxxxxx       (推荐)
 
 ## 8. 安全模型
 
-- **per-bot token**：每个 WS Bot 独立 token，前 8 字符（`ocw_xxxx`）用作前缀检索，全 token pbkdf2_sha256 哈希存库；明文只在创建时一次性返回。
+- **per-bot token**：每个 Agent Bridge Bot 独立 token，前 8 字符（`agb_xxxx`）用作前缀检索，全 token pbkdf2_sha256 哈希存库；明文只在创建时一次性返回。
 - **写入校验**：`reply` 帧带的 `file_ids` 必须属于同频道；目标 Bot 必须是该频道成员且 `status=online`。
 - **隔离**：plugin 收到的 `message` 只包含该 Bot 是成员的频道；不会窥探到无关频道。
 - **撤销**：在 AdminPage 给 Bot rotate token，旧 token 下次握手即被拒；当前在线连接需要等心跳过期或主动断开。
@@ -276,7 +276,7 @@ openclaw daemon logs --follow | grep agentnexus
 ## 10. FAQ
 
 **Q：能不能不通过 OpenClaw plugin，直接用自己写的客户端连两条 WS？**
-能。协议公开，鉴权用 `Bearer ocw_...`，按第 7 节实现 `hello / message / reply / delta / send_ack` 即可。OpenClaw plugin 只是其中一个参考实现。
+能。协议公开，鉴权用 `Bearer agb_...`，按第 7 节实现 `hello / message / reply / delta / send_ack` 即可。OpenClaw plugin 只是其中一个参考实现。
 
 **Q：一个 OpenClaw 进程能挂几个 Bot？**
 没硬上限。一个 account = 一个 Bot = 两条 WS（control + data）；按机器资源决定。
@@ -296,5 +296,5 @@ openclaw daemon logs --follow | grep agentnexus
 
 - `packages/openclaw-channel-agentnexus/README.md` —— plugin 实现细节、本地开发方式、demo 脚本
 - `docs/develop/OpenClaw_channel_plugin_接入指南.md` —— 完整协议规范（含历史决策与 TODO）
-- `backend/app/api/v1/openclaw_bridge/routes.py` —— 后端两条 WS 的权威实现
-- `backend/app/services/openclaw_bridge/` —— dispatcher / pending / token 等模块
+- `backend/app/api/v1/agent-bridge_bridge/routes.py` —— 后端两条 WS 的权威实现
+- `backend/app/services/agent_bridge/` —— dispatcher / pending / token 等模块

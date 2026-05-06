@@ -3,11 +3,11 @@ import {
   ArrowTopRightOnSquareIcon,
   ClipboardDocumentListIcon,
 } from "@heroicons/react/24/outline";
-import type { BotTraceEvent, Channel, ChannelBot, Message, WebsocketTaskContentData } from "../types";
+import type { BotTraceEvent, Channel, ChannelBot, Message, AgentBridgeTaskContentData } from "../types";
 import { formatTs } from "../lib/message";
 
 type TaskMessage = Message & {
-  content_data: WebsocketTaskContentData;
+  content_data: AgentBridgeTaskContentData;
 };
 
 interface TaskPageProps {
@@ -25,7 +25,7 @@ function taskTitle(task: TaskMessage): string {
 }
 
 function taskMessage(task: TaskMessage): string {
-  return task.content_data.message || task.content || "OpenClaw 已接收任务，完成后会自动更新这条回复。";
+  return task.content_data.message || task.content || "Agent Bridge 已接收任务，完成后会自动更新这条回复。";
 }
 
 function botLabel(task: TaskMessage, channelBots: ChannelBot[]): string {
@@ -34,7 +34,7 @@ function botLabel(task: TaskMessage, channelBots: ChannelBot[]): string {
 }
 
 function traceTitle(trace: BotTraceEvent): string {
-  return trace.title || trace.phase || trace.status || trace.stream || "OpenClaw";
+  return trace.title || trace.phase || trace.status || trace.stream || "Agent Bridge";
 }
 
 export function TaskPage({
@@ -161,7 +161,7 @@ export function TaskPage({
               </div>
 
               <div className="mt-5">
-                <h3 className="text-sm font-semibold">OpenClaw 过程</h3>
+                <h3 className="text-sm font-semibold">Agent Bridge 过程</h3>
                 {traces.length === 0 ? (
                   <div className="mt-2 rounded-md border p-3 text-sm" style={{ borderColor: "var(--border)", color: "var(--fg-3)" }}>
                     暂无 trace 事件；任务完成后这条消息会自动更新。

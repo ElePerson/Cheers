@@ -27,4 +27,4 @@ class APIResponse(BaseModel, Generic[T]):
 
     @classmethod
     def error(cls, message: str, request_id: str = "") -> "APIResponse[None]":
-        return cls(status="error", data=None, message=message, request_id=request_id)
+        return APIResponse[None](status="error", data=None, message=message, request_id=request_id)

@@ -182,7 +182,8 @@ async def _search_bing_cn(query: str, num_results: int, proxy: str | None) -> li
         if not link_tag:
             continue
         title = link_tag.get_text(strip=True)
-        href = link_tag.get("href", "")
+        href_value = link_tag.get("href", "")
+        href = href_value if isinstance(href_value, str) else ""
         if not href or not href.startswith("http"):
             continue
 

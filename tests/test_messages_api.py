@@ -289,11 +289,11 @@ async def test_create_message_returns_before_orchestrator_enqueue_completes(
     )
 
     assert secret_token is None
-    assert data["content"] == "returns immediately"
+    assert data.content == "returns immediately"
     assert len(background_tasks.tasks) == 1
     func, args, kwargs = background_tasks.tasks[0]
     assert func is message_routes._enqueue_orchestrator_bg
-    assert args == (ch.channel_id, data["msg_id"])
+    assert args == (ch.channel_id, data.msg_id)
     assert kwargs == {}
 
 

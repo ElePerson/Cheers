@@ -7,12 +7,12 @@ all-layers fallback for unknown types.
 """
 from __future__ import annotations
 
-from app.services.memory.channel_memory import ChannelMemory
-from app.services.pipeline.bot.stages.context_load import (
+from app.features.bot_runtime.pipeline.bot.stages.context_load import (
     build_memory_load_detail,
     select_memory_layers,
     should_build_memory,
 )
+from app.features.memory.channel_memory import ChannelMemory
 
 
 def test_normal_msg_loads_all_layers() -> None:

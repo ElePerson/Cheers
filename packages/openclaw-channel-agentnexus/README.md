@@ -1,15 +1,15 @@
 # openclaw-channel-agentnexus
 
-OpenClaw channel plugin for **AgentNexus**. One OpenClaw `account` = one AgentNexus `WebSocket Bot`, connected over the per-bot control + data WS bridge.
+OpenClaw channel plugin for **AgentNexus**. One OpenClaw `account` = one AgentNexus `Agent Bridge Bot`, connected over the per-bot control + data WS bridge.
 
 ```
 ┌────────────────────────────┐        ┌───────────────────────────┐
 │  OpenClaw (this plugin)    │        │  AgentNexus backend       │
 │                            │        │                           │
-│  createChatChannelPlugin(  │  ws    │  /ws/openclaw/control     │
+│  createChatChannelPlugin(  │  ws    │  /ws/agent-bridge/control     │
 │    {outbound.sendText,     │◄──────►│     (hello, join/left)    │
 │     gateway.start, ...}    │        │                           │
-│                            │  ws    │  /ws/openclaw/data        │
+│                            │  ws    │  /ws/agent-bridge/data        │
 │   ┌──────────────────┐     │◄──────►│     (message, reply, send)│
 │   │  BotSession      │     │        │                           │
 │   │   control + data │     │        │                           │
@@ -60,9 +60,9 @@ openclaw-channel-agentnexus  agentnexus  openclaw  loaded  …/dist/index.js  0.
 
 以下流程在 OpenClaw CLI `2026.4.15` 上实测通过。
 
-### 1. AgentNexus 侧准备一个 WebSocket Bot
+### 1. AgentNexus 侧准备一个 Agent Bridge Bot
 
-打开 AdminPage → Bot 管理 → 创建 Bot，选 **WebSocket Bot**。弹出的一次性 `ocw_...` token **立刻复制**，关闭后只能 rotate。
+打开 AdminPage → Bot 管理 → 创建 Bot，选 **Agent Bridge Bot**。弹出的一次性 `agb_...` token **立刻复制**，关闭后只能 rotate。
 
 把 bot 加进想让它工作的频道（频道成员里加 bot）。
 
@@ -80,11 +80,11 @@ openclaw-channel-agentnexus  agentnexus  openclaw  loaded  …/dist/index.js  0.
     "agentnexus": {
       "enabled": true,
       "accounts": {
-        "my-bot": {                    // 任意 ID，对应 AgentNexus 里的一个 WS Bot
+        "my-bot": {                    // 任意 ID，对应 AgentNexus 里的一个 Agent Bridge Bot
           "enabled": true,
-          "botToken": "ocw_xxxxxxxxxxxxxxxx",                       // 必填：第 1 步拿到的 token
-          "controlUrl": "ws://your-host:8002/ws/openclaw/control",  // 必填
-          "dataUrl":    "ws://your-host:8002/ws/openclaw/data",     // 必填
+          "botToken": "agb_xxxxxxxxxxxxxxxx",                       // 必填：第 1 步拿到的 token
+          "controlUrl": "ws://your-host:8002/ws/agent-bridge/control",  // 必填
+          "dataUrl":    "ws://your-host:8002/ws/agent-bridge/data",     // 必填
           "advanced": {                              // 可选，全部有合理默认
             "reconnectBaseMs": 1000,                 // 重连退避起点
             "reconnectMaxMs": 30000,                 // 重连退避上限
@@ -101,9 +101,9 @@ openclaw-channel-agentnexus  agentnexus  openclaw  loaded  …/dist/index.js  0.
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `botToken` | ✅ | AgentNexus 创建 WS Bot 时弹出的 `ocw_...` token，仅该次可见 |
-| `controlUrl` | ✅ | bridge 控制流，路径固定 `/ws/openclaw/control` |
-| `dataUrl` | ✅ | bridge 数据流，路径固定 `/ws/openclaw/data` |
+| `botToken` | ✅ | AgentNexus 创建 Agent Bridge Bot 时弹出的 `agb_...` token，仅该次可见 |
+| `controlUrl` | ✅ | bridge 控制流，路径固定 `/ws/agent-bridge/control` |
+| `dataUrl` | ✅ | bridge 数据流，路径固定 `/ws/agent-bridge/data` |
 | `enabled` | ❌ | 默认 `true`；置 `false` 临时禁用该 account |
 | `advanced.*` | ❌ | 重连 / 心跳 / ACK 超时；默认值适合大多数场景 |
 
@@ -120,7 +120,7 @@ openclaw channels status --probe
 验证 AgentNexus 后端是否收到 plugin 连接：
 
 ```bash
-curl -H "X-OpenClaw-Token: <BRIDGE_TOKEN>" http://localhost:8002/api/v1/openclaw/bridge/status
+curl -H "X-Agent-Bridge-Token: <BRIDGE_TOKEN>" http://localhost:8002/api/v1/agent-bridge/status
 # data.bot_sessions 应从 0 变成 1（或之前的数 +1）
 ```
 
@@ -163,8 +163,8 @@ import { BotSession } from "openclaw-channel-agentnexus";
 const session = new BotSession(
   {
     botToken: process.env.AGENTNEXUS_BOT_TOKEN!,
-    controlUrl: "ws://localhost:8002/ws/openclaw/control",
-    dataUrl: "ws://localhost:8002/ws/openclaw/data",
+    controlUrl: "ws://localhost:8002/ws/agent-bridge/control",
+    dataUrl: "ws://localhost:8002/ws/agent-bridge/data",
   },
   {
     onReady: () => console.log("ready", session.botId),

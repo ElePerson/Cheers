@@ -26,8 +26,8 @@ const {
 } = __testonly;
 
 const ACCOUNT_ID = "acc-test";
-const BOT_TOKEN = "ocw_test_token";
-const DATA_URL = "ws://127.0.0.1:0/ws/openclaw/data";
+const BOT_TOKEN = "agb_test_token";
+const DATA_URL = "ws://127.0.0.1:0/ws/agent-bridge/data";
 
 function fakeInbound(taskId: string, channelId: string): InboundMessage {
   return {
@@ -63,6 +63,13 @@ function installFakeEntry(taskId: string, channelId: string, opts: { placeholder
   if ("placeholder" in opts) {
     (inbound.event as { placeholder_msg_id: string | null }).placeholder_msg_id = opts.placeholder ?? null;
   }
+  const replyTarget = {
+    taskId,
+    placeholderMsgId: inbound.event.placeholder_msg_id ?? null,
+    channelId,
+    sessionKey: `agentnexus:${ACCOUNT_ID}:${channelId}`,
+    source: inbound,
+  };
   const session: FakeSession = {
     reply: vi.fn(async () => ({ ok: true, messageId: "msg-reply" })),
     send: vi.fn(async () => ({ ok: true, messageId: "msg-send" })),
@@ -95,6 +102,10 @@ function installFakeEntry(taskId: string, channelId: string, opts: { placeholder
     },
     lastInboundBySessionKey: new Map([[`agentnexus:${ACCOUNT_ID}:${channelId}`, inbound]]),
     lastInboundByTaskId: new Map([[taskId, inbound]]),
+    replyTargets: new Map([
+      [taskId, replyTarget],
+      [`agentnexus:${ACCOUNT_ID}:${channelId}`, replyTarget],
+    ]),
     bindingStore: new Map(),
     bindingAdapter: {} as never,
   });
@@ -287,6 +298,70 @@ describe("outbound.sendMedia + sendText (gateway deliver contract)", () => {
     // 槽位清干净
     expect(pendingStreamByTo.get("task-6")).toBeUndefined();
     expect(taskByPlaceholder.get("ph-task-6")).toBeUndefined();
+  });
+
+  it("子 conversation 输出继续写回父 placeholder", async () => {
+    const session = installFakeEntry("task-child-parent", "C1");
+    const entry = sessionRegistry.get(ACCOUNT_ID)!;
+    const parentTarget = entry.replyTargets.get("task-child-parent")!;
+    entry.replyTargets.set("child-conversation-1", parentTarget);
+
+    await sendText({ to: "child-conversation-1", text: "子", accountId: ACCOUNT_ID });
+    await sendText({ to: "child-conversation-1", text: "Bot", accountId: ACCOUNT_ID });
+
+    expect(session.streamDelta).toHaveBeenCalledTimes(2);
+    expect(session.streamDelta.mock.calls[0][0]).toMatchObject({
+      msgId: "ph-task-child-parent", seq: 1, delta: "子",
+    });
+    expect(session.streamDelta.mock.calls[1][0]).toMatchObject({
+      msgId: "ph-task-child-parent", seq: 2, delta: "Bot",
+    });
+    expect(pendingStreamByTo.get("task-child-parent")).toBeDefined();
+    expect(pendingStreamByTo.get("child-conversation-1")).toBeUndefined();
+    expect(taskByPlaceholder.get("ph-task-child-parent")).toBe("task-child-parent");
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(session.streamDone).toHaveBeenCalledTimes(1);
+    expect(session.streamDone.mock.calls[0][0]).toEqual({
+      msgId: "ph-task-child-parent",
+    });
+  });
+
+  it("binding metadata 可把 child conversation 解析回父 placeholder", async () => {
+    const session = installFakeEntry("task-binding-parent", "C1");
+    const entry = sessionRegistry.get(ACCOUNT_ID)!;
+    entry.replyTargets.delete("child-binding-1");
+    entry.bindingStore.set("sk-child", [
+      {
+        bindingId: "binding-child-1",
+        targetSessionKey: "sk-child",
+        targetKind: "subagent",
+        conversation: {
+          channel: "agentnexus",
+          accountId: ACCOUNT_ID,
+          conversationId: "child-binding-1",
+          parentConversationId: "task-binding-parent",
+        },
+        status: "active",
+        boundAt: Date.now(),
+        metadata: {
+          agentnexusTaskId: "task-binding-parent",
+          placeholderMsgId: null,
+          channelId: "C1",
+          sessionKey: "sk-child",
+        },
+      },
+    ]);
+
+    await sendText({ to: "child-binding-1", text: "绑定", accountId: ACCOUNT_ID });
+
+    expect(session.streamDelta).toHaveBeenCalledTimes(1);
+    expect(session.streamDelta.mock.calls[0][0]).toMatchObject({
+      msgId: "ph-task-binding-parent",
+      seq: 1,
+      delta: "绑定",
+    });
+    expect(pendingStreamByTo.get("task-binding-parent")).toBeDefined();
   });
 
   it("流式路径：data WS streamDelta 返回 false 时降级到 session.reply", async () => {

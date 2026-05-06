@@ -65,8 +65,8 @@ export type BotTraceEvent = {
   data?: Record<string, unknown>;
 };
 
-export type WebsocketTaskContentData = {
-  kind: "websocket_background_task";
+export type AgentBridgeTaskContentData = {
+  kind: "agent_bridge_background_task";
   status?: string;
   title?: string;
   message?: string;
@@ -123,7 +123,7 @@ export type Message = {
   is_partial?: boolean;
   _bot_status?: string;
   _bot_trace?: BotTraceEvent[];
-  _websocket_task?: WebsocketTaskContentData;
+  _agent_bridge_task?: AgentBridgeTaskContentData;
 };
 
 export type ContextData = Record<string, string>;

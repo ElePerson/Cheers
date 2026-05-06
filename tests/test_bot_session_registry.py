@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from app.services.openclaw_bridge.registry import BotSessionRegistry
+from app.features.agent_bridge.registry import BotSessionRegistry
 
 
 class FakeWS:

@@ -7,8 +7,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db.models import AIModel, BotAccount, Channel, ChannelMembership, MemoryEntry, PromptTemplate, Workspace
-from app.services.adapters.base import AgentPayload
-from app.services.adapters.channel_bot import ChannelBotAdapter
+from app.features.bot_runtime.adapters.base import AgentPayload
+from app.features.bot_runtime.adapters.channel_bot import ChannelBotAdapter
 
 
 def _payload(channel_id: str, text: str) -> AgentPayload:
@@ -63,8 +63,8 @@ async def test_update_anchor_persists_content() -> None:
     mock_llm.bind_tools = MagicMock(return_value=mock_llm)
 
     with (
-        patch("app.services.adapters.channel_bot._make_llm", return_value=mock_llm),
-        patch("app.services.adapters.channel_bot._get_llm_config", return_value={"base_url": "x", "model": "y"}),
+        patch("app.features.bot_runtime.adapters.channel_bot._make_llm", return_value=mock_llm),
+        patch("app.features.bot_runtime.adapters.channel_bot._get_llm_config", return_value={"base_url": "x", "model": "y"}),
         patch("app.db.session.async_session_factory", new=test_session_factory),
     ):
         adapter = ChannelBotAdapter()
@@ -106,8 +106,8 @@ async def test_update_anchor_empty_content_returns_error() -> None:
     mock_llm.bind_tools = MagicMock(return_value=mock_llm)
 
     with (
-        patch("app.services.adapters.channel_bot._make_llm", return_value=mock_llm),
-        patch("app.services.adapters.channel_bot._get_llm_config", return_value={"base_url": "x", "model": "y"}),
+        patch("app.features.bot_runtime.adapters.channel_bot._make_llm", return_value=mock_llm),
+        patch("app.features.bot_runtime.adapters.channel_bot._get_llm_config", return_value={"base_url": "x", "model": "y"}),
     ):
         adapter = ChannelBotAdapter()
         resp = await adapter.execute(_payload(channel_id, "清空锚点"))
@@ -119,7 +119,7 @@ async def test_update_anchor_empty_content_returns_error() -> None:
 @pytest.mark.skip(reason="Background task isolation issue - patches don't propagate to _run_orchestrator_bg")
 async def test_update_anchor_via_api(client, db_session) -> None:
     """通过 HTTP API 发送消息，触发 update_anchor，验证 memory_entries 中锚点已更新。"""
-    from app.services.guide.constants import GUIDE_BOT_ID
+    from app.features.bot_runtime.builtin_ids import HELPER_BOT_ID
 
     ws = Workspace(workspace_id="anc0-0000-0000-0000-000000000001", name="AnchorWS")
     ch = Channel(
@@ -131,7 +131,7 @@ async def test_update_anchor_via_api(client, db_session) -> None:
     model = _make_model("anc-model-0001")
     tpl = _make_template("anc-tpl-0001")
     bot = BotAccount(
-        bot_id=GUIDE_BOT_ID,
+        bot_id=HELPER_BOT_ID,
         username="channel bot",
         display_name="内置助手",
         model_id=model.model_id,
@@ -163,8 +163,8 @@ async def test_update_anchor_via_api(client, db_session) -> None:
     mock_llm.bind_tools = MagicMock(return_value=mock_llm)
 
     with (
-        patch("app.services.adapters.channel_bot._make_llm", return_value=mock_llm),
-        patch("app.services.adapters.channel_bot._get_llm_config", return_value={"base_url": "x", "model": "y"}),
+        patch("app.features.bot_runtime.adapters.channel_bot._make_llm", return_value=mock_llm),
+        patch("app.features.bot_runtime.adapters.channel_bot._get_llm_config", return_value={"base_url": "x", "model": "y"}),
     ):
         resp = await client.post(
             f"/api/v1/channels/{ch.channel_id}/messages",

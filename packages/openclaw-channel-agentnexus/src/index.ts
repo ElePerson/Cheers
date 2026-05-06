@@ -132,6 +132,12 @@ export default defineChannelPluginEntry<typeof agentnexusPlugin>({
               conversationId: body.taskId,
             },
             placement: "current",
+            metadata: {
+              agentnexusTaskId: body.taskId,
+              placeholderMsgId: body.placeholderMsgId ?? null,
+              channelId: body.channelId,
+              sessionKey: body.sessionKey,
+            },
           });
 
           // Step 2: 更新 session entry 的 last route —— deliver:true 从这里读

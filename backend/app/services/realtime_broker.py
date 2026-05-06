@@ -7,6 +7,7 @@ connections without changing the WebSocket frame shape.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import uuid
@@ -61,7 +62,9 @@ class RedisRealtimeBroker:
             socket_connect_timeout=1.0,
             socket_timeout=5.0,
         )
-        await self._redis.ping()
+        pong = self._redis.ping()
+        if inspect.isawaitable(pong):
+            await pong
         self._pubsub = self._redis.pubsub()
         await self._pubsub.psubscribe(_CHANNEL_PATTERN, _USER_PATTERN)
         self._task = asyncio.create_task(self._listen())

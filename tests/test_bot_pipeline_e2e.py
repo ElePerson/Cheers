@@ -9,9 +9,9 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import AIModel, BotAccount, Channel, ChannelMembership, PromptTemplate, Workspace
-from app.services.adapters.base import AgentPayload, AgentResponse, OpenClawAdapter
-from app.services.orchestrator.queue import stop_orchestrator_workers
-from app.services.pipeline.adapter_events import AdapterEvent, Delta, Final
+from app.features.bot_runtime.adapters.base import AgentPayload, AgentResponse, BotAdapter
+from app.features.bot_runtime.orchestrator.queue import stop_orchestrator_workers
+from app.features.bot_runtime.pipeline.adapter_events import AdapterEvent, Delta, Final
 
 TEST_USER_ID = "a0000000-0000-0000-0000-000000000099"
 
@@ -34,7 +34,7 @@ class RecordingBroker:
         self.user_frames.append((user_id, message))
 
 
-class StreamingAdapter(OpenClawAdapter):
+class StreamingAdapter(BotAdapter):
     async def execute(self, payload: AgentPayload) -> AgentResponse:
         return await self._drain_execute_iter(payload)
 
@@ -82,8 +82,8 @@ def _patch_background_session_factories(
         autocommit=False,
         autoflush=False,
     )
-    monkeypatch.setattr("app.services.orchestrator.jobs.async_session_factory", factory)
-    monkeypatch.setattr("app.services.pipeline.ingest.stages.async_session_factory", factory)
+    monkeypatch.setattr("app.features.bot_runtime.orchestrator.jobs.async_session_factory", factory)
+    monkeypatch.setattr("app.features.bot_runtime.pipeline.ingest.stages.async_session_factory", factory)
 
 
 async def _wait_for_bot_messages(
@@ -184,9 +184,9 @@ async def test_worker_bot_pipeline_emits_realtime_status_and_stream_frames(
     broker = RecordingBroker()
     monkeypatch.setattr("app.services.realtime_broker._broker", broker)
 
-    import app.services.orchestrator.jobs as jobs
+    import app.features.bot_runtime.orchestrator.jobs as jobs
 
-    async def adapter_factory(bot_id: str, session: AsyncSession) -> OpenClawAdapter:
+    async def adapter_factory(bot_id: str, session: AsyncSession) -> BotAdapter:
         return StreamingAdapter()
 
     monkeypatch.setattr(jobs, "get_adapter_for_bot", adapter_factory)

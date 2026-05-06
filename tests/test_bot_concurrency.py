@@ -6,11 +6,11 @@ import pytest
 
 from app.config import settings
 from app.db.models import Message
-from app.services.adapters.base import AgentResponse, OpenClawAdapter
-from app.services.pipeline.adapter_events import Final
-from app.services.pipeline.bot.capabilities import Capabilities
-from app.services.pipeline.bot.subagent import dispatch_many
-from app.services.pipeline.bus import NullEventBus
+from app.features.bot_runtime.adapters.base import AgentResponse, BotAdapter
+from app.features.bot_runtime.pipeline.adapter_events import Final
+from app.features.bot_runtime.pipeline.bot.capabilities import Capabilities
+from app.features.bot_runtime.pipeline.bot.subagent import dispatch_many
+from app.features.bot_runtime.pipeline.bus import NullEventBus
 
 
 class _Writer:
@@ -37,7 +37,7 @@ async def test_dispatch_many_respects_per_message_bot_concurrency(monkeypatch) -
     active = 0
     max_active = 0
 
-    class Adapter(OpenClawAdapter):
+    class Adapter(BotAdapter):
         async def execute(self, payload):
             return AgentResponse(content="ok", task_id=payload.task_id, success=True)
 
