@@ -126,6 +126,9 @@ async def test_bot_dm_scope_uses_user_bot_identity_not_channel_id(db_session: As
         (SCOPE_TASK, "task-dm-001", "alias"),
         (SCOPE_TASK, "task-dm-002", "alias"),
     }
+    dm_binding = next(b for b in bindings if b.scope_type == SCOPE_DM)
+    assert dm_binding.channel_id is None
+    assert dm_binding.dm_id is None
 
 
 @pytest.mark.asyncio
@@ -222,6 +225,14 @@ async def test_bot_dm_reuses_legacy_channel_scoped_binding(db_session: AsyncSess
     assert (SCOPE_DM, f"user:{user_id}:bot:{bot.bot_id}") in {
         (b.scope_type, b.scope_id) for b in bindings
     }
+    modern_dm_binding = next(
+        b for b in bindings if b.scope_type == SCOPE_DM and b.scope_id == f"user:{user_id}:bot:{bot.bot_id}"
+    )
+    legacy_dm_binding = next(b for b in bindings if b.scope_type == SCOPE_DM and b.scope_id == dm.channel_id)
+    assert modern_dm_binding.channel_id is None
+    assert modern_dm_binding.dm_id is None
+    assert legacy_dm_binding.channel_id == dm.channel_id
+    assert legacy_dm_binding.dm_id == dm.channel_id
 
 
 @pytest.mark.asyncio

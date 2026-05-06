@@ -232,6 +232,7 @@ async def _ensure_binding(
     channel_id: str | None,
     role: str,
 ) -> AgentNexusSessionBinding:
+    binding_channel_id = None if scope_type == SCOPE_DM else channel_id
     existing = await _find_binding_by_scope(
         db,
         bot_id=bot_id,
@@ -252,9 +253,9 @@ async def _ensure_binding(
                 openclaw_account_id=openclaw_account_id,
                 scope_type=scope_type,
                 scope_id=scope_id,
-                channel_id=channel_id,
+                channel_id=binding_channel_id,
                 topic_id=scope_id if scope_type == SCOPE_TOPIC else None,
-                dm_id=scope_id if scope_type == SCOPE_DM else None,
+                dm_id=None,
                 task_id=scope_id if scope_type == SCOPE_TASK else None,
                 role=role,
             )
