@@ -93,6 +93,9 @@ App.tsx
     │   │   ├── BotAvatar
     │   │   ├── BotSessionsPanel
     │   │   └── ModelBrandCard
+    │   ├── BotNewPane
+    │   ├── BotEditPane
+    │   ├── BotShared
     │   ├── TemplateListSubPane
     │   └── ModelListSubPane
     ├── FriendsPane
@@ -125,7 +128,12 @@ features/
     ├── bulletin/
     │   └── BulletinPane.tsx        # 留言板 Issue 列表、创建、状态切换
     ├── bots/
-    │   └── BotPane.tsx             # Bot 列表、新建、编辑、在线检测、模型/模板 tab
+    │   ├── BotPane.tsx             # Bot 设置 tab 入口，只编排 Bot/模板/模型子页
+    │   ├── BotListSubPane.tsx      # Bot 列表、刷新状态、进入新建/编辑
+    │   ├── BotNewPane.tsx          # HTTP / Agent Bridge Bot 新建向导
+    │   ├── BotEditPane.tsx         # Bot 详情、在线检测、模型/模板绑定、头像上传
+    │   ├── BotShared.tsx           # Bot scope 控件、在线徽标、展示辅助函数
+    │   └── types.ts                # BotRow、BotScope、ModelItem、TemplateItem
     ├── friends/
     │   └── FriendsPane.tsx          # 好友列表、申请、黑名单、添加好友
     ├── models/
@@ -142,7 +150,7 @@ features/
 - 一个 feature 可以复用 `shared`/`components` 的通用 UI，但不要反向依赖别的 feature 内部实现。
 - 从大文件迁移时优先切出完整业务闭环，如 `settings/friends`、`settings/bots`、`memory/files`。
 - `SettingsModal` 是设置页壳层：只持有顶层导航、Bot 列表加载、主题密度状态，不内联具体 pane 实现。
-- `settings/bots` 拥有 Bot 设置入口和 `BotRow` 类型；`SettingsModal` 只负责加载 Bot 列表并把数据传入 `BotPane`。
+- `settings/bots` 拥有 Bot 设置入口、列表钻取、新建/编辑表单、Bot 展示辅助和 `BotRow` 类型；`SettingsModal` 只负责加载 Bot 列表并把数据传入 `BotPane`。
 - `settings/models` 拥有模型管理闭环，并导出 `ModelBrandCard` / `modelBrandName` 给 Bot 创建与编辑复用。
 - feature 内如果出现第二个可跨 feature 复用的组件，应再下沉到 `components/` 或未来的 `shared/ui/`。
 
