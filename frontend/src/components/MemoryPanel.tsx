@@ -4,28 +4,16 @@ import { MessageMarkdown } from "../MessageMarkdown";
 import type { MemberItem, TodoItem, MemoryEntryItem } from "../types";
 import { LAYERS } from "../types";
 import { LAYER_META } from "../lib/layer-meta";
-import { downloadProtectedFile } from "../lib/protected-file";
 import { getAuthToken as getStoredToken } from "../api";
 import { AppIcon, FileTypeIcon } from "./icons";
 import { InviteMemberSearch } from "./InviteMemberSearch";
-import {
-  MemberAvatar,
-  MemberKindBadge,
-  MemberRow,
-  MemberSection,
-  resolveMemberKind,
-  resolveMemberLabel,
-  sortMembersByKind,
-} from "./members";
+import { SearchPicker } from "./SearchPicker";
+import { QuickAddFooter } from "../features/memory/editor/QuickAddFooter";
+import type { ChannelFilePreview } from "../features/memory/types";
+import { MembersView } from "../features/memory/views/MembersView";
+import { ProjectView } from "../features/memory/views/ProjectView";
 
 const API = "/api/v1";
-
-type ChannelFilePreview = {
-  file_id: string;
-  original_filename?: string | null;
-  content_type?: string | null;
-  size_bytes?: number | null;
-};
 
 // ── Memory Panel (right sidebar) ─────────────────────────────────────────────
 //
@@ -1243,8 +1231,29 @@ export function MemoryPanel({
               <p className="text-[11px] text-gray-400">{meta.desc}</p>
             </div>
           ) : (
-            <div className="divide-y divide-gray-100 overflow-y-auto">
-              {channelFiles.map((f) => {
+            <div className="flex h-full flex-col">
+              <div className="border-b border-gray-100 px-3 py-2">
+                <SearchPicker
+                  context="file_lookup"
+                  channelId={channelId}
+                  types={["files"]}
+                  modal
+                  placeholder="搜索文件名、摘要或类型"
+                  emptyText="没有匹配文件"
+                  actionLabel="预览"
+                  onSelect={(selection) => {
+                    if (selection.type !== "file") return;
+                    onFilePreview?.({
+                      file_id: selection.item.file_id,
+                      original_filename: selection.item.original_filename,
+                      content_type: selection.item.content_type,
+                      size_bytes: selection.item.size_bytes,
+                    });
+                  }}
+                />
+              </div>
+              <div className="divide-y divide-gray-100 overflow-y-auto">
+                {channelFiles.map((f) => {
                 const ct = f.content_type || "";
                 const typeLabel = ct.includes("pdf")
                   ? "PDF"
@@ -1303,23 +1312,18 @@ export function MemoryPanel({
                         </p>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        downloadProtectedFile(
-                          `${API}/files/${f.file_id}/download`,
-                          f.original_filename || f.file_id,
-                        ).catch(() => toast.error("文件下载失败"));
-                      }}
+                    <a
+                      href={`${API}/files/${f.file_id}/download`}
+                      onClick={(event) => event.stopPropagation()}
                       className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-700 transition-colors flex-shrink-0"
                       title="下载文件"
                     >
                       <AppIcon name="download" className="w-4 h-4" />
-                    </button>
+                    </a>
                   </div>
                 );
-              })}
+                })}
+              </div>
             </div>
           )
         ) : rawContent.trim() ? (
@@ -1346,514 +1350,5 @@ export function MemoryPanel({
         />
       )}
     </aside>
-  );
-}
-
-function QuickAddFooter({
-  channelId,
-  layer,
-  onAdded,
-}: {
-  channelId: string;
-  layer: string;
-  onAdded: () => void;
-}) {
-  const [v, setV] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    const text = v.trim();
-    if (!text || busy) return;
-    setBusy(true);
-    try {
-      const token = getStoredToken();
-      const res = await fetch(`${API}/channels/${channelId}/memory/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ layer, title: null, content: text }),
-      });
-      if (res.ok) {
-        setV("");
-        onAdded();
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div
-      className="flex items-center gap-2 flex-shrink-0"
-      style={{
-        padding: "10px 14px",
-        borderTop: "1px solid var(--border)",
-        background: "var(--bg-1)",
-      }}
-    >
-      <input
-        value={v}
-        onChange={(e) => setV(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          } else if (e.key === "Escape") {
-            setV("");
-          }
-        }}
-        placeholder="教一下 agents…"
-        disabled={busy}
-        className="an-input"
-        style={{
-          flex: 1,
-          fontSize: 12,
-          padding: "0 10px",
-          height: 28,
-          lineHeight: "28px",
-        }}
-      />
-      <button
-        type="button"
-        onClick={submit}
-        disabled={!v.trim() || busy}
-        className="an-btn an-btn-sm"
-        title="保存为一条新条目（Enter 亦可）"
-        style={{ height: 28, padding: "0 12px", flexShrink: 0 }}
-      >
-        {busy ? "…" : "保存"}
-      </button>
-    </div>
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Members view — a list of bots + people. Clicking a row opens a profile card
-// with back navigation, status, and quick actions.
-// ═════════════════════════════════════════════════════════════════════════════
-
-function MembersView({
-  members,
-  currentUserId,
-  profileLoading,
-  profileNickname,
-  profileBio,
-  profileSaving,
-  onProfileNicknameChange,
-  onProfileBioChange,
-  onSaveMyProfile,
-}: {
-  members: MemberItem[];
-  currentUserId?: string | null;
-  profileLoading: boolean;
-  profileNickname: string;
-  profileBio: string;
-  profileSaving: boolean;
-  onProfileNicknameChange: (value: string) => void;
-  onProfileBioChange: (value: string) => void;
-  onSaveMyProfile: () => void;
-}) {
-  const [selected, setSelected] = useState<MemberItem | null>(null);
-
-  const sortedMembers = sortMembersByKind(members, currentUserId);
-  const bots = sortedMembers.filter((m) => resolveMemberKind(m) === "bot");
-  const users = sortedMembers.filter((m) => resolveMemberKind(m) !== "bot");
-
-  if (selected) {
-    const kind = resolveMemberKind(selected);
-    const isBot = kind === "bot";
-    const isSelf = Boolean(currentUserId && selected.member_id === currentUserId && !isBot);
-    const label = resolveMemberLabel(selected, kind);
-    return (
-      <div className="overflow-y-auto px-3 py-2">
-        <div className="an-mem-detail">
-          <button
-            type="button"
-            className="an-md-back"
-            onClick={() => setSelected(null)}
-          >
-            ← 返回成员列表
-          </button>
-          <div className="an-md-head">
-            <MemberAvatar
-              avatarUrl={selected.avatar_url}
-              className="an-av"
-              kind={kind}
-              label={label}
-              size={44}
-            />
-            <div className="an-info">
-              <div className="an-n">
-                {label}
-                <MemberKindBadge kind={kind} />
-              </div>
-              <div className="an-h">
-                {selected.username && (
-                  <span className="an-d">@{selected.username}</span>
-                )}
-                {selected.username && (
-                  <span className="an-dot-sep">·</span>
-                )}
-                <span>{isBot ? "channel agent" : "channel member"}</span>
-              </div>
-            </div>
-          </div>
-
-          {isSelf ? (
-            <div className="an-md-section">
-              <div className="an-lbl">我的频道资料</div>
-              {profileLoading ? (
-                <div className="text-xs text-gray-400 py-3">加载中…</div>
-              ) : (
-                <div className="space-y-2">
-                  <input
-                    value={profileNickname}
-                    onChange={(e) => onProfileNicknameChange(e.target.value)}
-                    placeholder="频道昵称"
-                    maxLength={64}
-                    className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
-                  />
-                  <textarea
-                    value={profileBio}
-                    onChange={(e) => onProfileBioChange(e.target.value)}
-                    placeholder="在本频道的身份介绍…"
-                    rows={3}
-                    className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 resize-none focus:outline-none focus:border-blue-400"
-                  />
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={onSaveMyProfile}
-                      disabled={profileSaving}
-                      className="text-[11px] px-2.5 py-1 rounded bg-[#1264A3] text-white hover:bg-[#0f5a94] disabled:opacity-50"
-                    >
-                      {profileSaving ? "保存中…" : "保存资料"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="an-md-section">
-              <div className="an-lbl">简介 · About</div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--fg-2)",
-                  lineHeight: 1.5,
-                }}
-              >
-                {isBot
-                  ? "本频道的智能体，协同其他成员完成任务。"
-                  : "本频道的用户成员。"}
-              </div>
-            </div>
-          )}
-
-          <div className="an-md-section">
-            <div className="an-lbl">资料 · Profile</div>
-            <div className="an-md-kv">
-              <div className="an-k">ID</div>
-              <div className="an-v" style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
-                {selected.member_id}
-              </div>
-              <div className="an-k">类型</div>
-              <div className="an-v">{isBot ? "Bot 智能体" : "人类成员"}</div>
-              {selected.username && (
-                <>
-                  <div className="an-k">用户名</div>
-                  <div className="an-v">@{selected.username}</div>
-                </>
-              )}
-              {selected.display_name && (
-                <>
-                  <div className="an-k">显示名</div>
-                  <div className="an-v">{selected.display_name}</div>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="an-md-actions">
-            <button type="button">私聊</button>
-            <button type="button">{isBot ? "查看日志" : "资料卡"}</button>
-            <button type="button" className="primary">
-              @ 提及
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="an-members-list min-h-0 flex-1 overflow-y-auto px-3 py-2">
-        {bots.length > 0 && (
-          <MemberSection title="Agents · 智能体" count={bots.length}>
-            {bots.map((m) => (
-              <MemberRow
-                key={m.member_id}
-                as="button"
-                member={m}
-                onClick={() => setSelected(m)}
-                action={<span className="an-chev" aria-hidden="true">›</span>}
-              />
-            ))}
-          </MemberSection>
-        )}
-        {users.length > 0 && (
-          <MemberSection title="People · 成员" count={users.length}>
-            {users.map((m) => {
-              const isSelf = Boolean(currentUserId && m.member_id === currentUserId);
-              return (
-                <MemberRow
-                  key={m.member_id}
-                  as="button"
-                  member={m}
-                  onClick={() => setSelected(m)}
-                  badge={isSelf ? <span className="an-tag-pill self">我</span> : undefined}
-                  title={isSelf ? "我的频道资料" : undefined}
-                  action={<span className="an-chev" aria-hidden="true">›</span>}
-                />
-              );
-            })}
-          </MemberSection>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Project view — design's PROJECT tab rendered as a journey diagram.
-// Anchor node with progress ring, legend, a vertical river of decision /
-// progress nodes (chronological), and a dashed end-node with the goal state.
-// ═════════════════════════════════════════════════════════════════════════════
-
-function ProjectView({
-  anchors,
-  progress,
-  decisions,
-  loading,
-}: {
-  anchors: MemoryEntryItem[];
-  progress: MemoryEntryItem[];
-  decisions: MemoryEntryItem[];
-  loading: boolean;
-}) {
-  if (loading) {
-    return (
-      <div
-        className="flex items-center justify-center h-20 text-xs"
-        style={{ color: "var(--fg-3)" }}
-      >
-        加载中…
-      </div>
-    );
-  }
-
-  const doneRe = /done|完成|已做|shipped|merged|resolved|批准|approved/i;
-  const isDone = (e: MemoryEntryItem) =>
-    doneRe.test(e.content + " " + (e.title || ""));
-  const progressDone = progress.filter(isDone).length;
-  const progressPending = progress.length - progressDone;
-  const totalSteps = progress.length + decisions.length;
-  const completed = progressDone + decisions.length;
-  const pct = totalSteps === 0 ? 0 : Math.round((completed / totalSteps) * 100);
-
-  // Chronological river combining progress + decisions (oldest first).
-  const tsOf = (e: MemoryEntryItem) => e.updated_at || e.created_at || "";
-  const river = [
-    ...progress.map((e) => ({
-      item: e,
-      kind: isDone(e) ? "progress" : "progress-pending",
-      ts: tsOf(e),
-    })),
-    ...decisions.map((e) => ({
-      item: e,
-      kind: "decision",
-      ts: tsOf(e),
-    })),
-  ].sort((a, b) => (a.ts < b.ts ? -1 : 1));
-
-  const [primaryAnchor, ...restAnchors] = anchors;
-  const empty =
-    anchors.length === 0 && progress.length === 0 && decisions.length === 0;
-
-  // Progress ring geometry
-  const R = 22;
-  const C = 2 * Math.PI * R;
-  const off = C * (1 - pct / 100);
-
-  if (empty) {
-    return (
-      <div className="px-3 py-3">
-        <div
-          className="text-center py-10 text-xs"
-          style={{ color: "var(--fg-3)" }}
-        >
-          暂无项目锚点与进度。
-          <br />
-          点击右上角“编辑”添加 Anchor / Progress 后会显示在这里。
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="px-3 py-3">
-      <div className="an-journey">
-        {primaryAnchor && (
-          <div className="an-anchor-node">
-            <div className="an-ring">
-              <svg viewBox="0 0 52 52">
-                <circle className="an-ring-track" cx="26" cy="26" r={R} />
-                <circle
-                  className="an-ring-fill"
-                  cx="26"
-                  cy="26"
-                  r={R}
-                  strokeDasharray={C}
-                  strokeDashoffset={off}
-                />
-              </svg>
-              <div className="an-ring-pct">{pct}%</div>
-            </div>
-            <div className="an-info">
-              <div className="an-tg">Anchor</div>
-              {primaryAnchor.title && (
-                <div
-                  className="an-tx"
-                  style={{ fontWeight: 600, marginBottom: 2 }}
-                >
-                  {primaryAnchor.title}
-                </div>
-              )}
-              <div className="an-tx">
-                <MessageMarkdown text={primaryAnchor.content} />
-              </div>
-              <div className="an-mt">
-                {completed} / {totalSteps} 步
-                {primaryAnchor.updated_at && (
-                  <> · {new Date(primaryAnchor.updated_at).toLocaleString()}</>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {restAnchors.length > 0 && (
-          <div style={{ marginTop: 8, paddingLeft: 2 }}>
-            {restAnchors.map((a) => (
-              <div
-                key={a.entry_id}
-                style={{
-                  fontSize: 11.5,
-                  color: "var(--fg-2)",
-                  padding: "4px 0",
-                  display: "flex",
-                  gap: 6,
-                  alignItems: "baseline",
-                }}
-              >
-                <span
-                  style={{
-                    width: 4,
-                    height: 4,
-                    borderRadius: "50%",
-                    background: "var(--accent)",
-                    display: "inline-block",
-                    marginRight: 4,
-                    flexShrink: 0,
-                  }}
-                />
-                <span style={{ flex: 1 }}>{a.title || a.content}</span>
-                {a.updated_at && (
-                  <span style={{ fontSize: 10.5, color: "var(--fg-3)" }}>
-                    {new Date(a.updated_at).toLocaleDateString()}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="an-legend">
-          <span className="an-lg decision">
-            <span className="an-sq" />
-            Decision
-          </span>
-          <span className="an-lg progress">
-            <span className="an-sq" />
-            Progress
-          </span>
-          <span className="an-lg todo">
-            <span className="an-sq" />
-            Pending
-          </span>
-        </div>
-
-        {river.length > 0 && (
-          <>
-            <div className="an-sh first">Path so far</div>
-            <div className="an-river">
-              {river.map(({ item, kind }) => {
-                const isPending = kind === "progress-pending";
-                const rowCls = isPending
-                  ? "an-riv todo"
-                  : kind === "decision"
-                    ? "an-riv decision"
-                    : "an-riv progress";
-                const kindLabel =
-                  kind === "decision"
-                    ? "Decision"
-                    : isPending
-                      ? "In progress"
-                      : "Progress";
-                return (
-                  <div key={item.entry_id} className={rowCls}>
-                    <span className="an-marker" />
-                    <div className="an-card">
-                      <div className="an-kind">{kindLabel}</div>
-                      {item.title && (
-                        <div
-                          className="an-tx"
-                          style={{ fontWeight: 600, marginBottom: 2 }}
-                        >
-                          {item.title}
-                        </div>
-                      )}
-                      <div className="an-tx">
-                        <MessageMarkdown text={item.content} />
-                      </div>
-                      {item.updated_at && (
-                        <div className="an-mt">
-                          {new Date(item.updated_at).toLocaleString()}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        <div className="an-end-node">
-          <div className="an-cir" />
-          <div className="an-tx">
-            <b>Goal state.</b>{" "}
-            {progressPending === 0 && totalSteps > 0
-              ? "All known steps complete."
-              : progressPending > 0
-                ? `${progressPending} step${progressPending === 1 ? "" : "s"} in progress toward anchor.`
-                : "Waiting on first progress entry."}
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
