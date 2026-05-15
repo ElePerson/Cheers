@@ -1,5 +1,4 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import toast from "react-hot-toast";
 import NotificationPanel from "./NotificationPanel";
 import { useTheme } from "./useTheme";
@@ -23,34 +22,22 @@ import { ChannelMainFrame } from "./components/app/ChannelMainFrame";
 import { ChatShell } from "./components/app/ChatShell";
 import { ChatSidePanels } from "./components/app/ChatSidePanels";
 import { ChatWorkspaceView } from "./features/chat/ChatWorkspaceView";
+import { useChannelMessages } from "./features/chat/hooks/useChannelMessages";
+import { useChatRealtime } from "./features/chat/hooks/useChatRealtime";
 import { useComposerController } from "./features/chat/hooks/useComposerController";
 import { usePendingFiles } from "./features/chat/hooks/usePendingFiles";
 import { MessageDetailModal } from "./components/app/MessageDetailModal";
 import { AgentBridgeTaskCard } from "./features/chat/messages/AgentBridgeTaskCard";
 import { apiFetch, buildWsUrl } from "./api";
-import {
-  parseHelperPayload,
-  isClarifyReplyUserMessage,
-} from "./lib/helper";
-import {
-  buildTopicTree,
-  isMsgReply,
-  mergeMessagesChronologically,
-} from "./lib/message";
+import { parseHelperPayload } from "./lib/helper";
 import { refreshChannels, refreshDMs, refreshWorkspaces } from "./lib/refresh";
 import { API, API_DOCS_URL } from "./lib/app-config";
 import { applyDensity, getStoredDensity } from "./lib/density";
 import {
-  AGENT_BRIDGE_TASK_KIND,
   getActiveAgentBridgeTaskData,
   getAgentBridgeTaskData,
   type AgentBridgeTaskMessage,
 } from "./lib/agent-bridge";
-import {
-  botTraceStatusText,
-  makeClientStreamTrace,
-  trimBotTraceEvents,
-} from "./lib/bot-trace";
 import {
   buildChatPath,
   buildChatSearch,
@@ -59,19 +46,11 @@ import {
 } from "./lib/chat-routing";
 import {
   MAX_LOADED_MESSAGES,
-  trimToRecentMessages,
   VIRTUAL_MESSAGE_ESTIMATED_HEIGHT,
-  type PendingStreamDelta,
 } from "./lib/message-window";
 import {
-  emptyMessageStore,
-  messagesToStore,
   patchMessage,
-  patchMessages,
-  storeToMessages,
-  trimMessageStoreToRecent,
   upsertMessage,
-  type MessageStore,
 } from "./lib/message-store";
 import type {
   Channel,
@@ -79,7 +58,6 @@ import type {
   Workspace,
   Message,
   FileInfo,
-  BotTraceEvent,
   ContextData,
   ClarifySchema,
   ClarifyAnswers,
@@ -235,25 +213,7 @@ export default function App() {
       setComposerTitle("");
     }
   }, [isDmSelected, selectedId]);
-  const [messageStore, setMessageStore] = useState<MessageStore>(() =>
-    emptyMessageStore(),
-  );
-  const messages = useMemo(() => storeToMessages(messageStore), [messageStore]);
-  const setMessages = useCallback(
-    (next: Message[] | ((prev: Message[]) => Message[])) => {
-      setMessageStore((prevStore) => {
-        const prevMessages = storeToMessages(prevStore);
-        const nextMessages =
-          typeof next === "function" ? next(prevMessages) : next;
-        return messagesToStore(nextMessages);
-      });
-    },
-    [],
-  );
-  const streamDeltaBufferRef = useRef<Record<string, PendingStreamDelta>>({});
-  const streamDeltaRafRef = useRef<number | null>(null);
   const [memoryDetailMessage, setMemoryDetailMessage] = useState<Message | null>(null);
-  const [loading, setLoading] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // memoryTab drives the 4-tab cluster in the channel header + the drawer.
@@ -451,12 +411,32 @@ export default function App() {
   const [_expandedOlderIds, _setExpandedOlderIds] = useState<Set<string>>(
     new Set(),
   );
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const isLoadingOlderRef = useRef(false);
-  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
-  const stickToBottomRef = useRef(true);
-  const lastAutoScrollChannelRef = useRef<string | null>(null);
+  const {
+    setMessageStore,
+    messages,
+    setMessages,
+    loading,
+    hasMore,
+    loadingMore,
+    messagesContainerRef,
+    handleMessagesScroll,
+    topicRoots,
+    topicRepliesOf,
+    msgById,
+    clarifyAnsweredParentIds,
+    rowVirtualizer,
+    virtualItems,
+    pageTopicSourceMessages,
+    pageTopicRepliesOf,
+  } = useChannelMessages({
+    selectedId,
+    isDmSelected,
+    authFetch,
+    selectedIdRef,
+    pendingScrollMsgIdRef,
+    pageTopicMessages,
+    setExpandedTopics,
+  });
   const [processingBots, setProcessingBots] = useState<Record<string, string>>(
     {},
   );
@@ -482,7 +462,6 @@ export default function App() {
     setDMs([]);
     setWorkspaces([]);
     setMessages([]);
-    setHasMore(true);
     setLoginModalOpen(true);
   };
 
@@ -681,21 +660,17 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedId) {
-      setMessages([]);
-      setHasMore(true);
       setChannelBots([]);
       setChannelUsers([]);
       setProcessingBots({});
       setAutoAssist(false);
       setReplyingTo(null);
-      setLoading(false);
       return;
     }
     const targetChannelId = selectedId;
     const controller = new AbortController();
     const ch = channels.find((c) => c.channel_id === targetChannelId);
     setAutoAssist(ch?.auto_assist ?? false);
-    setLoading(true);
 
     authFetch(`${API}/channels/${targetChannelId}/members?with_username=1`, {
       signal: controller.signal,
@@ -762,450 +737,17 @@ export default function App() {
         setChannelUsers([]);
       });
 
-    authFetch(`${API}/channels/${targetChannelId}/messages`, {
-      signal: controller.signal,
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        if (controller.signal.aborted || selectedIdRef.current !== targetChannelId) return;
-        const data = d.data || [];
-        const visibleData = trimToRecentMessages(data);
-        setMessages(visibleData);
-        setHasMore(
-          Boolean(d.meta?.has_more ?? data.length >= 30) &&
-          visibleData.length < MAX_LOADED_MESSAGES,
-        );
-      })
-      .catch((error) => {
-        if ((error as { name?: string }).name === "AbortError") return;
-        if (selectedIdRef.current !== targetChannelId) return;
-        console.error(error);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted && selectedIdRef.current === targetChannelId) {
-          setLoading(false);
-        }
-      });
-
     return () => controller.abort();
-  }, [authFetch, authToken, channels, selectedId]);
+  }, [authFetch, channels, selectedId, setReplyingTo]);
 
-  // ── 上划加载更多历史消息 ──────────────────────────────────────────────────
-  const loadMoreMessages = useCallback(async () => {
-    if (!selectedId || !hasMore || loadingMore) return;
-    if (messages.length >= MAX_LOADED_MESSAGES) {
-      setHasMore(false);
-      return;
-    }
-    const targetChannelId = selectedId;
-    const oldest = messages[0];
-    if (!oldest) return;
-    setLoadingMore(true);
-    isLoadingOlderRef.current = true;
-    const container = messagesContainerRef.current;
-    const prevScrollHeight = container?.scrollHeight ?? 0;
-    try {
-      const r = await authFetch(
-        `${API}/channels/${targetChannelId}/messages?before_id=${oldest.msg_id}&limit=50`,
-      );
-      const d = await r.json();
-      const older = d.data || [];
-      if (older.length === 0) {
-        setHasMore(false);
-        return;
-      }
-      if (selectedIdRef.current !== targetChannelId) return;
-      const hitWindowCap = messages.length + older.length >= MAX_LOADED_MESSAGES;
-      setHasMore(
-        !hitWindowCap && Boolean(d.meta?.has_more ?? older.length >= 50),
-      );
-      setMessageStore((prev) =>
-        trimMessageStoreToRecent(
-          messagesToStore([...older, ...storeToMessages(prev)]),
-          MAX_LOADED_MESSAGES,
-        ),
-      );
-      // 恢复滚动位置
-      requestAnimationFrame(() => {
-        if (container) {
-          container.scrollTop = container.scrollHeight - prevScrollHeight;
-          stickToBottomRef.current =
-            container.scrollHeight - container.scrollTop - container.clientHeight < 160;
-        }
-        isLoadingOlderRef.current = false;
-      });
-    } catch (e) {
-      console.error(e);
-      isLoadingOlderRef.current = false;
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [selectedId, hasMore, loadingMore, messages, authFetch]);
-
-  const handleMessagesScroll = useCallback(
-    (e: React.UIEvent<HTMLDivElement>) => {
-      const target = e.currentTarget;
-      stickToBottomRef.current =
-        target.scrollHeight - target.scrollTop - target.clientHeight < 160;
-      if (target.scrollTop < 100 && hasMore && !loadingMore) {
-        loadMoreMessages();
-      }
-    },
-    [hasMore, loadingMore, loadMoreMessages],
-  );
-
-  const flushStreamDeltaBuffer = useCallback(() => {
-    const pending = streamDeltaBufferRef.current;
-    streamDeltaBufferRef.current = {};
-    if (streamDeltaRafRef.current !== null) {
-      cancelAnimationFrame(streamDeltaRafRef.current);
-      streamDeltaRafRef.current = null;
-    }
-
-    const entries = Object.entries(pending).filter(
-      ([, item]) => item.delta.length > 0,
-    );
-    if (entries.length === 0) return;
-
-    setMessageStore((prev) =>
-      patchMessages(
-        prev,
-        entries.map(([msgId, item]) => ({
-          msgId,
-          update: (m) => {
-            const taskData =
-              m.content_data?.kind === AGENT_BRIDGE_TASK_KIND
-                ? (m.content_data as AgentBridgeTaskContentData)
-                : m._agent_bridge_task;
-            const switchingFromTaskCard =
-              m.content_data?.kind === AGENT_BRIDGE_TASK_KIND;
-            const nextContent = switchingFromTaskCard
-              ? item.delta
-              : `${m.content || ""}${item.delta}`;
-            return {
-              ...m,
-              content: nextContent,
-              content_data: switchingFromTaskCard ? null : m.content_data,
-              _agent_bridge_task: taskData
-                ? {
-                    ...taskData,
-                    status: "streaming",
-                    message: "正在接收 provider 输出。",
-                  }
-                : m._agent_bridge_task,
-              _bot_trace: trimBotTraceEvents([
-                ...(m._bot_trace || []),
-                makeClientStreamTrace(
-                  m,
-                  "message_stream",
-                  "收到流式片段",
-                  {
-                    event_type: "message_stream",
-                    delta_chars: item.delta.length,
-                    delta_preview: item.delta.slice(0, 160),
-                    accumulated_chars: nextContent.length,
-                    coalesced_chunks: item.chunks,
-                  },
-                  item.chunks > 1
-                    ? `+${item.delta.length} chars / ${item.chunks} chunks`
-                    : `+${item.delta.length} chars`,
-                ),
-              ]),
-              _streaming: true,
-            };
-          },
-        })),
-      ),
-    );
-  }, []);
-
-  const queueStreamDelta = useCallback(
-    (msgId: unknown, value: unknown) => {
-      const id = typeof msgId === "string" ? msgId : "";
-      const delta =
-        typeof value === "string" ? value : value == null ? "" : String(value);
-      if (!id || !delta) return;
-
-      const current = streamDeltaBufferRef.current[id];
-      streamDeltaBufferRef.current[id] = {
-        delta: `${current?.delta || ""}${delta}`,
-        chunks: (current?.chunks || 0) + 1,
-      };
-      if (streamDeltaRafRef.current === null) {
-        streamDeltaRafRef.current = requestAnimationFrame(() => {
-          streamDeltaRafRef.current = null;
-          flushStreamDeltaBuffer();
-        });
-      }
-    },
-    [flushStreamDeltaBuffer],
-  );
-
-  useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-
-    const updateMetrics = () => {
-      stickToBottomRef.current =
-        container.scrollHeight - container.scrollTop - container.clientHeight < 160;
-    };
-
-    updateMetrics();
-    const observer = new ResizeObserver(updateMetrics);
-    observer.observe(container);
-    return () => {
-      observer.disconnect();
-    };
-  }, [selectedId]);
-
-  // Scroll to a pending message after channel switch + messages load
-  useEffect(() => {
-    const msgId = pendingScrollMsgIdRef.current;
-    if (!msgId || loading || messages.length === 0) return;
-    pendingScrollMsgIdRef.current = null;
-    setTimeout(() => {
-      const el = document.getElementById(`msg-${msgId}`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        return;
-      }
-      const idx = messages.findIndex((m) => m.msg_id === msgId);
-      const container = messagesContainerRef.current;
-      if (idx >= 0 && container) {
-        container.scrollTop = Math.max(0, idx * VIRTUAL_MESSAGE_ESTIMATED_HEIGHT - container.clientHeight / 2);
-      }
-    }, 100);
-  }, [messages, loading]);
-
-  useEffect(() => {
-    if (!selectedId) return;
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let retryCount = 0;
-    let disposed = false;
-    const MAX_RETRIES = 10;
-    const BASE_DELAY = 1000;
-    const MAX_DELAY = 30000;
-
-    function connect() {
-      if (disposed) return;
-      ws = new WebSocket(buildWsUrl(`/ws/channels/${selectedId}`));
-
-      ws.onopen = () => {
-        retryCount = 0;
-      };
-
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          if (msg.type === "bot_processing" && msg.data) {
-            const { bot_id, username } = msg.data;
-            if (bot_id) {
-              setProcessingBots((prev) => ({
-                ...prev,
-                [bot_id]: username || bot_id,
-              }));
-            }
-          } else if (msg.type === "message" && msg.data) {
-            // Bot placeholder arrived → clear the per-bot thinking indicator.
-            if (msg.data.sender_type === "bot" && msg.data.sender_id) {
-              setProcessingBots((prev) => {
-                if (!(msg.data.sender_id in prev)) return prev;
-                const next = { ...prev };
-                delete next[msg.data.sender_id];
-                return next;
-              });
-            }
-            setMessageStore((prev) => {
-              const incoming = msg.data as Message;
-              const id = incoming.msg_id;
-              if (id && prev.byId[id]) {
-                // Already present — merge post-hoc updates (e.g. permission
-                // card resolution flipping content_data.resolved). Keep any
-                // client-local transient fields like _streaming.
-                return patchMessage(prev, id, (m) => ({
-                  ...m,
-                  content: incoming.content ?? m.content,
-                  content_data: incoming.content_data ?? m.content_data,
-                  msg_type: incoming.msg_type ?? m.msg_type,
-                }));
-              }
-              const entry =
-                incoming.sender_type === "bot"
-                  ? {
-                      ...incoming,
-                      _streaming: true,
-                      _bot_trace: [
-                        makeClientStreamTrace(
-                          incoming,
-                          "placeholder",
-                          "创建 Bot 回复占位",
-                          { event_type: "message" },
-                        ),
-                      ],
-                    }
-                  : incoming;
-              return upsertMessage(prev, entry, MAX_LOADED_MESSAGES);
-            });
-            if (
-              msg.data.sender_type === "bot" &&
-              typeof msg.data.content === "string" &&
-              msg.data.content.includes("已更新记忆层")
-            ) {
-              authFetch(`${API}/channels/${selectedId}/context`)
-                .then((r) => r.json())
-                .then((d) => d.data && setContextData(d.data))
-                .catch(() => {});
-            }
-          } else if (msg.type === "message_stream" && msg.data) {
-            const { msg_id, delta } = msg.data;
-            queueStreamDelta(msg_id, delta);
-          } else if (msg.type === "bot_trace" && msg.data) {
-            const trace = msg.data as BotTraceEvent;
-            if (!trace.msg_id) return;
-            const status = botTraceStatusText(trace);
-            setMessageStore((prev) =>
-              patchMessage(prev, trace.msg_id!, (m) => ({
-                ...m,
-                _bot_status: status,
-                _bot_trace: trimBotTraceEvents([
-                  ...(m._bot_trace || []),
-                  { ...trace, ts: trace.ts ?? Date.now() },
-                ]),
-              })),
-            );
-          } else if (msg.type === "message_done" && msg.data) {
-            const { msg_id, content, files, file_ids, is_partial, error } = msg.data;
-            flushStreamDeltaBuffer();
-            const hasContentData = Object.prototype.hasOwnProperty.call(
-              msg.data,
-              "content_data",
-            );
-            const nextContentData = hasContentData
-              ? msg.data.content_data
-              : undefined;
-            setMessageStore((prev) =>
-              patchMessage(prev, msg_id, (m) => {
-                const priorTask =
-                  m.content_data?.kind === AGENT_BRIDGE_TASK_KIND
-                    ? (m.content_data as AgentBridgeTaskContentData)
-                    : m._agent_bridge_task;
-                const nextTask =
-                  nextContentData?.kind === AGENT_BRIDGE_TASK_KIND
-                    ? (nextContentData as AgentBridgeTaskContentData)
-                    : priorTask
-                      ? {
-                          ...priorTask,
-                          status: error
-                            ? "error"
-                            : is_partial
-                              ? "partial"
-                              : "done",
-                          message: error
-                            ? String(error)
-                            : is_partial
-                              ? "任务已中断，已保留当前输出。"
-                              : "任务已完成。",
-                        }
-                      : m._agent_bridge_task;
-                return {
-                  ...m,
-                  content,
-                  content_data:
-                    nextContentData !== undefined
-                      ? nextContentData
-                      : m.content_data?.kind === AGENT_BRIDGE_TASK_KIND
-                        ? null
-                        : m.content_data,
-                  _agent_bridge_task: nextTask,
-                  _streaming: false,
-                  _bot_trace: trimBotTraceEvents([
-                    ...(m._bot_trace || []),
-                    makeClientStreamTrace(
-                      m,
-                      error
-                        ? "message_done_error"
-                        : is_partial
-                          ? "message_done_partial"
-                          : "message_done",
-                      error
-                        ? "流式回复出错"
-                        : is_partial
-                          ? "流式回复中断"
-                          : "流式回复完成",
-                      {
-                        event_type: "message_done",
-                        content_chars: String(content || "").length,
-                        is_partial: Boolean(is_partial),
-                        error: error || null,
-                        file_count: Array.isArray(files)
-                          ? files.length
-                          : Array.isArray(file_ids)
-                            ? file_ids.length
-                            : 0,
-                      },
-                      error
-                        ? String(error)
-                        : `${String(content || "").length} chars`,
-                    ),
-                  ]),
-                  _bot_status: undefined,
-                  ...(files ? { files } : {}),
-                  ...(file_ids ? { file_ids } : {}),
-                  ...(typeof is_partial === "boolean"
-                    ? { is_partial }
-                    : {}),
-                };
-              }),
-            );
-            if (
-              typeof content === "string" &&
-              content.includes("已更新记忆层")
-            ) {
-              authFetch(`${API}/channels/${selectedId}/context`)
-                .then((r) => r.json())
-                .then((d) => d.data && setContextData(d.data))
-                .catch(() => {});
-            }
-          }
-        } catch {}
-      };
-
-      ws.onerror = () => {
-        reportClientError(
-          "WS",
-          `/ws/channels/${selectedId}`,
-          0,
-          "websocket error",
-        );
-      };
-
-      ws.onclose = () => {
-        if (disposed) return;
-        if (retryCount < MAX_RETRIES) {
-          const delay = Math.min(
-            BASE_DELAY * Math.pow(2, retryCount),
-            MAX_DELAY,
-          );
-          retryCount++;
-          reconnectTimer = setTimeout(connect, delay);
-        }
-      };
-    }
-
-    connect();
-
-    return () => {
-      disposed = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (streamDeltaRafRef.current !== null) {
-        cancelAnimationFrame(streamDeltaRafRef.current);
-        streamDeltaRafRef.current = null;
-      }
-      streamDeltaBufferRef.current = {};
-      if (ws) ws.close();
-    };
-  }, [selectedId, reportClientError, flushStreamDeltaBuffer, queueStreamDelta]);
+  useChatRealtime({
+    selectedId,
+    authFetch,
+    setContextData,
+    setMessageStore,
+    setProcessingBots,
+    reportClientError,
+  });
 
   // User-scoped WebSocket: receives lightweight notifications for channels
   // the user isn't currently viewing. Used to live-increment rail unread
@@ -1922,19 +1464,6 @@ export default function App() {
     };
   })();
 
-  // 进入频道或收到新消息时，聊天区域滚动到最新消息（加载旧消息时跳过）
-  useEffect(() => {
-    if (!messagesContainerRef.current || isLoadingOlderRef.current) return;
-    const container = messagesContainerRef.current;
-    const channelChanged = lastAutoScrollChannelRef.current !== selectedId;
-    lastAutoScrollChannelRef.current = selectedId ?? null;
-    if (!channelChanged && !stickToBottomRef.current) return;
-    requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
-      stickToBottomRef.current = true;
-    });
-  }, [selectedId, messages.length]);
-
   // 打开频道时把未读标记为已读：先在本地把徽标清零（立即反馈），再向后端
   // 同步阅读游标。失败不回滚徽标——下次加载频道列表时会重新计算。
   useEffect(() => {
@@ -1965,33 +1494,6 @@ export default function App() {
     });
   }, [selectedId, authToken]);
 
-  // Auto-expand topics that contain streaming (incoming) messages
-  useEffect(() => {
-    const msgIdSet = new Set(messages.map((x) => x.msg_id));
-    const rootIdCache = new Map<string, string>();
-    function getRootId(msgId: string): string {
-      if (rootIdCache.has(msgId)) return rootIdCache.get(msgId)!;
-      const m = messages.find((x) => x.msg_id === msgId);
-      if (!m || !isMsgReply(m, msgIdSet) || !m.in_reply_to_msg_id) {
-        rootIdCache.set(msgId, msgId);
-        return msgId;
-      }
-      const rid = getRootId(m.in_reply_to_msg_id);
-      rootIdCache.set(msgId, rid);
-      return rid;
-    }
-    const toExpand = messages
-      .filter((m) => isMsgReply(m, msgIdSet) && m._streaming)
-      .map((m) => getRootId(m.msg_id));
-    if (toExpand.length > 0)
-      setExpandedTopics((prev) => new Set([...prev, ...toExpand]));
-  }, [messages]);
-
-  // Build topic tree: follow parent chain to find root, group all descendants under it.
-  const { topicRoots, topicRepliesOf } = useMemo(
-    () => buildTopicTree(messages, isDmSelected),
-    [isDmSelected, messages],
-  );
   const botById = useMemo(
     () => new Map(channelBots.map((bot) => [bot.member_id, bot])),
     [channelBots],
@@ -2014,38 +1516,6 @@ export default function App() {
   const userById = useMemo(
     () => new Map(channelUsers.map((user) => [user.member_id, user])),
     [channelUsers],
-  );
-  const msgById = useMemo(
-    () => new Map(messages.map((message) => [message.msg_id, message])),
-    [messages],
-  );
-  const clarifyAnsweredParentIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const message of messages) {
-      if (
-        message.in_reply_to_msg_id &&
-        isClarifyReplyUserMessage(message.content)
-      ) {
-        ids.add(message.in_reply_to_msg_id);
-      }
-    }
-    return ids;
-  }, [messages]);
-  const rowVirtualizer = useVirtualizer({
-    count: topicRoots.length,
-    getScrollElement: () => messagesContainerRef.current,
-    estimateSize: () => VIRTUAL_MESSAGE_ESTIMATED_HEIGHT,
-    overscan: 12,
-    getItemKey: (index) => topicRoots[index]?.msg_id ?? index,
-  });
-  const virtualItems = rowVirtualizer.getVirtualItems();
-  const pageTopicSourceMessages = useMemo(
-    () => mergeMessagesChronologically(messages, pageTopicMessages),
-    [messages, pageTopicMessages],
-  );
-  const { topicRepliesOf: pageTopicRepliesOf } = useMemo(
-    () => buildTopicTree(pageTopicSourceMessages, false),
-    [pageTopicSourceMessages],
   );
   const selectedDetailMessage = memoryDetailMessage
     ? msgById.get(memoryDetailMessage.msg_id) || memoryDetailMessage
