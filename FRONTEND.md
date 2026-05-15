@@ -68,7 +68,9 @@ App.tsx
 │           ├── MemoryPanel
 │           │   ├── InviteMemberSearch
 │           │   ├── SearchPicker
-│           │   └── MemberListItem
+│           │   ├── QuickAddFooter
+│           │   ├── MembersView
+│           │   └── ProjectView
 │           └── FilePreviewSidebar
 ├── NotificationPanel
 ├── LoginModal
@@ -120,6 +122,15 @@ App.tsx
 
 ```text
 features/
+├── memory/
+│   ├── editor/
+│   │   ├── EntryEditor.tsx         # Markdown 条目编辑器，MemoryPage 复用
+│   │   └── QuickAddFooter.tsx      # 记忆侧栏底部快速新增条目
+│   ├── views/
+│   │   ├── MembersView.tsx         # 记忆侧栏成员列表与成员资料卡
+│   │   └── ProjectView.tsx         # PROJECT 虚拟层的项目旅程视图
+│   ├── parsers.ts                  # FILES_INDEX / RECENT 解析与时间格式化
+│   └── types.ts                    # 文件卡片、时间线、文件预览等 memory 局部类型
 └── settings/
     ├── account/
     │   └── AccountPane.tsx         # 账户资料、头像上传、密码修改、钥匙链
@@ -149,6 +160,7 @@ features/
 - 只放有明确业务域的组件、hooks、api 和局部类型。
 - 一个 feature 可以复用 `shared`/`components` 的通用 UI，但不要反向依赖别的 feature 内部实现。
 - 从大文件迁移时优先切出完整业务闭环，如 `settings/friends`、`settings/bots`、`memory/files`。
+- `features/memory` 承接 `MemoryPanel` 与 `MemoryPage` 的共享 parser、编辑器和视图；两个入口组件应只保留数据加载、状态编排和页面布局。
 - `SettingsModal` 是设置页壳层：只持有顶层导航、Bot 列表加载、主题密度状态，不内联具体 pane 实现。
 - `settings/bots` 拥有 Bot 设置入口、列表钻取、新建/编辑表单、Bot 展示辅助和 `BotRow` 类型；`SettingsModal` 只负责加载 Bot 列表并把数据传入 `BotPane`。
 - `settings/models` 拥有模型管理闭环，并导出 `ModelBrandCard` / `modelBrandName` 给 Bot 创建与编辑复用。
@@ -271,6 +283,20 @@ frontend/src/
 ## 统一搜索组件
 
 `SearchPicker` 是唯一标准搜索框。
+
+内部组件层级：
+
+```text
+components/
+├── SearchPicker.tsx                 # 对外 API、请求状态、输入框、快捷键和 imperative handle
+└── search/
+    ├── SearchFilters.tsx            # 类型筛选 chips
+    ├── SearchHighlight.tsx          # 命中文本高亮
+    ├── SearchResultGroup.tsx        # 分组标题与列表
+    ├── SearchResultItem.tsx         # 各类型结果行，用户/Bot 复用 MemberListItem
+    ├── SearchScopeMenu.tsx          # 搜索范围切换菜单
+    └── searchResultUtils.ts         # 结果 label、subtitle、key 等纯函数
+```
 
 适用场景：
 

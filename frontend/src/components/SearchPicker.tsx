@@ -8,15 +8,15 @@ import {
 } from "react";
 import { apiFetch } from "../api";
 import type {
-  SearchBotHit,
   SearchContext,
   SearchResultsPayload,
   SearchResultType,
   SearchSelection,
 } from "../types";
 import { AppIcon } from "./icons/AppIcon";
-import { FileTypeIcon } from "./icons/FileTypeIcon";
-import { MemberListItem } from "./members";
+import { SearchFilters, type SearchTypeFilterOption } from "./search/SearchFilters";
+import { SearchResultGroup, type SearchSelectionGroup } from "./search/SearchResultGroup";
+import { SearchScopeMenu } from "./search/SearchScopeMenu";
 
 export type SearchPickerHandle = {
   focus: (select?: boolean) => void;
@@ -30,10 +30,7 @@ export type SearchScopeOption = {
   marker?: string;
 };
 
-export type SearchTypeFilterOption = {
-  type: SearchResultType;
-  label: string;
-};
+export type { SearchTypeFilterOption } from "./search/SearchFilters";
 
 type SearchPickerProps = {
   context: SearchContext;
@@ -71,114 +68,6 @@ const EMPTY_RESULTS: SearchResultsPayload = {
   tasks: [],
   messages: [],
 };
-
-function botScopeText(scope?: SearchBotHit["scope"]) {
-  if (scope === "private") return "Private";
-  if (scope === "everyone") return "Everyone";
-  return "Friend";
-}
-
-function botOwnerText(bot: Pick<SearchBotHit, "owner">) {
-  return bot.owner?.display_name || bot.owner?.username || "系统";
-}
-
-function channelTypeText(type?: string | null) {
-  if (type === "private") return "Private";
-  return "Workspace";
-}
-
-function formatBytes(size?: number | null) {
-  if (!size || size <= 0) return "";
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function fileTypeText(contentType?: string | null) {
-  const ct = contentType || "";
-  if (ct.includes("pdf")) return "PDF";
-  if (ct.includes("wordprocessingml") || ct.includes("docx")) return "Word";
-  if (ct.includes("spreadsheetml") || ct.includes("xlsx")) return "Excel";
-  if (ct.startsWith("image/")) return "图片";
-  if (ct.startsWith("text/")) return "文本";
-  return "文件";
-}
-
-function labelFor(selection: SearchSelection) {
-  const { type, item } = selection;
-  if (type === "workspace") return item.name;
-  if (type === "channel") return item.name;
-  if (type === "user") return item.display_name || item.username;
-  if (type === "bot") return item.display_name || item.username;
-  if (type === "file") return item.original_filename || item.file_id;
-  if (type === "todo") return item.content;
-  if (type === "task") return item.bot_name || item.task_id;
-  return item.snippet || item.channel_name;
-}
-
-function subFor(selection: SearchSelection) {
-  const { type, item } = selection;
-  if (type === "workspace") return item.kind === "personal" ? "Personal" : "Workspace";
-  if (type === "channel") return channelTypeText(item.type);
-  if (type === "user") return item.display_name && item.display_name !== item.username ? `@${item.username}` : "";
-  if (type === "bot") return `@${item.username} · ${botScopeText(item.scope)} · Owner: ${botOwnerText(item)}`;
-  if (type === "file") {
-    const size = formatBytes(item.size_bytes);
-    return `${item.channel_name || "频道"} · ${fileTypeText(item.content_type)}${size ? ` · ${size}` : ""}`;
-  }
-  if (type === "todo") return `${item.channel_name || "频道"} · ${item.status}`;
-  if (type === "task") return `${item.channel_name || "频道"} · ${item.task_id}`;
-  return `${item.channel_name || "频道"} · ${item.sender_label}`;
-}
-
-function sigilFor(type: SearchSelection["type"]) {
-  if (type === "workspace") return "□";
-  if (type === "channel") return "#";
-  if (type === "user") return "@";
-  if (type === "bot") return "⦿";
-  if (type === "file") return "";
-  if (type === "todo") return "✓";
-  if (type === "task") return "↯";
-  return "#";
-}
-
-function groupTitle(type: SearchSelection["type"]) {
-  if (type === "workspace") return "工作空间";
-  if (type === "channel") return "频道";
-  if (type === "user") return "成员";
-  if (type === "bot") return "Bot";
-  if (type === "file") return "文件";
-  if (type === "todo") return "待办";
-  if (type === "task") return "任务";
-  return "消息";
-}
-
-function itemKey(selection: SearchSelection) {
-  if (selection.type === "workspace") return `workspace:${selection.item.workspace_id}`;
-  if (selection.type === "channel") return `channel:${selection.item.channel_id}`;
-  if (selection.type === "user") return `user:${selection.item.user_id}`;
-  if (selection.type === "bot") return `bot:${selection.item.bot_id}`;
-  if (selection.type === "file") return `file:${selection.item.file_id}`;
-  if (selection.type === "todo") return `todo:${selection.item.todo_id}`;
-  if (selection.type === "task") return `task:${selection.item.task_id}`;
-  return `message:${selection.item.msg_id}`;
-}
-
-function Highlight({ text, query }: { text: string; query: string }) {
-  const needle = query.trim();
-  if (!needle) return <>{text}</>;
-  const lower = text.toLowerCase();
-  const needleLower = needle.toLowerCase();
-  const idx = lower.indexOf(needleLower);
-  if (idx < 0) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <mark>{text.slice(idx, idx + needle.length)}</mark>
-      {text.slice(idx + needle.length)}
-    </>
-  );
-}
 
 function normalizeResults(payload: Partial<SearchResultsPayload> | null | undefined): SearchResultsPayload {
   return {
@@ -338,7 +227,7 @@ export const SearchPicker = forwardRef<SearchPickerHandle, SearchPickerProps>(
       };
     }, [q, context, limit, token, workspaceId, channelId, requestTypesKey]);
 
-    const groups = useMemo(() => {
+    const groups = useMemo<SearchSelectionGroup[]>(() => {
       if (!results) return [];
       return [
         { type: "workspace" as const, items: results.workspaces.map((item) => ({ type: "workspace" as const, item })) },
@@ -377,7 +266,6 @@ export const SearchPicker = forwardRef<SearchPickerHandle, SearchPickerProps>(
     ].filter(Boolean).join(" ");
     const scopeDescription = scopeTitle || scopeLabel || "";
     const currentScope = scopeOptions.find((option) => option.value === scopeValue);
-    const activeTypeSet = new Set(activeTypes);
     const toggleType = (type: SearchResultType) => {
       setActiveTypes((prev) => {
         if (prev.includes(type)) {
@@ -446,56 +334,22 @@ export const SearchPicker = forwardRef<SearchPickerHandle, SearchPickerProps>(
             {keyboardHint && <kbd className="an-search-kbd">{keyboardHint}</kbd>}
           </>
         )}
-        {typeOptions.length > 0 && (
-          <div className="an-search-filters" role="group" aria-label="搜索类型">
-            {typeOptions.map((option) => {
-              const selected = activeTypeSet.has(option.type);
-              return (
-                <button
-                  key={option.type}
-                  type="button"
-                  className="an-search-filter"
-                  data-active={selected ? "1" : undefined}
-                  aria-pressed={selected}
-                  onClick={() => toggleType(option.type)}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <SearchFilters
+          options={typeOptions}
+          activeTypes={activeTypes}
+          onToggle={toggleType}
+        />
         {scopeOpen && canSwitchScope && (
-          <div className="an-search-scope-pop" role="menu">
-            {scopeOptions.map((option) => {
-              const selected = option.value === scopeValue;
-              return (
-                <button
-                  key={option.value || "__all__"}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={selected}
-                  className="an-search-scope-option"
-                  data-active={selected ? "1" : undefined}
-                  title={option.title || option.label}
-                  onClick={() => {
-                    onScopeChange?.(option.value);
-                    setQ("");
-                    setResults(null);
-                    setScopeOpen(false);
-                  }}
-                >
-                  <span className="an-search-scope-option-mark">{option.marker || "∗"}</span>
-                  <span className="an-search-scope-option-text">
-                    <span className="an-search-scope-option-name">{option.label}</span>
-                    {option.title && (
-                      <span className="an-search-scope-option-sub">{option.title}</span>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <SearchScopeMenu
+            options={scopeOptions}
+            value={scopeValue}
+            onSelect={(value) => {
+              onScopeChange?.(value);
+              setQ("");
+              setResults(null);
+              setScopeOpen(false);
+            }}
+          />
         )}
         {open && q.trim() && (
           <div className="an-search-pop" role="listbox">
@@ -504,81 +358,13 @@ export const SearchPicker = forwardRef<SearchPickerHandle, SearchPickerProps>(
               <div className="an-search-empty">{emptyText}</div>
             )}
             {groups.map((group) => (
-              <div key={group.type}>
-                <div className="an-search-group">{groupTitle(group.type)}</div>
-                {group.items.map((selection) => {
-                  const rich =
-                    selection.type === "file" ||
-                    selection.type === "message" ||
-                    selection.type === "todo" ||
-                    selection.type === "task";
-                  const sub = subFor(selection);
-                  const action = actionText(selection);
-                  if (selection.type === "user" || selection.type === "bot") {
-                    const label = labelFor(selection);
-                    return (
-                      <MemberListItem
-                        key={itemKey(selection)}
-                        id={selection.type === "user" ? selection.item.user_id : selection.item.bot_id}
-                        kind={selection.type}
-                        username={selection.item.username}
-                        displayName={label}
-                        name={<Highlight text={label} query={q} />}
-                        avatarUrl={selection.item.avatar_url}
-                        subtitle={sub}
-                        variant="panel"
-                        compact
-                        asButton
-                        className="an-search-hit an-search-member-hit"
-                        onClick={() => choose(selection)}
-                        actions={action ? <span className="an-search-action">{action}</span> : undefined}
-                      />
-                    );
-                  }
-                  return (
-                    <button
-                      key={itemKey(selection)}
-                      type="button"
-                      className={`an-search-hit ${rich ? "is-rich" : ""}`}
-                      onClick={() => choose(selection)}
-                    >
-                      {selection.type === "file" ? (
-                        <span className="an-search-file-ico">
-                          <FileTypeIcon
-                            contentType={selection.item.content_type}
-                            filename={selection.item.original_filename || selection.item.file_id}
-                            size={18}
-                          />
-                        </span>
-                      ) : (
-                        <span className="an-search-sigil">{sigilFor(selection.type)}</span>
-                      )}
-                      <span className="an-search-main">
-                        <span className="an-search-name">
-                          <Highlight text={labelFor(selection)} query={q} />
-                        </span>
-                        {sub && <span className="an-search-sub">{sub}</span>}
-                        {selection.type === "file" && selection.item.snippet && (
-                          <span className="an-search-meta">
-                            <Highlight text={selection.item.snippet} query={q} />
-                          </span>
-                        )}
-                        {selection.type === "task" && selection.item.snippet && (
-                          <span className="an-search-meta">
-                            <Highlight text={selection.item.snippet} query={q} />
-                          </span>
-                        )}
-                        {selection.type === "message" && (
-                          <span className="an-search-meta">
-                            <Highlight text={selection.item.snippet} query={q} />
-                          </span>
-                        )}
-                      </span>
-                      {action && <span className="an-search-action">{action}</span>}
-                    </button>
-                  );
-                })}
-              </div>
+              <SearchResultGroup
+                key={group.type}
+                group={group}
+                query={q}
+                actionFor={actionText}
+                onSelect={choose}
+              />
             ))}
           </div>
         )}
