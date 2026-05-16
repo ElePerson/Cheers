@@ -42,6 +42,8 @@ export const EN_TO_ZH: Record<string, string> = {
   "Edit": "编辑",
   "Preview": "预览",
   "Back": "返回",
+  "Jump to bottom": "跳到底部",
+  "Bottom": "到底部",
   "Done": "完成",
   "Copy": "复制",
   "Clear": "清除",

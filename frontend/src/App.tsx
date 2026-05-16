@@ -495,8 +495,11 @@ export default function App() {
     clarifyAnsweredParentIds,
     rowVirtualizer,
     virtualItems,
+    showJumpToBottom,
+    jumpToBottom,
     pageTopicSourceMessages,
     pageTopicRepliesOf,
+    preloadChannelMessages,
   } = useChannelMessages({
     selectedId,
     isDmSelected,
@@ -1315,6 +1318,7 @@ export default function App() {
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenFilePreview={openFilePreview}
             onOpenPersonalFileMain={openPersonalFileInMain}
+            onPreloadChannel={preloadChannelMessages}
           />
         }
       >
@@ -1459,6 +1463,8 @@ export default function App() {
                 topicRepliesOf,
                 virtualItems,
                 rowVirtualizer,
+                showJumpToBottom,
+                onJumpToBottom: jumpToBottom,
                 botById,
                 botByUsername,
                 coordinatorBot,

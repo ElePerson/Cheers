@@ -6,9 +6,12 @@ import { API } from "../../../lib/app-config";
 import { isClarifyReplyUserMessage } from "../../../lib/helper";
 import { buildTopicTree, isMsgReply, mergeMessagesChronologically } from "../../../lib/message";
 import {
+  INITIAL_MESSAGE_PAGE_SIZE,
   MAX_LOADED_MESSAGES,
+  OLDER_MESSAGE_PAGE_SIZE,
   trimToRecentMessages,
   VIRTUAL_MESSAGE_ESTIMATED_HEIGHT,
+  VIRTUAL_MESSAGE_OVERSCAN_ROWS,
 } from "../../../lib/message-window";
 import {
   emptyMessageStore,
@@ -19,7 +22,11 @@ import {
 } from "../../../lib/message-store";
 import type { Message } from "../../../types";
 
-const MESSAGE_PAGE_SIZE = 50;
+const CHANNEL_CACHE_REVALIDATE_MS = 5_000;
+const JUMP_TO_BOTTOM_BOTTOM_GAP = 240;
+const JUMP_TO_BOTTOM_SCROLL_DISTANCE = 140;
+const JUMP_TO_BOTTOM_SETTLE_FRAMES = 12;
+const STICK_TO_BOTTOM_GAP = 160;
 
 interface UseChannelMessagesOptions {
   selectedId: string | null;
@@ -30,6 +37,12 @@ interface UseChannelMessagesOptions {
   pageTopicMessages: Message[];
   setExpandedTopics: Dispatch<SetStateAction<Set<string>>>;
 }
+
+type ChannelMessageCacheEntry = {
+  store: MessageStore;
+  hasMore: boolean;
+  receivedAt: number;
+};
 
 export function useChannelMessages({
   selectedId,
@@ -47,10 +60,9 @@ export function useChannelMessages({
   const setMessages = useCallback(
     (next: Message[] | ((prev: Message[]) => Message[])) => {
       setMessageStore((prevStore) => {
+        if (typeof next !== "function") return messagesToStore(next);
         const prevMessages = storeToMessages(prevStore);
-        const nextMessages =
-          typeof next === "function" ? next(prevMessages) : next;
-        return messagesToStore(nextMessages);
+        return messagesToStore(next(prevMessages));
       });
     },
     [],
@@ -58,42 +70,149 @@ export function useChannelMessages({
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const isLoadingOlderRef = useRef(false);
   const stickToBottomRef = useRef(true);
   const lastAutoScrollChannelRef = useRef<string | null>(null);
+  const channelMessageCacheRef = useRef<Partial<Record<string, ChannelMessageCacheEntry>>>({});
+  const preloadRequestsRef = useRef<Partial<Record<string, Promise<ChannelMessageCacheEntry | null>>>>({});
+  const cacheGenerationRef = useRef(0);
+  const showJumpToBottomRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
+  const downwardScrollDistanceRef = useRef(0);
+  const jumpToBottomRafRef = useRef<number | null>(null);
+
+  const setJumpToBottomVisible = useCallback((visible: boolean) => {
+    if (showJumpToBottomRef.current === visible) return;
+    showJumpToBottomRef.current = visible;
+    setShowJumpToBottom(visible);
+  }, []);
+
+  const cancelJumpToBottomRaf = useCallback(() => {
+    if (jumpToBottomRafRef.current === null) return;
+    cancelAnimationFrame(jumpToBottomRafRef.current);
+    jumpToBottomRafRef.current = null;
+  }, []);
+
+  const fetchInitialMessages = useCallback(
+    async (
+      channelId: string,
+      signal?: AbortSignal,
+    ): Promise<ChannelMessageCacheEntry> => {
+      const response = await authFetch(
+        `${API}/channels/${channelId}/messages?limit=${INITIAL_MESSAGE_PAGE_SIZE}`,
+        signal ? { signal } : undefined,
+      );
+      const data = await response.json();
+      const items = data.data || [];
+      const visibleData = trimToRecentMessages(items);
+      return {
+        store: messagesToStore(visibleData),
+        hasMore:
+          Boolean(data.meta?.has_more ?? items.length >= INITIAL_MESSAGE_PAGE_SIZE) &&
+          visibleData.length < MAX_LOADED_MESSAGES,
+        receivedAt: Date.now(),
+      };
+    },
+    [authFetch],
+  );
+
+  const preloadChannelMessages = useCallback(
+    (channelId: string) => {
+      if (
+        !channelId ||
+        channelMessageCacheRef.current[channelId] ||
+        preloadRequestsRef.current[channelId]
+      ) {
+        return;
+      }
+      const generation = cacheGenerationRef.current;
+      const request = fetchInitialMessages(channelId)
+        .then((entry) => {
+          if (cacheGenerationRef.current === generation) {
+            channelMessageCacheRef.current[channelId] = entry;
+          }
+          return entry;
+        })
+        .catch((error) => {
+          if ((error as { name?: string }).name !== "AbortError") {
+            console.debug("channel message preload failed", error);
+          }
+          return null;
+        })
+        .finally(() => {
+          delete preloadRequestsRef.current[channelId];
+        });
+      preloadRequestsRef.current[channelId] = request;
+    },
+    [fetchInitialMessages],
+  );
+
+  useEffect(() => {
+    cacheGenerationRef.current += 1;
+    channelMessageCacheRef.current = {};
+    preloadRequestsRef.current = {};
+  }, [authFetch]);
+
+  useEffect(() => cancelJumpToBottomRaf, [cancelJumpToBottomRaf]);
 
   useEffect(() => {
     if (!selectedId) {
-      setMessages([]);
+      cancelJumpToBottomRaf();
+      setMessageStore(emptyMessageStore());
       setHasMore(true);
       setLoading(false);
+      setJumpToBottomVisible(false);
       return;
     }
     const targetChannelId = selectedId;
     const controller = new AbortController();
+    const cached = channelMessageCacheRef.current[targetChannelId];
     stickToBottomRef.current = true;
     lastAutoScrollChannelRef.current = null;
-    setLoading(true);
+    lastScrollTopRef.current = 0;
+    downwardScrollDistanceRef.current = 0;
+    cancelJumpToBottomRaf();
+    setJumpToBottomVisible(false);
+    if (cached) {
+      setMessageStore(cached.store);
+      setHasMore(cached.hasMore);
+      setLoading(false);
+    } else {
+      setMessageStore(emptyMessageStore());
+      setHasMore(true);
+      setLoading(true);
+    }
 
-    authFetch(`${API}/channels/${targetChannelId}/messages?limit=${MESSAGE_PAGE_SIZE}`, {
-      signal: controller.signal,
-    })
-      .then((response) => response.json())
-      .then((data) => {
+    if (cached && Date.now() - cached.receivedAt < CHANNEL_CACHE_REVALIDATE_MS) {
+      return () => controller.abort();
+    }
+
+    const request =
+      preloadRequestsRef.current[targetChannelId] ??
+      fetchInitialMessages(targetChannelId, controller.signal);
+
+    request
+      .then((entry) => {
+        if (!entry) return;
         if (
           controller.signal.aborted ||
           selectedIdRef.current !== targetChannelId
         ) {
           return;
         }
-        const items = data.data || [];
-        const visibleData = trimToRecentMessages(items);
-        setMessages(visibleData);
-        setHasMore(
-          Boolean(data.meta?.has_more ?? items.length >= MESSAGE_PAGE_SIZE) &&
-            visibleData.length < MAX_LOADED_MESSAGES,
-        );
+        channelMessageCacheRef.current[targetChannelId] = entry;
+        setMessageStore((prev) => {
+          const prevMessages = storeToMessages(prev);
+          if (prevMessages.length === 0) return entry.store;
+          return messagesToStore(
+            trimToRecentMessages(
+              mergeMessagesChronologically(prevMessages, storeToMessages(entry.store)),
+            ),
+          );
+        });
+        setHasMore(entry.hasMore);
       })
       .catch((error) => {
         if ((error as { name?: string }).name === "AbortError") return;
@@ -110,7 +229,16 @@ export function useChannelMessages({
       });
 
     return () => controller.abort();
-  }, [authFetch, selectedId, selectedIdRef, setMessages]);
+  }, [cancelJumpToBottomRaf, fetchInitialMessages, selectedId, selectedIdRef, setJumpToBottomVisible]);
+
+  useEffect(() => {
+    if (!selectedId || loading) return;
+    channelMessageCacheRef.current[selectedId] = {
+      store: messageStore,
+      hasMore,
+      receivedAt: Date.now(),
+    };
+  }, [hasMore, loading, messageStore, selectedId]);
 
   const loadMoreMessages = useCallback(async () => {
     if (!selectedId || !hasMore || loadingMore) return;
@@ -127,7 +255,7 @@ export function useChannelMessages({
     const prevScrollHeight = container?.scrollHeight ?? 0;
     try {
       const response = await authFetch(
-        `${API}/channels/${targetChannelId}/messages?before_id=${oldest.msg_id}&limit=${MESSAGE_PAGE_SIZE}`,
+        `${API}/channels/${targetChannelId}/messages?before_id=${oldest.msg_id}&limit=${OLDER_MESSAGE_PAGE_SIZE}`,
       );
       const data = await response.json();
       const older = data.data || [];
@@ -139,7 +267,7 @@ export function useChannelMessages({
       const hitWindowCap =
         messages.length + older.length >= MAX_LOADED_MESSAGES;
       setHasMore(
-        !hitWindowCap && Boolean(data.meta?.has_more ?? older.length >= MESSAGE_PAGE_SIZE),
+        !hitWindowCap && Boolean(data.meta?.has_more ?? older.length >= OLDER_MESSAGE_PAGE_SIZE),
       );
       setMessageStore((prev) =>
         trimMessageStoreToRecent(
@@ -152,7 +280,7 @@ export function useChannelMessages({
           container.scrollTop = container.scrollHeight - prevScrollHeight;
           stickToBottomRef.current =
             container.scrollHeight - container.scrollTop - container.clientHeight <
-            160;
+            STICK_TO_BOTTOM_GAP;
         }
         isLoadingOlderRef.current = false;
       });
@@ -167,13 +295,34 @@ export function useChannelMessages({
   const handleMessagesScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
       const target = event.currentTarget;
-      stickToBottomRef.current =
-        target.scrollHeight - target.scrollTop - target.clientHeight < 160;
+      const scrollTop = target.scrollTop;
+      const bottomGap = target.scrollHeight - scrollTop - target.clientHeight;
+      const nearBottom = bottomGap < STICK_TO_BOTTOM_GAP;
+      const delta = scrollTop - lastScrollTopRef.current;
+      lastScrollTopRef.current = scrollTop;
+      stickToBottomRef.current = nearBottom;
+
+      if (nearBottom) {
+        downwardScrollDistanceRef.current = 0;
+        setJumpToBottomVisible(false);
+      } else if (delta > 0) {
+        downwardScrollDistanceRef.current += delta;
+        if (
+          bottomGap > JUMP_TO_BOTTOM_BOTTOM_GAP &&
+          downwardScrollDistanceRef.current > JUMP_TO_BOTTOM_SCROLL_DISTANCE
+        ) {
+          setJumpToBottomVisible(true);
+        }
+      } else if (delta < -8) {
+        downwardScrollDistanceRef.current = 0;
+        setJumpToBottomVisible(false);
+      }
+
       if (target.scrollTop < 100 && hasMore && !loadingMore) {
         loadMoreMessages();
       }
     },
-    [hasMore, loadingMore, loadMoreMessages],
+    [hasMore, loadingMore, loadMoreMessages, setJumpToBottomVisible],
   );
 
   useEffect(() => {
@@ -183,11 +332,12 @@ export function useChannelMessages({
     const updateMetrics = () => {
       const wasStuckToBottom = stickToBottomRef.current;
       stickToBottomRef.current =
-        container.scrollHeight - container.scrollTop - container.clientHeight < 160;
+        container.scrollHeight - container.scrollTop - container.clientHeight < STICK_TO_BOTTOM_GAP;
       if (wasStuckToBottom && !isLoadingOlderRef.current) {
         requestAnimationFrame(() => {
           container.scrollTop = container.scrollHeight;
           stickToBottomRef.current = true;
+          setJumpToBottomVisible(false);
         });
       }
     };
@@ -270,10 +420,54 @@ export function useChannelMessages({
     count: topicRoots.length,
     getScrollElement: () => messagesContainerRef.current,
     estimateSize: () => VIRTUAL_MESSAGE_ESTIMATED_HEIGHT,
-    overscan: 12,
+    overscan: VIRTUAL_MESSAGE_OVERSCAN_ROWS,
+    isScrollingResetDelay: 120,
+    useAnimationFrameWithResizeObserver: true,
     getItemKey: (index) => topicRoots[index]?.msg_id ?? index,
   });
   const virtualItems = rowVirtualizer.getVirtualItems();
+
+  const jumpToBottom = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    cancelJumpToBottomRaf();
+    downwardScrollDistanceRef.current = 0;
+    setJumpToBottomVisible(false);
+    stickToBottomRef.current = true;
+    if (topicRoots.length > 0) {
+      rowVirtualizer.scrollToIndex(topicRoots.length - 1, { align: "end" });
+    }
+
+    const settleToBottom = (remainingFrames: number) => {
+      const nextContainer = messagesContainerRef.current;
+      if (!nextContainer) return;
+      if (topicRoots.length > 0) {
+        rowVirtualizer.scrollToIndex(topicRoots.length - 1, { align: "end" });
+      }
+      nextContainer.scrollTop = Math.max(
+        0,
+        nextContainer.scrollHeight - nextContainer.clientHeight,
+      );
+      lastScrollTopRef.current = nextContainer.scrollTop;
+      const bottomGap =
+        nextContainer.scrollHeight -
+        nextContainer.scrollTop -
+        nextContainer.clientHeight;
+      if (bottomGap > 1 && remainingFrames > 0) {
+        jumpToBottomRafRef.current = requestAnimationFrame(() =>
+          settleToBottom(remainingFrames - 1),
+        );
+        return;
+      }
+      jumpToBottomRafRef.current = null;
+      stickToBottomRef.current = true;
+      setJumpToBottomVisible(false);
+    };
+
+    jumpToBottomRafRef.current = requestAnimationFrame(() =>
+      settleToBottom(JUMP_TO_BOTTOM_SETTLE_FRAMES),
+    );
+  }, [cancelJumpToBottomRaf, rowVirtualizer, setJumpToBottomVisible, topicRoots.length]);
 
   useLayoutEffect(() => {
     if (!messagesContainerRef.current || isLoadingOlderRef.current) return;
@@ -286,7 +480,8 @@ export function useChannelMessages({
     rowVirtualizer.scrollToIndex(topicRoots.length - 1, { align: "end" });
     container.scrollTop = container.scrollHeight;
     stickToBottomRef.current = true;
-  }, [messages.length, rowVirtualizer, selectedId, topicRoots.length]);
+    setJumpToBottomVisible(false);
+  }, [messages.length, rowVirtualizer, selectedId, setJumpToBottomVisible, topicRoots.length]);
 
   const pageTopicSourceMessages = useMemo(
     () => mergeMessagesChronologically(messages, pageTopicMessages),
@@ -313,7 +508,10 @@ export function useChannelMessages({
     clarifyAnsweredParentIds,
     rowVirtualizer,
     virtualItems,
+    showJumpToBottom,
+    jumpToBottom,
     pageTopicSourceMessages,
     pageTopicRepliesOf,
+    preloadChannelMessages,
   };
 }

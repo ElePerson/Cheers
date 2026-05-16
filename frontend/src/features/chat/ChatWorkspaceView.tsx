@@ -1,7 +1,6 @@
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import { useMemo, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { AppIcon } from "../../components/icons/AppIcon";
 import { ChannelHeader, type MemoryTab } from "../../components/ChannelHeader";
-import { useLanguage } from "../../i18n";
 import {
   MessageComposer,
   type MessageComposerProps,
@@ -86,27 +85,30 @@ export function ChatWorkspaceView({
   onJumpToMessage,
   onRefreshDmSession,
 }: ChatWorkspaceViewProps) {
-  const { isChinese } = useLanguage();
-  const mobileBrandLabel = isChinese ? "AgentNEXUS" : "AgentNEXUS";
-  const topics = topicRoots
-    .map((root) => {
-      const replies = topicRepliesOf(root.msg_id);
-      const isExplicit = root.msg_type === "topic";
-      if (!isExplicit && replies.length < TOPIC_DISPLAY_THRESHOLD) {
-        return null;
-      }
-      const title =
-        (root.content || "").replace(/\s+/g, " ").trim().slice(0, 60) ||
-        "(No title)";
-      const last = replies[replies.length - 1];
-      return {
-        rootId: root.msg_id,
-        title,
-        count: replies.length,
-        lastTime: last?.created_at ? formatTs(last.created_at) : undefined,
-      };
-    })
-    .filter((item): item is NonNullable<typeof item> => item !== null);
+  const mobileBrandLabel = "AgentNEXUS";
+  const topics = useMemo(
+    () =>
+      topicRoots
+        .map((root) => {
+          const replies = topicRepliesOf(root.msg_id);
+          const isExplicit = root.msg_type === "topic";
+          if (!isExplicit && replies.length < TOPIC_DISPLAY_THRESHOLD) {
+            return null;
+          }
+          const title =
+            (root.content || "").replace(/\s+/g, " ").trim().slice(0, 60) ||
+            "(No title)";
+          const last = replies[replies.length - 1];
+          return {
+            rootId: root.msg_id,
+            title,
+            count: replies.length,
+            lastTime: last?.created_at ? formatTs(last.created_at) : undefined,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null),
+    [topicRepliesOf, topicRoots],
+  );
 
   return (
     <>

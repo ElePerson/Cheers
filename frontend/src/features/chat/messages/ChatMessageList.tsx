@@ -61,6 +61,8 @@ export interface ChatMessageListProps {
   topicRepliesOf: (msgId: string) => Message[];
   virtualItems: VirtualItem[];
   rowVirtualizer: Virtualizer<HTMLDivElement, Element>;
+  showJumpToBottom: boolean;
+  onJumpToBottom: () => void;
   botById: Map<string, ChannelBot>;
   botByUsername: Map<string, ChannelBot>;
   coordinatorBot?: ChannelBot;
@@ -125,6 +127,8 @@ export function ChatMessageList({
   topicRepliesOf,
   virtualItems,
   rowVirtualizer,
+  showJumpToBottom,
+  onJumpToBottom,
   botById,
   botByUsername,
   coordinatorBot,
@@ -165,9 +169,10 @@ export function ChatMessageList({
     `${forwardSelectionMode ? "opacity-100" : `opacity-0 ${hoverClass}`} focus-within:opacity-100 transition-opacity`;
 
   return (
+    <>
                 <div
                   ref={messagesContainerRef}
-                  className="flex-1 overflow-auto"
+                  className="an-chat-scroll flex-1 overflow-auto"
                   onScroll={onMessagesScroll}
                 >
                   {loading ? (
@@ -1939,6 +1944,7 @@ export function ChatMessageList({
                                 key={virtualItem.key}
                                 ref={rowVirtualizer.measureElement}
                                 data-index={virtualItem.index}
+                                className="an-chat-virtual-row"
                                 style={{
                                   position: "absolute",
                                   top: 0,
@@ -2007,5 +2013,18 @@ export function ChatMessageList({
                     </div>
                   )}
                 </div>
+                {showJumpToBottom && (
+                  <button
+                    type="button"
+                    className="an-chat-jump-bottom"
+                    onClick={onJumpToBottom}
+                    title="Jump to bottom"
+                    aria-label="Jump to bottom"
+                  >
+                    <AppIcon name="chevronDown" className="h-4 w-4" />
+                    <span>Bottom</span>
+                  </button>
+                )}
+    </>
   );
 }
