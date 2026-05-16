@@ -87,7 +87,7 @@ export function ChatWorkspaceView({
   onRefreshDmSession,
 }: ChatWorkspaceViewProps) {
   const { isChinese } = useLanguage();
-  const mobileBrandLabel = isChinese ? "智枢协作" : "AgentNEXUS";
+  const mobileBrandLabel = isChinese ? "AgentNEXUS" : "AgentNEXUS";
   const topics = topicRoots
     .map((root) => {
       const replies = topicRepliesOf(root.msg_id);
@@ -97,7 +97,7 @@ export function ChatWorkspaceView({
       }
       const title =
         (root.content || "").replace(/\s+/g, " ").trim().slice(0, 60) ||
-        "(无标题)";
+        "(No title)";
       const last = replies[replies.length - 1];
       return {
         rootId: root.msg_id,
@@ -154,7 +154,7 @@ export function ChatWorkspaceView({
                   scopeId={activeDmSessionScopeId}
                   channelId={selectedId}
                   botId={activeBotDm.counterparty.member_id}
-                  title="DM 对应 Session"
+                  title="DM sessions"
                   refreshKey={dmSessionRefreshNonce}
                   variant="toolbar"
                   onRefresh={onRefreshDmSession}
@@ -166,7 +166,7 @@ export function ChatWorkspaceView({
                     scopeType="channel"
                     scopeId={selectedId}
                     channelId={selectedId}
-                    title="频道对应 Session"
+                    title="Channel sessions"
                     variant="toolbar"
                   />
                 )
@@ -208,15 +208,15 @@ export function ChatWorkspaceView({
               <AppIcon name="messageCircle" className="w-10 h-10 text-gray-300" />
             </div>
             <p className="text-gray-700 text-[15px] font-semibold">
-              {isPersonalWorkspace ? "选择一个私信或 Project" : "选择一个频道"}
+              {isPersonalWorkspace ? "Select a DM or Project" : "Select a channel"}
             </p>
             <p className="text-gray-400 text-[13px] mt-1.5">
               {isPersonalWorkspace ? (
-                "从左侧选择私信、文件或 Project。"
+                "Select a DM, file, or Project on the left."
               ) : (
                 <>
-                  从左侧选择频道开始对话，或{" "}
-                  <span className="text-[#1264A3]">创建新频道</span>
+                  Select a channel on the left to start chatting, or{" "}
+                  <span className="text-[#1264A3]">create a new channel</span>
                 </>
               )}
             </p>
