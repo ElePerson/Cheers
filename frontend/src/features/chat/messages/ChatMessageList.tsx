@@ -7,6 +7,7 @@ import type {
 } from "react";
 import type { VirtualItem, Virtualizer } from "@tanstack/react-virtual";
 import toast from "react-hot-toast";
+import { AvatarVisual } from "../../../components/AvatarVisual";
 import { BotAvatar } from "../../../components/BotAvatar";
 import { ClarifyInlineBlock } from "../../../components/ClarifyInlineBlock";
 import {
@@ -1262,32 +1263,12 @@ export function ChatMessageList({
                             >
                                 <div className="flex-shrink-0 mt-0.5">
                                   {r.sender_type === "bot" ? (
-                                    rBot?.avatar_url ? (
-                                      <img
-                                        src={rBot.avatar_url}
-                                        alt={rLabel}
-                                        className={
-                                          rFlat
-                                            ? "w-9 h-9 rounded-xl object-cover"
-                                            : "w-8 h-8 rounded-xl object-cover"
-                                        }
-                                      />
-                                    ) : (
-                                      <div
-                                        className={
-                                          rFlat
-                                            ? "an-chat-avatar lg"
-                                            : "an-chat-avatar md"
-                                        }
-                                        style={{
-                                          background: rFlat
-                                            ? "var(--fg-3)"
-                                            : "var(--green)",
-                                        }}
-                                      >
-                                        {rInitials}
-                                      </div>
-                                    )
+                                    <BotAvatar
+                                      label={rLabel}
+                                      avatarUrl={rBot?.avatar_url}
+                                      brandName={rBot?.display_name || rBot?.username || rLabel}
+                                      size={rFlat ? 36 : 32}
+                                    />
                                   ) : (
                                     <div
                                       className={
@@ -1549,11 +1530,14 @@ export function ChatMessageList({
                                 <span className="an-topic-chip-faces">
                                   {visibleAvatars.map((p) =>
                                     p.avatarUrl ? (
-                                      <img
+                                      <AvatarVisual
                                         key={p.key}
-                                        src={p.avatarUrl}
-                                        alt={p.label}
+                                        avatarUrl={p.avatarUrl}
                                         className="an-topic-chip-face"
+                                        fallback={p.initial}
+                                        label={p.label}
+                                        radius={8}
+                                        size={24}
                                       />
                                     ) : (
                                       <span
@@ -1736,20 +1720,13 @@ export function ChatMessageList({
                                     className="group/tr flex items-start gap-2 px-3 py-1"
                                   >
                                     {r.sender_type === "bot" ? (
-                                      rBot?.avatar_url ? (
-                                        <img
-                                          src={rBot.avatar_url}
-                                          alt={rLabel}
-                                          className="w-6 h-6 rounded-lg object-cover flex-shrink-0 mt-0.5"
-                                        />
-                                      ) : (
-                                        <div
-                                          className="an-chat-avatar sm mt-0.5"
-                                          style={{ background: "var(--green)" }}
-                                        >
-                                          {rInitials}
-                                        </div>
-                                      )
+                                      <BotAvatar
+                                        label={rLabel}
+                                        avatarUrl={rBot?.avatar_url}
+                                        brandName={rBot?.display_name || rBot?.username || rLabel}
+                                        size={24}
+                                        className="mt-0.5"
+                                      />
                                     ) : (
                                       <div
                                         className="an-chat-avatar sm mt-0.5"
