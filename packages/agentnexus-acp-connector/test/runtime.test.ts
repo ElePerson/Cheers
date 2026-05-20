@@ -68,7 +68,7 @@ describe("ConnectorRuntime", () => {
     });
 
     await waitFor(() => bridge.receivedDeltas.length > 0 && bridge.receivedDones.length === 1);
-    expect(bridge.receivedDeltas.map((d) => d.delta).join("")).toContain("echo: hello from nexus");
+    expect(bridge.receivedDeltas.map((d) => d.delta).join("")).toContain("hello from nexus");
     expect(bridge.receivedDones[0]).toMatchObject({ type: "done", msg_id: "ph-1" });
     expect(bridge.receivedTraces.some((t) => t.phase === "prompt_finished")).toBe(true);
     const state = JSON.parse(await readFile(statePath, "utf8"));
@@ -670,6 +670,99 @@ describe("ConnectorRuntime", () => {
       file_ids: ["file-1"],
     });
     expect(bridge.receivedTraces.some((t) => t.phase === "file_uploaded")).toBe(true);
+    await runtime.stop();
+  });
+
+  it("uploads ACP image content chunks as AgentNexus files", async () => {
+    const statePath = path.join(tmp, "state.json");
+    const runtime = new ConnectorRuntime(
+      {
+        "codex-main": {
+          botToken: "agb_test",
+          controlUrl: bridge.controlUrl,
+          dataUrl: bridge.dataUrl,
+          advanced: { reconnectBaseMs: 20, reconnectMaxMs: 100, heartbeatIntervalMs: 60_000, sendAckTimeoutMs: 1000 },
+          agent: {
+            transport: "stdio",
+            command: process.execPath,
+            args: [fakeAgent],
+            cwd: tmp,
+            env: { FAKE_ACP_RETURN_IMAGE: "1" },
+          },
+        },
+      },
+      new SessionStateStore(statePath),
+      console,
+    );
+    await runtime.start();
+    await waitFor(() => bridge.connectionsFor("control") === 1 && bridge.connectionsFor("data") === 1);
+
+    bridge.pushMessage({
+      task_id: "task-image",
+      channel_id: "C1",
+      seq: 4,
+      placeholder_msg_id: "ph-image",
+      provider_session_key: "agentnexus:channel:C1",
+      trigger_message: { text: "return an image" },
+    });
+
+    await waitFor(() => bridge.receivedUploads.length === 1 && bridge.receivedDones.length === 1);
+    expect(bridge.receivedUploads[0]).toMatchObject({
+      type: "file_upload",
+      channel_id: "C1",
+      filename: "acp-output.png",
+      content_type: "image/png",
+    });
+    expect(Buffer.from(String(bridge.receivedUploads[0].data_b64), "base64").toString("utf8"))
+      .toBe("fake-png-output");
+    expect(bridge.receivedDones[0]).toMatchObject({
+      type: "done",
+      msg_id: "ph-image",
+      file_ids: ["file-1"],
+    });
+    await runtime.stop();
+  });
+
+  it("rotates the ACP session and retries once when OpenAI image item ids were not persisted", async () => {
+    const statePath = path.join(tmp, "state.json");
+    const runtime = new ConnectorRuntime(
+      {
+        "codex-main": {
+          botToken: "agb_test",
+          controlUrl: bridge.controlUrl,
+          dataUrl: bridge.dataUrl,
+          advanced: { reconnectBaseMs: 20, reconnectMaxMs: 100, heartbeatIntervalMs: 60_000, sendAckTimeoutMs: 1000 },
+          agent: {
+            transport: "stdio",
+            command: process.execPath,
+            args: [fakeAgent],
+            cwd: tmp,
+            env: { FAKE_ACP_FAIL_FIRST_PROMPT_NONPERSISTED_ITEM: "1" },
+          },
+        },
+      },
+      new SessionStateStore(statePath),
+      console,
+    );
+    await runtime.start();
+    await waitFor(() => bridge.connectionsFor("control") === 1 && bridge.connectionsFor("data") === 1);
+
+    bridge.pushMessage({
+      task_id: "task-nonpersisted-item",
+      channel_id: "C1",
+      seq: 5,
+      placeholder_msg_id: "ph-nonpersisted-item",
+      provider_session_key: "agentnexus:channel:C1",
+      trigger_message: { text: "generate an image and return it" },
+    });
+
+    await waitFor(() => bridge.receivedDones.length === 1);
+    expect(bridge.receivedErrors).toHaveLength(0);
+    expect(bridge.receivedDeltas.map((d) => d.delta).join("")).toContain("echo:");
+    expect(bridge.receivedTraces.some((t) => t.phase === "provider_session_rotated")).toBe(true);
+    const promptStarts = bridge.receivedTraces.filter((t) => t.phase === "prompt_started");
+    expect(promptStarts).toHaveLength(2);
+    expect(promptStarts[0].run_id).not.toBe(promptStarts[1].run_id);
     await runtime.stop();
   });
 
