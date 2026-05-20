@@ -11,12 +11,15 @@ const returnFileLink = process.env.FAKE_ACP_RETURN_FILE_LINK === "1";
 const returnFileLinkWithLine = process.env.FAKE_ACP_RETURN_FILE_LINK_WITH_LINE === "1";
 const returnMissingFileLink = process.env.FAKE_ACP_RETURN_MISSING_FILE_LINK === "1";
 const returnFileReferences = process.env.FAKE_ACP_RETURN_FILE_REFERENCES === "1";
+const returnImage = process.env.FAKE_ACP_RETURN_IMAGE === "1";
 const returnOptions = process.env.FAKE_ACP_OPTIONS === "1";
 const promptErrorKind = process.env.FAKE_ACP_PROMPT_ERROR_KIND || "";
 const promptErrorMessage = process.env.FAKE_ACP_PROMPT_ERROR_MESSAGE || "";
+const failFirstPromptWithNonPersistedItem = process.env.FAKE_ACP_FAIL_FIRST_PROMPT_NONPERSISTED_ITEM === "1";
 const hangPrompt = process.env.FAKE_ACP_HANG_PROMPT === "1";
 const promptDelayMs = Number(process.env.FAKE_ACP_PROMPT_DELAY_MS || "0");
 const promptDelayIfIncludes = process.env.FAKE_ACP_PROMPT_DELAY_IF_INCLUDES || "";
+let nonPersistedItemFailureSent = false;
 
 function send(frame) {
   process.stdout.write(`${JSON.stringify(frame)}\n`);
@@ -171,6 +174,15 @@ async function handle(frame) {
     if (promptDelayMs > 0 && (!promptDelayIfIncludes || promptText.includes(promptDelayIfIncludes))) {
       await sleep(promptDelayMs);
     }
+    if (failFirstPromptWithNonPersistedItem && !nonPersistedItemFailureSent) {
+      nonPersistedItemFailureSent = true;
+      error(
+        id,
+        -32603,
+        "unexpected status 404 Not Found: Item with id 'ig_fake_nonpersisted' not found. Items are not persisted when `store` is set to false. Try again with `store` set to true, or remove this item from your input.",
+      );
+      return;
+    }
     if (promptErrorKind) {
       error(
         id,
@@ -221,6 +233,19 @@ async function handle(frame) {
         },
       },
     });
+    if (returnImage) {
+      notify("session/update", {
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "image",
+            mimeType: "image/png",
+            data: Buffer.from("fake-png-output").toString("base64"),
+          },
+        },
+      });
+    }
     if (returnFile) {
       notify("session/update", {
         sessionId: params.sessionId,

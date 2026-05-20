@@ -178,6 +178,11 @@ const NESTED_CONTENT_FIELDS = [
   "items",
 ];
 const TEXT_REFERENCE_FIELDS = ["text", "message", "markdown", "description"];
+const AGENTNEXUS_ACP_OUTPUT_CONTRACT = [
+  "AgentNexus ACP output contract:",
+  "- Return generated images or files as ACP resource/file content with inline text/base64, or write them under the current working directory and include a Markdown/file path link.",
+  "- Do not return provider-internal item ids such as OpenAI `ig_...`; AgentNexus cannot fetch those ids as files.",
+].join("\n");
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -302,6 +307,43 @@ function guessContentType(filename: string, fallback?: string): string | undefin
   return types[ext] ?? undefined;
 }
 
+function contentTypeFromDataUrl(value: string | null): string | undefined {
+  if (!value) return undefined;
+  const match = /^data:([^;,]+)?;base64,/i.exec(value);
+  return match?.[1]?.trim() || undefined;
+}
+
+function defaultExtensionForContentType(contentType?: string): string {
+  const clean = contentType?.split(";")[0]?.trim().toLowerCase();
+  const extensions: Record<string, string> = {
+    "application/json": ".json",
+    "application/pdf": ".pdf",
+    "application/xml": ".xml",
+    "application/zip": ".zip",
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/svg+xml": ".svg",
+    "image/webp": ".webp",
+    "text/csv": ".csv",
+    "text/html": ".html",
+    "text/markdown": ".md",
+    "text/plain": ".txt",
+  };
+  return clean ? extensions[clean] ?? "" : "";
+}
+
+function withContentTypeExtension(filename: string, contentType?: string): string {
+  const ext = defaultExtensionForContentType(contentType);
+  if (!ext) return filename;
+  const currentExt = path.extname(filename);
+  if (!currentExt) return `${filename}${ext}`;
+  if (currentExt.toLowerCase() === ".bin") {
+    return `${filename.slice(0, -currentExt.length)}${ext}`;
+  }
+  return filename;
+}
+
 function decodePathComponent(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -347,21 +389,27 @@ function isInsideDir(filePath: string, dir: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
-function filenameFromRecord(record: Record<string, unknown>, fallback: string): string {
+function filenameFromRecord(record: Record<string, unknown>, fallback: string, contentType?: string): string {
   const direct = record.filename ?? record.name ?? record.title ?? record.path ?? record.filePath ?? record.uri;
-  return typeof direct === "string" && direct.trim() ? safeFilename(direct) : fallback;
+  const filename = typeof direct === "string" && direct.trim() ? safeFilename(direct) : fallback;
+  return withContentTypeExtension(filename, contentType);
 }
 
 function inlineFileFromRecord(record: Record<string, unknown>, fallbackName: string): ExtractedFile | null {
-  const filename = filenameFromRecord(record, fallbackName);
-  const contentType = guessContentType(
-    filename,
-    typeof record.mimeType === "string"
-      ? record.mimeType
-      : typeof record.contentType === "string"
-        ? record.contentType
-        : undefined,
-  );
+  const blob = typeof record.blob === "string"
+    ? record.blob
+    : typeof record.data_b64 === "string"
+      ? record.data_b64
+      : typeof record.data === "string"
+        ? record.data
+        : null;
+  const explicitContentType = typeof record.mimeType === "string"
+    ? record.mimeType
+    : typeof record.contentType === "string"
+      ? record.contentType
+      : contentTypeFromDataUrl(blob);
+  const filename = filenameFromRecord(record, fallbackName, explicitContentType);
+  const contentType = guessContentType(filename, explicitContentType);
   const text = typeof record.text === "string" ? record.text : typeof record.content === "string" ? record.content : null;
   if (text !== null) {
     return {
@@ -371,13 +419,6 @@ function inlineFileFromRecord(record: Record<string, unknown>, fallbackName: str
       data: Buffer.from(text, "utf8"),
     };
   }
-  const blob = typeof record.blob === "string"
-    ? record.blob
-    : typeof record.data_b64 === "string"
-      ? record.data_b64
-      : typeof record.data === "string"
-        ? record.data
-        : null;
   if (blob !== null) {
     const data = bytesFromBase64(blob);
     return {
@@ -547,9 +588,11 @@ async function extractFilesFromContent(
   }
   const inline = (
     block.type === "file"
+    || block.type === "image"
     || block.type === "resource"
     || typeof block.blob === "string"
     || typeof block.data_b64 === "string"
+    || (typeof block.data === "string" && (typeof block.mimeType === "string" || typeof block.contentType === "string"))
     || (typeof block.text === "string" && (typeof block.filename === "string" || typeof block.name === "string"))
   )
     ? inlineFileFromRecord(block, fallbackName)
@@ -758,6 +801,31 @@ function providerErrorKind(err: unknown): string {
     if (typeof data.error_kind === "string") return data.error_kind;
   }
   return "";
+}
+
+function errorSearchText(err: unknown): string {
+  const parts = [err instanceof Error ? err.message : String(err)];
+  if (err instanceof JsonRpcError && err.data !== undefined) {
+    try {
+      parts.push(JSON.stringify(err.data));
+    } catch {
+      parts.push(String(err.data));
+    }
+  }
+  return parts.join(" ").toLowerCase();
+}
+
+function isNonPersistedOpenAIItemError(err: unknown): boolean {
+  const text = errorSearchText(err);
+  return (
+    text.includes("items are not persisted")
+    || (
+      text.includes("item with id")
+      && text.includes("not found")
+      && text.includes("store")
+      && text.includes("false")
+    )
+  );
 }
 
 function formatProviderError(err: unknown): string {
@@ -1040,7 +1108,7 @@ async function attachmentToPromptBlocks(
 }
 
 async function buildPrompt(message: InboundMessage, options: PromptBuildOptions): Promise<ContentBlock[]> {
-  const parts: string[] = [];
+  const parts: string[] = [AGENTNEXUS_ACP_OUTPUT_CONTRACT];
   if (message.text.trim()) parts.push(message.text.trim());
   const memory = message.event.memory_context ?? {};
   if (Object.keys(memory).length > 0) {
@@ -1274,6 +1342,10 @@ export class AcpBridgeAccount {
         );
       }
     }
+    return this.createAcpSession(providerSessionKey);
+  }
+
+  private async createAcpSession(providerSessionKey: string): Promise<string> {
     const created = await this.agent.newSession();
     this.activeProviderSessions.set(providerSessionKey, created.sessionId);
     this.providerSessionKeysByAcpSession.set(created.sessionId, providerSessionKey);
@@ -1286,6 +1358,15 @@ export class AcpBridgeAccount {
     }
     this.logger.info("acp account=%s created session %s for %s", this.accountId, created.sessionId, providerSessionKey);
     return created.sessionId;
+  }
+
+  private async forgetAcpSession(providerSessionKey: string, acpSessionId: string): Promise<void> {
+    if (this.activeProviderSessions.get(providerSessionKey) === acpSessionId) {
+      this.activeProviderSessions.delete(providerSessionKey);
+    }
+    this.providerSessionKeysByAcpSession.delete(acpSessionId);
+    this.configOptionsBySession.delete(acpSessionId);
+    await this.state.remove(this.accountId, providerSessionKey);
   }
 
   private async handleMessage(message: InboundMessage): Promise<void> {
@@ -1310,72 +1391,32 @@ export class AcpBridgeAccount {
     };
     this.activeRunsBySession.set(acpSessionId, ctx);
     this.activeRunsByMsg.set(msgId, ctx);
-    this.bridge.trace({
-      msg_id: msgId,
-      task_id: message.event.task_id,
-      channel_id: message.channelId,
-      run_id: acpSessionId,
-      session_key: providerSessionKey,
-      stream: "acp",
-      seq: ++ctx.traceSeq,
-      phase: "prompt_started",
-      status: "running",
-      title: "ACP prompt started",
-      message: this.config.agent.command,
-    });
+    this.tracePromptStarted(ctx);
     try {
-      const capabilities = this.agent.initializeResponse?.agentCapabilities?.promptCapabilities ?? {};
-      const result = await this.agent.prompt(acpSessionId, await buildPrompt(message, {
-        httpBase: deriveHttpBase(this.config.dataUrl),
-        botToken: this.config.botToken,
-        supportsImages: capabilities.image === true,
-        supportsEmbeddedContext: capabilities.embeddedContext === true,
-        logger: this.logger,
-      }));
-      await this.uploadTextLinkedFiles(ctx);
-      await Promise.allSettled(ctx.pendingFileUploads);
-      this.bridge.trace({
-        msg_id: msgId,
-        task_id: message.event.task_id,
-        channel_id: message.channelId,
-        run_id: acpSessionId,
-        session_key: providerSessionKey,
-        stream: "acp",
-        seq: ++ctx.traceSeq,
-        phase: "prompt_finished",
-        status: result.stopReason === "cancelled" ? "cancelled" : "completed",
-        title: "ACP prompt finished",
-        message: result.stopReason ?? "end_turn",
-      });
-      if (message.event.placeholder_msg_id) {
-        const ack = await this.bridge.streamDone({ msgId, fileIds: ctx.fileIds });
-        if (!ack.ok) {
-          this.logger.warn(
-            "acp account=%s stream done not acknowledged msg_id=%s code=%s error=%s",
-            this.accountId,
-            msgId,
-            ack.code,
-            ack.error,
-          );
-        }
-      } else {
-        await this.bridge.reply({
-          source: message,
-          text: ctx.text || `[ACP completed: ${result.stopReason ?? "end_turn"}]`,
-          fileIds: ctx.fileIds,
-        });
-      }
+      await this.runAcpPromptToCompletion(ctx);
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      let userMessage = formatProviderError(err);
-      if (err instanceof JsonRpcRequestTimeoutError && err.method === "session/prompt") {
-        this.agent.cancel(acpSessionId);
+      let failure: unknown = err;
+      if (isNonPersistedOpenAIItemError(failure) && !ctx.sentDelta && ctx.fileIds.length === 0) {
+        try {
+          await this.retryAfterNonPersistedOpenAIItem(ctx);
+          return;
+        } catch (retryErr) {
+          failure = retryErr;
+        }
+      }
+      if (isNonPersistedOpenAIItemError(failure)) {
+        await this.forgetAcpSession(providerSessionKey, ctx.acpSessionId);
+      }
+      const detail = failure instanceof Error ? failure.message : String(failure);
+      let userMessage = formatProviderError(failure);
+      if (failure instanceof JsonRpcRequestTimeoutError && failure.method === "session/prompt") {
+        this.agent.cancel(ctx.acpSessionId);
         userMessage = detail;
         this.bridge.trace({
           msg_id: msgId,
           task_id: message.event.task_id,
           channel_id: message.channelId,
-          run_id: acpSessionId,
+          run_id: ctx.acpSessionId,
           session_key: providerSessionKey,
           stream: "acp",
           seq: ++ctx.traceSeq,
@@ -1383,14 +1424,14 @@ export class AcpBridgeAccount {
           status: "failed",
           title: "ACP prompt timed out",
           message: detail,
-          data: { timeoutMs: err.timeoutMs },
+          data: { timeoutMs: failure.timeoutMs },
         });
       } else {
         this.bridge.trace({
           msg_id: msgId,
           task_id: message.event.task_id,
           channel_id: message.channelId,
-          run_id: acpSessionId,
+          run_id: ctx.acpSessionId,
           session_key: providerSessionKey,
           stream: "acp",
           seq: ++ctx.traceSeq,
@@ -1400,7 +1441,7 @@ export class AcpBridgeAccount {
           message: userMessage,
           data: {
             error: detail,
-            error_kind: providerErrorKind(err) || undefined,
+            error_kind: providerErrorKind(failure) || undefined,
           },
         });
       }
@@ -1423,10 +1464,113 @@ export class AcpBridgeAccount {
       } else {
         await this.bridge.reply({ source: message, text: userMessage });
       }
-      throw err;
+      throw failure;
     } finally {
-      this.activeRunsBySession.delete(acpSessionId);
+      this.activeRunsBySession.delete(ctx.acpSessionId);
       this.activeRunsByMsg.delete(msgId);
+    }
+  }
+
+  private tracePromptStarted(ctx: RunContext): void {
+    this.bridge.trace({
+      msg_id: ctx.msgId,
+      task_id: ctx.source.event.task_id,
+      channel_id: ctx.source.channelId,
+      run_id: ctx.acpSessionId,
+      session_key: ctx.providerSessionKey,
+      stream: "acp",
+      seq: ++ctx.traceSeq,
+      phase: "prompt_started",
+      status: "running",
+      title: "ACP prompt started",
+      message: this.config.agent.command,
+    });
+  }
+
+  private async runAcpPromptToCompletion(ctx: RunContext): Promise<void> {
+    const capabilities = this.agent.initializeResponse?.agentCapabilities?.promptCapabilities ?? {};
+    const result = await this.agent.prompt(ctx.acpSessionId, await buildPrompt(ctx.source, {
+      httpBase: ctx.httpBase,
+      botToken: ctx.botToken,
+      supportsImages: capabilities.image === true,
+      supportsEmbeddedContext: capabilities.embeddedContext === true,
+      logger: this.logger,
+    }));
+    await this.uploadTextLinkedFiles(ctx);
+    await Promise.allSettled(ctx.pendingFileUploads);
+    this.bridge.trace({
+      msg_id: ctx.msgId,
+      task_id: ctx.source.event.task_id,
+      channel_id: ctx.source.channelId,
+      run_id: ctx.acpSessionId,
+      session_key: ctx.providerSessionKey,
+      stream: "acp",
+      seq: ++ctx.traceSeq,
+      phase: "prompt_finished",
+      status: result.stopReason === "cancelled" ? "cancelled" : "completed",
+      title: "ACP prompt finished",
+      message: result.stopReason ?? "end_turn",
+    });
+    if (ctx.source.event.placeholder_msg_id) {
+      const ack = await this.bridge.streamDone({ msgId: ctx.msgId, fileIds: ctx.fileIds });
+      if (!ack.ok) {
+        this.logger.warn(
+          "acp account=%s stream done not acknowledged msg_id=%s code=%s error=%s",
+          this.accountId,
+          ctx.msgId,
+          ack.code,
+          ack.error,
+        );
+      }
+    } else {
+      await this.bridge.reply({
+        source: ctx.source,
+        text: ctx.text || `[ACP completed: ${result.stopReason ?? "end_turn"}]`,
+        fileIds: ctx.fileIds,
+      });
+    }
+  }
+
+  private async retryAfterNonPersistedOpenAIItem(ctx: RunContext): Promise<void> {
+    const previousSessionId = ctx.acpSessionId;
+    this.logger.warn(
+      "acp account=%s rotating session=%s after non-persisted OpenAI Responses item error",
+      this.accountId,
+      previousSessionId,
+    );
+    await this.forgetAcpSession(ctx.providerSessionKey, previousSessionId);
+    this.activeRunsBySession.delete(previousSessionId);
+    const nextSessionId = await this.createAcpSession(ctx.providerSessionKey);
+    ctx.acpSessionId = nextSessionId;
+    ctx.startedAtMs = Date.now();
+    ctx.text = "";
+    ctx.sentDelta = false;
+    ctx.fileIds = [];
+    ctx.seenFileKeys.clear();
+    ctx.pendingFileUploads = [];
+    this.activeRunsBySession.set(nextSessionId, ctx);
+    this.bridge.trace({
+      msg_id: ctx.msgId,
+      task_id: ctx.source.event.task_id,
+      channel_id: ctx.source.channelId,
+      run_id: nextSessionId,
+      session_key: ctx.providerSessionKey,
+      stream: "acp",
+      seq: ++ctx.traceSeq,
+      phase: "provider_session_rotated",
+      status: "running",
+      title: "ACP session rotated",
+      message: "Retrying with a fresh ACP session after a non-persisted OpenAI item reference.",
+      data: { previous_session_id: previousSessionId },
+    });
+    this.tracePromptStarted(ctx);
+    try {
+      await this.runAcpPromptToCompletion(ctx);
+    } catch (err) {
+      if (isNonPersistedOpenAIItemError(err)) {
+        await this.forgetAcpSession(ctx.providerSessionKey, ctx.acpSessionId);
+      }
+      throw err;
     }
   }
 
