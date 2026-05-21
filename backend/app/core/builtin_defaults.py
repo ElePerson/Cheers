@@ -27,21 +27,21 @@ class BuiltinPromptTemplateText:
 def coordinator_bot_defaults(locale: str | None = None) -> dict[str, str]:
     locale = normalize_locale(locale)
     capabilities = (
-        ["系统帮助", "项目问答", "记忆读写", "澄清弹窗", "Bot路由建议"]
+        ["系统帮助", "分组问答", "记忆读写", "澄清弹窗", "Bot路由建议"]
         if locale == "zh-CN"
-        else ["System help", "Project Q&A", "Memory read/write", "Clarification dialog", "Bot routing suggestions"]
+        else ["System help", "Group Q&A", "Memory read/write", "Clarification dialog", "Bot routing suggestions"]
     )
     description = localized(
         locale,
         en=(
-            "AgentNexus built-in Coordinator assistant for system help, project Q&A, and memory management. "
-            "It can answer product usage questions, use project memory for business context, read and write "
-            "four project memory layers, and suggest routing to specialist Bots when needed."
+            "AgentNexus built-in Coordinator assistant for system help, group Q&A, and memory management. "
+            "It can answer product usage questions, use group memory for business context, read and write "
+            "four group memory layers, and suggest routing to specialist Bots when needed."
         ),
         zh=(
-            "系统内置协作助手（Coordinator），集使用帮助、项目助手、记忆管理三合一。"
-            "可回答系统使用问题、结合项目记忆回答业务问题、"
-            "读写四层项目记忆、并在需要时建议路由到专业 Bot。"
+            "系统内置协作助手（Coordinator），集使用帮助、分组助手、记忆管理三合一。"
+            "可回答系统使用问题、结合分组记忆回答业务问题、"
+            "读写四层分组记忆、并在需要时建议路由到专业 Bot。"
         ),
     )
     return {
@@ -76,14 +76,14 @@ def helper_onboarding_message(locale: str | None = None) -> str:
         en=(
             "Hi, I am AgentNexus's built-in collaboration assistant @Coordinator.\n\n"
             "You can ask me product questions in natural language, such as how to create a workspace, "
-            "invite members, upload files, mention Bots, inspect project memory, read Docs, "
+            "invite members, upload files, mention Bots, inspect group memory, read Docs, "
             "or connect Agent Bridge / OpenClaw.\n\n"
             "If you are unsure what to do next, tell me your goal and I will break it into concrete steps."
         ),
         zh=(
             "你好，我是 AgentNexus 内置协作助手 @Coordinator。\n\n"
             "你可以直接用自然语言问我如何使用系统，例如：如何创建工作空间、"
-            "邀请成员、上传文件、@ Bot、查看项目记忆、阅读 Docs，"
+            "邀请成员、上传文件、@ Bot、查看分组记忆、阅读 Docs，"
             "或接入 Agent Bridge / OpenClaw。\n\n"
             "如果你不确定下一步怎么做，可以直接告诉我你的目标，我会把操作步骤拆给你。"
         ),

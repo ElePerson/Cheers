@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, get_session
@@ -13,6 +14,16 @@ from app.services.channel_service import ChannelService
 from app.services.workspace_service import WorkspaceService
 
 router = APIRouter(prefix="/dms", tags=["dms"])
+
+
+class DMGroupRenameBody(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+
+
+class DMGroupRenameResponse(BaseModel):
+    project_id: str
+    project_title: str
+    updated_count: int
 
 
 @router.get("", response_model=APIResponse[list[DMInResponse]])
@@ -47,6 +58,35 @@ async def list_dms(
             )
         )
     return APIResponse.ok(out)
+
+
+@router.patch("/groups/{project_id}", response_model=APIResponse[DMGroupRenameResponse])
+async def rename_dm_group(
+    project_id: str,
+    body: DMGroupRenameBody,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> APIResponse:
+    personal = await WorkspaceService(session).ensure_personal_workspace(
+        current_user,
+        locale=locale_from_headers(request.headers),
+    )
+    title = body.title.strip()
+    updated_count = await ChannelService(session).rename_personal_project(
+        workspace_id=personal.workspace_id,
+        current_user=current_user,
+        project_id=project_id,
+        project_title=title,
+    )
+    await session.commit()
+    return APIResponse.ok(
+        DMGroupRenameResponse(
+            project_id=project_id,
+            project_title=title[:80],
+            updated_count=updated_count,
+        )
+    )
 
 
 @router.post("", response_model=APIResponse[DMInResponse])

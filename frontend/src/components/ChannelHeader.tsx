@@ -18,7 +18,7 @@ export const MEMORY_TABS: {
 }[] = [
   {
     id: "PROJECT",
-    label: "Project",
+    label: "Group",
     icon: (
       <AppIcon name="briefcase" />
     ),
@@ -96,7 +96,8 @@ export function ChannelHeader({
     activeDm?.counterparty.username ||
     "DM";
   const dmChatTitle = activeDm?.chat_title?.trim() || activeDm?.title?.trim() || "";
-  const dmProjectTitle = activeDm?.project_title?.trim() || "";
+  const dmProjectTitle =
+    (activeDm?.project_title?.trim() || "").replace(/^Project(\s+\d+)?$/i, "Group$1");
   const dmContextTitle =
     dmProjectTitle && dmChatTitle
       ? `${dmProjectTitle} · ${dmChatTitle}`
