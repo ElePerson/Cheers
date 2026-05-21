@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -40,7 +41,7 @@ interface PromptBuildOptions {
   supportsImages: boolean;
   supportsEmbeddedContext: boolean;
   logger: Logger;
-  ignoreOutputFilePath?: (filePath: string) => void;
+  ignoreOutputFileKey?: (fileKey: string) => void;
 }
 
 interface BridgeTextFile {
@@ -103,7 +104,7 @@ interface RunContext {
   sentDelta: boolean;
   fileIds: string[];
   seenFileKeys: Set<string>;
-  ignoredOutputFilePaths: Set<string>;
+  ignoredOutputFileKeys: Set<string>;
   pendingFileUploads: Promise<void>[];
 }
 
@@ -157,6 +158,7 @@ const OUTPUT_FILE_EXTENSIONS = new Set([
   ".rtf",
   ".svg",
   ".tar",
+  ".tgz",
   ".txt",
   ".webp",
   ".wps",
@@ -318,8 +320,10 @@ function guessContentType(filename: string, fallback?: string): string | undefin
   if (cleanFallback) return cleanFallback;
   const ext = path.extname(filename).toLowerCase();
   const types: Record<string, string> = {
+    ".7z": "application/x-7z-compressed",
     ".csv": "text/csv",
     ".gif": "image/gif",
+    ".gz": "application/gzip",
     ".htm": "text/html",
     ".html": "text/html",
     ".jpeg": "image/jpeg",
@@ -328,7 +332,10 @@ function guessContentType(filename: string, fallback?: string): string | undefin
     ".md": "text/markdown",
     ".pdf": "application/pdf",
     ".png": "image/png",
+    ".rar": "application/vnd.rar",
     ".svg": "image/svg+xml",
+    ".tar": "application/x-tar",
+    ".tgz": "application/gzip",
     ".txt": "text/plain",
     ".webp": "image/webp",
     ".xml": "application/xml",
@@ -412,6 +419,14 @@ function normalizeFileReference(raw: string): string {
 function bytesFromBase64(value: string): Uint8Array {
   const match = value.match(/^data:([^;,]+)?;base64,(.*)$/s);
   return Buffer.from(match ? match[2] : value, "base64");
+}
+
+function fileContentDigest(data: Uint8Array): string {
+  return createHash("sha256").update(data).digest("hex").slice(0, 16);
+}
+
+function fileKeyForPath(filePath: string, mtimeMs: number, size: number, data: Uint8Array): string {
+  return `file:${path.resolve(filePath)}:${mtimeMs}:${size}:${fileContentDigest(data)}`;
 }
 
 function isInsideDir(filePath: string, dir: string): boolean {
@@ -514,14 +529,15 @@ async function fileFromPath(
     if (!info.isFile()) return null;
     if (options.minMtimeMs !== undefined && info.mtimeMs + 1000 < options.minMtimeMs) return null;
     const filename = filenameFromRecord(resource, safeFilename(filePath));
+    const data = await readFile(filePath);
     return {
-      key: `file:${path.resolve(filePath)}:${info.mtimeMs}:${info.size}`,
+      key: fileKeyForPath(filePath, info.mtimeMs, info.size, data),
       filename,
       contentType: guessContentType(
         filename,
         typeof resource.mimeType === "string" ? resource.mimeType : undefined,
       ),
-      data: await readFile(filePath),
+      data,
       path: path.resolve(filePath),
     };
   } catch {
@@ -1026,7 +1042,8 @@ async function saveBridgeBinaryAttachment(
   await mkdir(dir, { recursive: true });
   const data = Buffer.from(binary.dataB64, "base64");
   await writeFile(target, data);
-  options.ignoreOutputFilePath?.(target);
+  const info = await stat(target);
+  options.ignoreOutputFileKey?.(fileKeyForPath(target, info.mtimeMs, info.size, data));
   return {
     filename,
     contentType: binary.contentType || attachment.content_type || "application/octet-stream",
@@ -1489,7 +1506,7 @@ export class AcpBridgeAccount {
       sentDelta: false,
       fileIds: [],
       seenFileKeys: new Set<string>(),
-      ignoredOutputFilePaths: new Set<string>(),
+      ignoredOutputFileKeys: new Set<string>(),
       pendingFileUploads: [],
     };
     this.activeRunsBySession.set(acpSessionId, ctx);
@@ -1600,7 +1617,7 @@ export class AcpBridgeAccount {
       supportsImages: capabilities.image === true,
       supportsEmbeddedContext: capabilities.embeddedContext === true,
       logger: this.logger,
-      ignoreOutputFilePath: (filePath) => ctx.ignoredOutputFilePaths.add(path.resolve(filePath)),
+      ignoreOutputFileKey: (fileKey) => ctx.ignoredOutputFileKeys.add(fileKey),
     }));
     await this.uploadTextLinkedFiles(ctx);
     await Promise.allSettled(ctx.pendingFileUploads);
@@ -1653,7 +1670,7 @@ export class AcpBridgeAccount {
     ctx.sentDelta = false;
     ctx.fileIds = [];
     ctx.seenFileKeys.clear();
-    ctx.ignoredOutputFilePaths.clear();
+    ctx.ignoredOutputFileKeys.clear();
     ctx.pendingFileUploads = [];
     this.activeRunsBySession.set(nextSessionId, ctx);
     this.bridge.trace({
@@ -1970,7 +1987,7 @@ export class AcpBridgeAccount {
 
   private async uploadFiles(ctx: RunContext, files: ExtractedFile[]): Promise<void> {
     for (const file of files) {
-      if (file.path && ctx.ignoredOutputFilePaths.has(path.resolve(file.path))) continue;
+      if (ctx.ignoredOutputFileKeys.has(file.key)) continue;
       if (ctx.seenFileKeys.has(file.key)) continue;
       ctx.seenFileKeys.add(file.key);
       try {

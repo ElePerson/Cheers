@@ -254,6 +254,10 @@ compatibility fallback, the connector also scans the final ACP text for
 Markdown links or `file://` links that point inside `agent.cwd` and uploads
 newly-created/modified files as AgentNexus attachments.
 
+Archive outputs such as npm package tarballs are supported too. If `npm pack`
+creates `agentnexus-acp-connector-0.1.9.tgz` under `agent.cwd`, the ACP agent
+can return it by mentioning that filename, a Markdown link, or a `file://` URI.
+
 If the ACP agent needs to create or modify files before returning them, set
 `agent.permissionMode` intentionally. The default is `reject`; use `allow` only
 for a trusted local workspace.
@@ -283,6 +287,13 @@ is allowed to read. Binary inbound attachments are written below:
 
 If the ACP agent enforces tool permissions, allow file reads for that workspace
 or adjust the connector/agent permission mode intentionally.
+
+### A generated `.tgz` package is not returned
+
+Upgrade to a connector version that recognizes npm tarballs, restart the daemon,
+and make sure the generated `.tgz` file is under `agent.cwd`. The ACP agent can
+mention the package as a relative filename, Markdown link, absolute path, or
+`file://` URI.
 
 ### The connector cannot hydrate a large binary file
 

@@ -873,6 +873,56 @@ describe("ConnectorRuntime", () => {
     await runtime.stop();
   });
 
+  it("uploads npm package tarballs referenced by relative filename", async () => {
+    const statePath = path.join(tmp, "state.json");
+    const runtime = new ConnectorRuntime(
+      {
+        "opencode-main": {
+          botToken: "agb_test",
+          controlUrl: bridge.controlUrl,
+          dataUrl: bridge.dataUrl,
+          advanced: { reconnectBaseMs: 20, reconnectMaxMs: 100, heartbeatIntervalMs: 60_000, sendAckTimeoutMs: 1000 },
+          agent: {
+            transport: "stdio",
+            command: process.execPath,
+            args: [fakeAgent],
+            cwd: tmp,
+            env: { FAKE_ACP_RETURN_TGZ_FILE_REFERENCE: "1" },
+          },
+        },
+      },
+      new SessionStateStore(statePath),
+      console,
+    );
+    await runtime.start();
+    await waitFor(() => bridge.connectionsFor("control") === 1 && bridge.connectionsFor("data") === 1);
+
+    bridge.pushMessage({
+      task_id: "task-package-tarball",
+      channel_id: "C1",
+      seq: 11,
+      placeholder_msg_id: "ph-package-tarball",
+      provider_session_key: "agentnexus:channel:C1",
+      trigger_message: { text: "build the latest npm package" },
+    });
+
+    await waitFor(() => bridge.receivedUploads.length === 1 && bridge.receivedDones.length === 1);
+    expect(bridge.receivedUploads[0]).toMatchObject({
+      type: "file_upload",
+      channel_id: "C1",
+      filename: "agentnexus-acp-connector-0.1.9.tgz",
+      content_type: "application/gzip",
+    });
+    expect(Buffer.from(String(bridge.receivedUploads[0].data_b64), "base64").toString("utf8"))
+      .toBe("fake npm package tarball");
+    expect(bridge.receivedDones[0]).toMatchObject({
+      type: "done",
+      msg_id: "ph-package-tarball",
+      file_ids: ["file-1"],
+    });
+    await runtime.stop();
+  });
+
   it("uploads linked local files when ACP includes a line suffix", async () => {
     const statePath = path.join(tmp, "state.json");
     const runtime = new ConnectorRuntime(
@@ -1183,6 +1233,68 @@ describe("ConnectorRuntime", () => {
     expect(streamed).toContain(savedPath);
     expect(streamed).toContain("[resource:file://");
     expect(bridge.receivedUploads).toHaveLength(0);
+    await runtime.stop();
+  });
+
+  it("uploads downloaded attachment files after the ACP agent modifies them in place", async () => {
+    const statePath = path.join(tmp, "state.json");
+    bridge.setBinaryFile("doc-edit", {
+      filename: "legacy.doc",
+      contentType: "application/msword",
+      data: Buffer.from("legacy document bytes"),
+    });
+    const runtime = new ConnectorRuntime(
+      {
+        "opencode-main": {
+          botToken: "agb_test",
+          controlUrl: bridge.controlUrl,
+          dataUrl: bridge.dataUrl,
+          advanced: { reconnectBaseMs: 20, reconnectMaxMs: 100, heartbeatIntervalMs: 60_000, sendAckTimeoutMs: 1000 },
+          agent: {
+            transport: "stdio",
+            command: process.execPath,
+            args: [fakeAgent],
+            cwd: tmp,
+            env: { FAKE_ACP_MODIFY_PROMPT_ATTACHMENT_PATH: "1" },
+          },
+        },
+      },
+      new SessionStateStore(statePath),
+      console,
+    );
+    await runtime.start();
+    await waitFor(() => bridge.connectionsFor("control") === 1 && bridge.connectionsFor("data") === 1);
+
+    bridge.pushMessage({
+      task_id: "task-edited-binary-attachment",
+      channel_id: "C1",
+      seq: 7,
+      placeholder_msg_id: "ph-edited-binary-attachment",
+      provider_session_key: "agentnexus:channel:C1",
+      trigger_message: { text: "edit the legacy document and return it" },
+      attachments: [
+        {
+          file_id: "doc-edit",
+          filename: "legacy.doc",
+          content_type: "application/msword",
+          size_bytes: 21,
+        },
+      ],
+    });
+
+    await waitFor(() => bridge.receivedUploads.length === 1 && bridge.receivedDones.length === 1);
+    expect(bridge.receivedUploads[0]).toMatchObject({
+      type: "file_upload",
+      channel_id: "C1",
+      filename: "legacy.doc",
+    });
+    expect(Buffer.from(String(bridge.receivedUploads[0].data_b64), "base64").toString("utf8"))
+      .toBe("modified legacy document bytes");
+    expect(bridge.receivedDones[0]).toMatchObject({
+      type: "done",
+      msg_id: "ph-edited-binary-attachment",
+      file_ids: ["file-1"],
+    });
     await runtime.stop();
   });
 });
