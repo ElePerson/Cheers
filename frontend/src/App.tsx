@@ -148,7 +148,7 @@ function personalProjectChannelPurpose(
   return JSON.stringify({
     kind: PERSONAL_PROJECT_CHANNEL_PURPOSE_KIND,
     project_id: channel.project_id,
-    project_title: channel.project_title || "Project",
+    project_title: channel.project_title || "Group",
     task_title: taskTitle,
   });
 }

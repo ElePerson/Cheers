@@ -271,7 +271,7 @@ class ChannelService:
             resolved_project_id = _clean_short_text(project_id) or f"project:{uuid4()}"
             resolved_project_title = (
                 _clean_short_text(project_title)
-                or "Project"
+                or "Group"
             )
             resolved_chat_title = (
                 _clean_short_text(chat_title)
@@ -392,6 +392,67 @@ class ChannelService:
             channel_ids=channel_ids,
         )
 
+    async def rename_personal_project(
+        self,
+        workspace_id: str,
+        current_user: User,
+        project_id: str,
+        project_title: str,
+    ) -> int:
+        clean_project_id = _clean_short_text(project_id)
+        clean_project_title = _clean_short_text(project_title)
+        if not clean_project_id:
+            raise BadRequestError("group id is required")
+        if not clean_project_title:
+            raise BadRequestError("group name is required")
+
+        ws = await self.ws_repo.get_by_id(workspace_id)
+        if not ws or ws.kind != "personal":
+            raise BadRequestError("groups can only be renamed in Personal workspace")
+        wm = await self.ws_repo.get_membership(workspace_id, current_user.user_id)
+        if not wm and not is_admin(current_user):
+            raise ForbiddenError("not a member of this workspace")
+
+        result = await self.session.execute(
+            select(Channel)
+            .join(ChannelMembership, Channel.channel_id == ChannelMembership.channel_id)
+            .where(
+                Channel.workspace_id == workspace_id,
+                ChannelMembership.member_id == current_user.user_id,
+                ChannelMembership.member_type == "user",
+            )
+        )
+        updated = 0
+        for channel in result.scalars().all():
+            if channel.type == "dm":
+                meta = _parse_personal_project_purpose(channel.purpose)
+                if meta.get("project_id") != clean_project_id:
+                    continue
+                channel.purpose = _personal_project_purpose(
+                    project_id=clean_project_id,
+                    project_title=clean_project_title,
+                    chat_title=meta.get("chat_title") or "Chat 1",
+                )
+                self.session.add(channel)
+                updated += 1
+                continue
+
+            meta = parse_personal_project_channel_purpose(channel.purpose)
+            if meta.get("project_id") != clean_project_id:
+                continue
+            channel.purpose = _personal_project_channel_purpose(
+                project_id=clean_project_id,
+                project_title=clean_project_title,
+                task_title=meta.get("task_title") or channel.name or "Task",
+            )
+            self.session.add(channel)
+            updated += 1
+
+        if updated == 0:
+            raise NotFoundError("group not found")
+        await self.session.flush()
+        return updated
+
     async def mark_read(self, channel_id: str, user_id: str) -> datetime | None:
         """Move the user's read cursor to "now" for this channel. Returns the
         new timestamp, or None if the user isn't a member of the channel."""
@@ -439,9 +500,9 @@ class ChannelService:
         )
         if has_project_meta:
             if ws.kind != "personal" or type != "private":
-                raise BadRequestError("个人 Project task 只能创建在 Personal workspace 的 private channel 中")
+                raise BadRequestError("个人 Group task 只能创建在 Personal workspace 的 private channel 中")
             resolved_project_id = _clean_short_text(project_id) or f"project:{uuid4()}"
-            resolved_project_title = _clean_short_text(project_title) or "Project"
+            resolved_project_title = _clean_short_text(project_title) or "Group"
             resolved_task_title = _clean_short_text(task_title) or _clean_short_text(name) or "Task"
             purpose = _personal_project_channel_purpose(
                 project_id=resolved_project_id,

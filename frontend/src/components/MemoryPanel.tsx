@@ -15,9 +15,9 @@ import { ProjectView } from "../features/memory/views/ProjectView";
 
 const API = "/api/v1";
 const PANEL_TITLE_BY_LAYER: Record<string, string> = {
-  PROJECT: "Project memory",
-  ANCHOR: "Project memory",
-  PROGRESS: "Project progress",
+  PROJECT: "Group memory",
+  ANCHOR: "Group memory",
+  PROGRESS: "Group progress",
   DECISIONS: "Decisions",
   FILES_INDEX: "Files",
   MEMBERS: "Members",
@@ -115,7 +115,7 @@ export function MemoryPanel({
 
   const isProject = activeLayer === "PROJECT";
   const PROJECT_META = {
-    label: "Project memory",
+    label: "Group memory",
     desc: "Core goals and progress (Anchor + Progress)",
     color: "blue",
     icon: "◆",

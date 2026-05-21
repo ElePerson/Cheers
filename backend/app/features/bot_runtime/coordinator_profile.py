@@ -37,17 +37,17 @@ class CoordinatorContextProfile:
 
 HELP_KEYWORDS = (
     "帮助", "怎么用", "不会用", "说明书", "文档", "入口", "功能入口",
-    "创建项目", "建项目", "新建项目", "怎么建", "加入项目", "加入频道",
+    "创建分组", "建分组", "新建分组", "创建项目", "建项目", "新建项目", "怎么建", "加入分组", "加入项目", "加入频道",
     "拉bot", "邀请bot", "加bot", "bot不在", "@没反应", "没反应",
     "安装", "部署", "环境", "报错", "排查", "agent bridge", "openclaw",
-    "connect agent bridge", "how to use", "how to create", "how to join",
+    "connect agent bridge", "how to use", "how to create", "how to join", "create group", "join group",
 )
 FILE_KEYWORDS = (
     "文件", "附件", "上传", "读取", "预览", "总结文件", "概括文件",
     "图片", "图像", "pdf", "docx", "xlsx", "pptx", "file", "attachment",
 )
 MEMORY_KEYWORDS = (
-    "记忆", "记住", "记录", "更新项目", "项目锚点", "锚点", "决策",
+    "记忆", "记住", "记录", "更新分组", "分组锚点", "更新项目", "项目锚点", "锚点", "决策",
     "进度", "里程碑", "待办", "todo", "任务", "结论",
 )
 DELEGATION_KEYWORDS = (

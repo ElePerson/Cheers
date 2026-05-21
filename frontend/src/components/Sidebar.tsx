@@ -24,7 +24,7 @@ import {
 import { MemberAvatar, type MemberKind } from "./members";
 import type { SearchSelection } from "../types";
 import { WorkspaceSettingsModal } from "./WorkspaceSettingsModal";
-import { Modal } from "./Modal";
+import { Modal, ModalFooter } from "./Modal";
 import { Tooltip } from "./Tooltip";
 
 interface SidebarProps {
@@ -73,6 +73,10 @@ type PersonalAddDialogState = {
   projectId: string;
   projectTitle: string;
 } | null;
+type RenameGroupDialogState = {
+  projectId: string;
+  projectTitle: string;
+} | null;
 type PersonalSectionKey = "dms" | "files" | "projects";
 type PersonalFileItem = FileInfo & {
   channel_id?: string | null;
@@ -85,6 +89,11 @@ type PersonalFileItem = FileInfo & {
 type ProjectTaskItem =
   | { kind: "dm"; key: string; dm: DM; botLabel: string; label: string; createdAt: number }
   | { kind: "channel"; key: string; channel: Channel; label: string; createdAt: number };
+
+const GROUP_FALLBACK_TITLE = "Group 1";
+
+const displayGroupTitle = (value: string | null | undefined) =>
+  (value || GROUP_FALLBACK_TITLE).replace(/^Project(\s+\d+)?$/i, "Group$1");
 
 const wsColor = (id: string) => {
   let h = 0;
@@ -214,10 +223,14 @@ export function Sidebar({
   const searchPickerRef = useRef<SearchPickerHandle | null>(null);
   const [personalAddDialog, setPersonalAddDialog] =
     useState<PersonalAddDialogState>(null);
+  const [renameGroupDialog, setRenameGroupDialog] =
+    useState<RenameGroupDialogState>(null);
   const [projectDraftTitle, setProjectDraftTitle] = useState("");
+  const [groupRenameDraft, setGroupRenameDraft] = useState("");
   const [projectTaskKind, setProjectTaskKind] = useState<"bot" | "channel">("bot");
   const [channelTaskDraftTitle, setChannelTaskDraftTitle] = useState("");
   const [creatingProjectChannelTask, setCreatingProjectChannelTask] = useState(false);
+  const [renamingGroup, setRenamingGroup] = useState(false);
   const [personalFiles, setPersonalFiles] = useState<PersonalFileItem[]>([]);
   const [personalFilesLoading, setPersonalFilesLoading] = useState(false);
   const [personalFilesDragOver, setPersonalFilesDragOver] = useState(false);
@@ -296,7 +309,7 @@ export function Sidebar({
       const cp = dm.counterparty;
       const botLabel = cp.display_name || cp.username || "Bot";
       const projectId = dm.project_id || "personal-project-default";
-      const projectTitle = dm.project_title || "Project 1";
+      const projectTitle = displayGroupTitle(dm.project_title);
       const next = (counts.get(projectId) || 0) + 1;
       counts.set(projectId, next);
       const chatLabel = dm.chat_title?.trim() || dm.title?.trim() || `Chat ${next}`;
@@ -317,7 +330,7 @@ export function Sidebar({
       ) {
         continue;
       }
-      const projectTitle = channel.project_title || "Project 1";
+      const projectTitle = displayGroupTitle(channel.project_title);
       ensureGroup(channel.project_id, projectTitle).tasks.push({
         kind: "channel",
         key: channel.channel_id,
@@ -334,7 +347,7 @@ export function Sidebar({
       }));
   }, [channels, selectedWorkspaceId, visiblePersonalDms]);
 
-  const nextProjectTitle = () => `Project ${projectGroups.length + 1}`;
+  const nextProjectTitle = () => `Group ${projectGroups.length + 1}`;
 
   const nextProjectChatTitle = (projectId: string) => {
     const count =
@@ -585,6 +598,57 @@ export function Sidebar({
     });
   };
 
+  const openRenameGroupDialog = (project: { projectId: string; projectTitle: string }) => {
+    setRenameGroupDialog(project);
+    setGroupRenameDraft(project.projectTitle);
+  };
+
+  const renameGroup = async () => {
+    if (!renameGroupDialog) return;
+    const nextTitle = groupRenameDraft.trim();
+    if (!nextTitle) {
+      toast.error("Enter a group name");
+      return;
+    }
+    setRenamingGroup(true);
+    try {
+      const response = await apiFetch(
+        `/dms/groups/${encodeURIComponent(renameGroupDialog.projectId)}`,
+        {
+          method: "PATCH",
+          token: authToken,
+          body: { title: nextTitle },
+        },
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.status === "error") {
+        throw new Error(payload?.detail || payload?.message || "Rename failed");
+      }
+      const savedTitle = payload?.data?.project_title || nextTitle;
+      setDMs?.((prev) =>
+        prev.map((dm) =>
+          dm.project_id === renameGroupDialog.projectId
+            ? { ...dm, project_title: savedTitle }
+            : dm,
+        ),
+      );
+      setChannels((prev) =>
+        prev.map((channel) =>
+          channel.project_id === renameGroupDialog.projectId
+            ? { ...channel, project_title: savedTitle }
+            : channel,
+        ),
+      );
+      setRenameGroupDialog(null);
+      setGroupRenameDraft("");
+      toast.success("Group renamed");
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Rename failed");
+    } finally {
+      setRenamingGroup(false);
+    }
+  };
+
   const openMessageHit = (channelId: string, msgId: string) => {
     if (onOpenMessage) {
       onOpenMessage(channelId, msgId);
@@ -632,7 +696,7 @@ export function Sidebar({
     }
     if (personalAddDialog.kind === "project" || personalAddDialog.kind === "projectChat") {
       if (selection.type !== "bot") {
-        toast.error("Select a bot to add to the project");
+        toast.error("Select a bot to add to the group");
         return;
       }
       const projectTitle =
@@ -1102,7 +1166,7 @@ export function Sidebar({
       )}
 
       {/* Personal workspace: user DMs, files gathered from personal chats, and
-          bot conversations grouped under Projects. */}
+          bot conversations gathered under Groups. */}
       {isPersonalWorkspace && (
         <>
       <div className="an-rail-section-h">
@@ -1320,12 +1384,12 @@ export function Sidebar({
       </div>
 
       <div className="an-rail-section-h">
-        <span>Project</span>
+        <span>Group</span>
         <button
           type="button"
           className="an-rail-section-toggle an-rail-section-toggle-solo"
           title={personalSectionExpanded("projects") ? "Collapse" : "Expand"}
-          aria-label={personalSectionExpanded("projects") ? "Collapse Project" : "Expand Project"}
+          aria-label={personalSectionExpanded("projects") ? "Collapse Group" : "Expand Group"}
           aria-expanded={personalSectionExpanded("projects")}
           onClick={() => togglePersonalSection("projects")}
         >
@@ -1338,17 +1402,17 @@ export function Sidebar({
           <button
             type="button"
             className="an-rail-row an-rail-action-row w-full"
-            title="New Project"
+            title="New Group"
             onClick={() => openPersonalAddDialog("project")}
           >
             <span className="an-sigil">
               <AppIcon name="plus" />
             </span>
-            <span className="an-name">New Project</span>
+            <span className="an-name">New Group</span>
           </button>
         </li>
         {projectGroups.length === 0 && (
-          <li className="an-rail-empty">No projects yet</li>
+          <li className="an-rail-empty">No groups yet</li>
         )}
         {projectGroups.map((project) => (
           <li key={project.projectId} className="an-project-group">
@@ -1359,6 +1423,15 @@ export function Sidebar({
                 </span>
                 <span className="an-name">{project.projectTitle}</span>
               </div>
+              <button
+                type="button"
+                className="an-project-add"
+                title="Rename Group"
+                aria-label={`Rename Group ${project.projectTitle}`}
+                onClick={() => openRenameGroupDialog(project)}
+              >
+                <AppIcon name="pencil" />
+              </button>
             </div>
             <ul className="an-project-chats">
               <li>
@@ -1559,13 +1632,55 @@ export function Sidebar({
       }
     />
     <Modal
+      open={Boolean(renameGroupDialog)}
+      onClose={() => {
+        if (!renamingGroup) setRenameGroupDialog(null);
+      }}
+      title="Rename Group"
+      description={renameGroupDialog?.projectTitle}
+    >
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium" style={{ color: "var(--fg-2)" }}>
+          Group name
+        </span>
+        <input
+          value={groupRenameDraft}
+          onChange={(event) => setGroupRenameDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void renameGroup();
+          }}
+          className="an-input"
+          maxLength={80}
+          autoFocus
+        />
+      </label>
+      <ModalFooter>
+        <button
+          type="button"
+          className="an-btn an-btn-ghost"
+          disabled={renamingGroup}
+          onClick={() => setRenameGroupDialog(null)}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="an-btn an-btn-primary"
+          disabled={renamingGroup}
+          onClick={() => void renameGroup()}
+        >
+          {renamingGroup ? "Saving..." : "Save"}
+        </button>
+      </ModalFooter>
+    </Modal>
+    <Modal
       open={Boolean(personalAddDialog)}
       onClose={() => setPersonalAddDialog(null)}
       title={
         personalAddDialog?.kind === "dm"
           ? "Start DM"
           : personalAddDialog?.kind === "project"
-            ? "Create Project"
+            ? "Create Group"
             : beginnerMode
               ? "New Task"
               : "Add Bot Chat"
@@ -1575,17 +1690,17 @@ export function Sidebar({
           ? "Search members and create DMs."
           : personalAddDialog?.kind === "project"
             ? beginnerMode
-              ? "Name the project. A private task channel will include every bot you can use."
-              : "Name the project, then choose the first task."
+              ? "Name the group. A private task channel will include every bot you can use."
+              : "Name the group, then choose the first task."
             : beginnerMode
-              ? `Create a private task channel in ${personalAddDialog?.projectTitle || "Project"}.`
-              : `Add a task to ${personalAddDialog?.projectTitle || "Project"}.`
+              ? `Create a private task channel in ${personalAddDialog?.projectTitle || "Group"}.`
+              : `Add a task to ${personalAddDialog?.projectTitle || "Group"}.`
       }
     >
       {personalAddDialog?.kind === "project" && (
         <label className="mb-3 block">
           <span className="mb-1 block text-xs font-medium" style={{ color: "var(--fg-2)" }}>
-            Project Name
+            Group Name
           </span>
           <input
             value={projectDraftTitle}
