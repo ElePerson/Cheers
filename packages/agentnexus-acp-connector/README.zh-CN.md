@@ -251,6 +251,10 @@ compatibility fallback, the connector also scans the final ACP text for
 Markdown links or `file://` links that point inside `agent.cwd` and uploads
 newly-created/modified files as AgentNexus attachments.
 
+归档类输出也支持，例如 npm package tarball。如果 `npm pack` 在 `agent.cwd`
+下生成了 `agentnexus-acp-connector-0.1.9.tgz`，ACP agent 可以通过提及该文件名、
+Markdown 链接或 `file://` URI 将它回传。
+
 If the ACP agent needs to create or modify files before returning them, set
 `agent.permissionMode` intentionally. The default is `reject`; use `allow` only
 for a trusted local workspace.
@@ -280,6 +284,12 @@ agentnexus-acp-connector restart --name opencode-main
 
 如果 ACP agent 有工具权限限制，需要允许该工作区的文件读取，或有意识地调整
 connector/agent 的 permission mode。
+
+### 生成的 `.tgz` 包没有被回传
+
+升级到可识别 npm tarball 的 connector 版本，重启 daemon，并确认生成的 `.tgz`
+文件位于 `agent.cwd` 下。ACP agent 可以通过相对文件名、Markdown 链接、绝对路径
+或 `file://` URI 返回该包文件。
 
 ### connector 无法 hydrate 大文件
 

@@ -11,8 +11,10 @@ const returnFileLink = process.env.FAKE_ACP_RETURN_FILE_LINK === "1";
 const returnFileLinkWithLine = process.env.FAKE_ACP_RETURN_FILE_LINK_WITH_LINE === "1";
 const returnMissingFileLink = process.env.FAKE_ACP_RETURN_MISSING_FILE_LINK === "1";
 const returnFileReferences = process.env.FAKE_ACP_RETURN_FILE_REFERENCES === "1";
+const returnTgzFileReference = process.env.FAKE_ACP_RETURN_TGZ_FILE_REFERENCE === "1";
 const returnImage = process.env.FAKE_ACP_RETURN_IMAGE === "1";
 const returnOptions = process.env.FAKE_ACP_OPTIONS === "1";
+const modifyPromptAttachmentPath = process.env.FAKE_ACP_MODIFY_PROMPT_ATTACHMENT_PATH === "1";
 const promptErrorKind = process.env.FAKE_ACP_PROMPT_ERROR_KIND || "";
 const promptErrorMessage = process.env.FAKE_ACP_PROMPT_ERROR_MESSAGE || "";
 const failFirstPromptWithNonPersistedItem = process.env.FAKE_ACP_FAIL_FIRST_PROMPT_NONPERSISTED_ITEM === "1";
@@ -173,6 +175,12 @@ async function handle(frame) {
     if (hangPrompt) return;
     if (promptDelayMs > 0 && (!promptDelayIfIncludes || promptText.includes(promptDelayIfIncludes))) {
       await sleep(promptDelayMs);
+    }
+    if (modifyPromptAttachmentPath) {
+      const match = /^Saved locally:\s*(.+)$/m.exec(promptText);
+      if (match) {
+        await writeFile(match[1].trim(), "modified legacy document bytes", "utf8");
+      }
     }
     if (failFirstPromptWithNonPersistedItem && !nonPersistedItemFailureSent) {
       nonPersistedItemFailureSent = true;
@@ -338,6 +346,22 @@ async function handle(frame) {
             type: "file",
             path: structuredPath,
             mimeType: "text/plain",
+          },
+        },
+      });
+    }
+    if (returnTgzFileReference) {
+      const cwd = sessionCwd(params.sessionId);
+      const filename = "agentnexus-acp-connector-0.1.9.tgz";
+      const filePath = path.join(cwd, filename);
+      await writeFile(filePath, Buffer.from("fake npm package tarball"));
+      notify("session/update", {
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: `\nPackage file: ${filename}`,
           },
         },
       });
