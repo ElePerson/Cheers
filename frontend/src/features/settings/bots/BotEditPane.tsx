@@ -86,13 +86,6 @@ function connectorOptionValues(option: {
   return normalized;
 }
 
-function connectorOptionChoices(option: {
-  options?: Array<{ value?: string; id?: string; name?: string; description?: string | null }>;
-  values?: Array<{ id?: string; name?: string; description?: string | null }>;
-}): Array<{ value: string; name: string }> {
-  return connectorOptionValues(option).map((value) => ({ value: value.id, name: value.name }));
-}
-
 function connectorOptionCurrentValue(
   option: { currentValue?: string | null; currentValueId?: string | null },
   values: Array<{ id: string }> = [],
@@ -146,7 +139,17 @@ export function BotEditPane({
     return id === "model" || name.includes("model");
   });
   const discoveredModelValues = discoveredModelOption ? connectorOptionValues(discoveredModelOption) : [];
-  const connectorModelListId = `connector-model-options-${bot.bot_id}`;
+  const showConnectorModelOverride = discoveredModelValues.length === 0;
+  const advancedDiscoveredConfigOptions = discoveredConfigOptions.filter((option) => option !== discoveredModelOption);
+  const showLiveAcpDetails = Boolean(
+    connectorOptions && (
+      connectorOptions.agentInfo ||
+      discoveredModes.length > 0 ||
+      advancedDiscoveredConfigOptions.length > 0 ||
+      connectorControl?.last_option_status ||
+      connectorOptions.truncated
+    ),
+  );
   const [savingConnectorControl, setSavingConnectorControl] = useState(false);
   const [agentnexusApprovalMode, setAgentnexusApprovalMode] = useState<ConnectorPermissionMode>(
     normalizeConnectorPermissionMode(connectorSettings.agentnexusApprovalMode ?? connectorSettings.permissionMode),
@@ -162,9 +165,6 @@ export function BotEditPane({
   );
   const [connectorCwd, setConnectorCwd] = useState(connectorSettings.cwd || "");
   const [connectorModel, setConnectorModel] = useState(connectorSettings.model || "");
-  const [connectorConfigOptionValues, setConnectorConfigOptionValues] = useState<Record<string, string>>(
-    connectorSettings.configOptions || {},
-  );
   const [applyingAcpOptionKey, setApplyingAcpOptionKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -183,7 +183,6 @@ export function BotEditPane({
     setConnectorRequestTimeoutSeconds(msToSeconds(nextSettings.requestTimeoutMs, 120));
     setConnectorCwd(nextSettings.cwd || "");
     setConnectorModel(nextSettings.model || "");
-    setConnectorConfigOptionValues(nextSettings.configOptions || {});
     setConnectionTest(null);
   }, [
     bot.avatar_url,
@@ -370,11 +369,7 @@ export function BotEditPane({
         requestTimeoutMs: secondsToMs(connectorRequestTimeoutSeconds),
       };
       if (connectorCwd.trim()) settings.cwd = connectorCwd.trim();
-      if (connectorModel.trim()) settings.model = connectorModel.trim();
-      const configOptions = Object.fromEntries(
-        Object.entries(connectorConfigOptionValues).filter(([key, value]) => key.trim() && value.trim()),
-      );
-      if (Object.keys(configOptions).length > 0) settings.configOptions = configOptions;
+      if (showConnectorModelOverride && connectorModel.trim()) settings.model = connectorModel.trim();
       const res = await apiFetch(`/bots/${bot.bot_id}/connector-control`, {
         method: "PUT",
         token: authToken,
@@ -639,23 +634,6 @@ export function BotEditPane({
                 <option value="allow">Allow</option>
                 <option value="cancel">Cancel</option>
               </select>
-              <div className="an-rc-sub" style={{ marginTop: 4 }}>
-                Platform policy for ACP approval requests that reach AgentNexus.
-              </div>
-            </Field>
-            <Field label="Agent native permission mode">
-              <select
-                value={agentNativePermissionMode}
-                onChange={(e) => setAgentNativePermissionMode(normalizeAgentNativePermissionMode(e.target.value))}
-                className={inputCls}
-              >
-                <option value="ask">Ask through ACP</option>
-                <option value="allow">Allow in agent</option>
-                <option value="deny">Deny in agent</option>
-              </select>
-              <div className="an-rc-sub" style={{ marginTop: 4 }}>
-                Provider-side mode; use ask when the provider should forward requests to AgentNexus.
-              </div>
             </Field>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
               <Field label="Working directory">
@@ -666,99 +644,81 @@ export function BotEditPane({
                   placeholder="/tmp/agent-workspace"
                 />
               </Field>
-              <Field label="OpenCode model">
-                <input
-                  value={connectorModel}
-                  onChange={(e) => setConnectorModel(e.target.value)}
-                  className={inputCls}
-                  list={discoveredModelValues.length ? connectorModelListId : undefined}
-                  placeholder="gpt-5.5"
-                />
-                {discoveredModelValues.length > 0 && (
-                  <datalist id={connectorModelListId}>
+              {discoveredModelOption && discoveredModelValues.length > 0 ? (
+                <Field label={connectorOptionTitle(discoveredModelOption)}>
+                  <select
+                    value={connectorOptionCurrentValue(discoveredModelOption, discoveredModelValues)}
+                    onChange={(e) => void setAcpConfigOption(discoveredModelOption, e.target.value)}
+                    disabled={applyingAcpOptionKey?.startsWith(`${safeConnectorText(discoveredModelOption.id, "")}:`)}
+                    className={inputCls}
+                  >
                     {discoveredModelValues.map((value) => {
-                      return <option key={value.id} value={value.id} label={value.name} />;
+                      return (
+                        <option key={value.id} value={value.id}>
+                          {value.name}{value.id !== value.name ? ` (${value.id})` : ""}
+                        </option>
+                      );
                     })}
-                  </datalist>
-                )}
-              </Field>
-              <Field label="Prompt timeout (seconds)">
-                <input
-                  type="number"
-                  min={5}
-                  max={3600}
-                  value={connectorPromptTimeoutSeconds}
-                  onChange={(e) => setConnectorPromptTimeoutSeconds(Number(e.target.value || 0))}
-                  className={inputCls}
-                />
-              </Field>
-              <Field label="Request timeout (seconds)">
-                <input
-                  type="number"
-                  min={5}
-                  max={3600}
-                  value={connectorRequestTimeoutSeconds}
-                  onChange={(e) => setConnectorRequestTimeoutSeconds(Number(e.target.value || 0))}
-                  className={inputCls}
-                />
-              </Field>
+                  </select>
+                </Field>
+              ) : showConnectorModelOverride && (
+                <Field label="Model override">
+                  <input
+                    value={connectorModel}
+                    onChange={(e) => setConnectorModel(e.target.value)}
+                    className={inputCls}
+                    placeholder="gpt-5.5"
+                  />
+                </Field>
+              )}
             </div>
+            <details>
+              <summary className="an-rc-title" style={{ cursor: "pointer" }}>Advanced connector settings</summary>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, marginTop: 10 }}>
+                <Field label="Agent native permission mode">
+                  <select
+                    value={agentNativePermissionMode}
+                    onChange={(e) => setAgentNativePermissionMode(normalizeAgentNativePermissionMode(e.target.value))}
+                    className={inputCls}
+                  >
+                    <option value="ask">Ask through ACP</option>
+                    <option value="allow">Allow in agent</option>
+                    <option value="deny">Deny in agent</option>
+                  </select>
+                </Field>
+                <Field label="Prompt timeout (seconds)">
+                  <input
+                    type="number"
+                    min={5}
+                    max={3600}
+                    value={connectorPromptTimeoutSeconds}
+                    onChange={(e) => setConnectorPromptTimeoutSeconds(Number(e.target.value || 0))}
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="Request timeout (seconds)">
+                  <input
+                    type="number"
+                    min={5}
+                    max={3600}
+                    value={connectorRequestTimeoutSeconds}
+                    onChange={(e) => setConnectorRequestTimeoutSeconds(Number(e.target.value || 0))}
+                    className={inputCls}
+                  />
+                </Field>
+              </div>
+            </details>
             {connectorControl?.last_status?.rejected?.length ? (
               <div className="an-inline-status" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
                 {connectorControl.last_status.rejected.map((item) => `${item.field || "field"}: ${item.reason || "rejected"}`).join("; ")}
               </div>
             ) : null}
-            {discoveredConfigOptions.length > 0 && (
-              <div style={{ display: "grid", gap: 8 }}>
-                <div className="an-rc-title">ACP protocol options</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
-                  {discoveredConfigOptions.map((option) => {
-                    const id = safeConnectorText(option.id, "");
-                    if (!id) return null;
-                    const choices = connectorOptionChoices(option);
-                    const value = connectorConfigOptionValues[id] ?? connectorOptionCurrentValue(option);
-                    return (
-                      <Field key={id} label={connectorOptionTitle(option)}>
-                        <>
-                          {choices.length > 0 ? (
-                            <select
-                              value={value}
-                              onChange={(e) => {
-                                setConnectorConfigOptionValues((prev) => ({ ...prev, [id]: e.target.value }));
-                              }}
-                              className={inputCls}
-                            >
-                              {choices.map((choice) => (
-                                <option key={choice.value} value={choice.value}>
-                                  {choice.name}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <input
-                              value={value}
-                              onChange={(e) => {
-                                setConnectorConfigOptionValues((prev) => ({ ...prev, [id]: e.target.value }));
-                              }}
-                              className={inputCls}
-                            />
-                          )}
-                          {option.description && (
-                            <div className="an-rc-sub" style={{ marginTop: 4 }}>
-                              {option.description}
-                            </div>
-                          )}
-                        </>
-                      </Field>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            {connectorOptions && (
-              <div className="an-inline-status" style={{ background: "var(--surface-soft)", color: "var(--fg-1)" }}>
+            {showLiveAcpDetails && connectorOptions && (
+              <details>
+                <summary className="an-rc-title" style={{ cursor: "pointer" }}>Live ACP options</summary>
+                <div className="an-inline-status" style={{ background: "var(--surface-soft)", color: "var(--fg-1)", marginTop: 8 }}>
                 <div style={{ fontWeight: 650 }}>
-                  ACP discovered options
+                  Agent runtime
                   {connectorOptions.reported_at ? ` · ${new Date(connectorOptions.reported_at).toLocaleString()}` : ""}
                 </div>
                 {connectorOptions.agentInfo && (
@@ -777,9 +737,9 @@ export function BotEditPane({
                     }).join(", ")}
                   </div>
                 )}
-                {discoveredConfigOptions.length > 0 && (
+                {advancedDiscoveredConfigOptions.length > 0 && (
                   <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
-                    {discoveredConfigOptions.map((option) => {
+                    {advancedDiscoveredConfigOptions.map((option) => {
                       const configId = safeConnectorText(option.id, "");
                       const values = connectorOptionValues(option);
                       const selectValue = connectorOptionCurrentValue(option, values);
@@ -837,6 +797,7 @@ export function BotEditPane({
                 )}
                 {connectorOptions.truncated && <div>Options payload was too large and was truncated.</div>}
               </div>
+              </details>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <PrimaryButton onClick={() => void saveConnectorControl()} disabled={savingConnectorControl}>
