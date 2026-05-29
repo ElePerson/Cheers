@@ -3,7 +3,10 @@ use std::sync::Arc;
 use sqlx::PgPool;
 
 use crate::{
-    acp_bridge::registry::BotLocator,
+    acp_bridge::{
+        registry::{BotLocator, InProcessBotLocator},
+        stream::StreamRegistry,
+    },
     config::Config,
     realtime::{fanout::Fanout, manager::ConnectionManager},
 };
@@ -23,6 +26,13 @@ pub struct AppState {
     /// 浏览器 WS 连接管理器（subscribe/unsubscribe + 成员资格缓存）。
     pub conn_manager: Arc<ConnectionManager>,
 
-    /// 向 bot 派发任务 / 发送数据帧的实现。
+    /// 向 bot 派发任务 / 发送数据帧（trait object，未来可换 Redis 实现）。
     pub bot_locator: Arc<dyn BotLocator>,
+
+    /// 本期进程内实现，直接暴露 bind_control/bind_data 给 WS handler。
+    /// 未来多实例时这个字段去掉，bind 操作通过总线完成。
+    pub bot_registry: Arc<InProcessBotLocator>,
+
+    /// delta/done 回流注册表（msg_id → StreamEntry）。
+    pub stream_registry: Arc<StreamRegistry>,
 }

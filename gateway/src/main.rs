@@ -16,7 +16,7 @@ mod transport;
 use app_state::AppState;
 use config::Config;
 use realtime::{fanout::InProcessFanout, manager::ConnectionManager};
-use acp_bridge::registry::InProcessBotLocator;
+use acp_bridge::{registry::InProcessBotLocator, stream::StreamRegistry};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -41,7 +41,9 @@ async fn main() -> anyhow::Result<()> {
     // ── 进程内 fan-out 和 bot 定位器（本期单实例实现）──────────────────────
     let fanout = InProcessFanout::new();
     let conn_manager = ConnectionManager::new(fanout.clone(), db.clone());
-    let bot_locator = InProcessBotLocator::new();
+    let bot_registry = InProcessBotLocator::new();
+    let bot_locator = bot_registry.clone() as Arc<dyn crate::acp_bridge::registry::BotLocator>;
+    let stream_registry = StreamRegistry::new();
 
     // ── 全局共享状态 ───────────────────────────────────────────────────────
     let state = AppState {
@@ -50,12 +52,16 @@ async fn main() -> anyhow::Result<()> {
         fanout,
         conn_manager,
         bot_locator,
+        bot_registry,
+        stream_registry,
     };
 
     // ── 路由组装 ──────────────────────────────────────────────────────────
     let app = Router::new()
         .route("/health", get(health))
         .route("/ws", get(transport::ws::browser::ws_handler))
+        .route("/ws/acp-bridge/control", get(transport::ws::acp_bridge::control_handler))
+        .route("/ws/acp-bridge/data", get(transport::ws::acp_bridge::data_handler))
         .with_state(state);
 
     // ── 启动服务器 ────────────────────────────────────────────────────────
