@@ -17,6 +17,8 @@
 | 传输 | **WS-only**，SSE 退场 | 连接模型单一，限流/心跳/状态只需一套 |
 | 连接复用 | **单连接复用**，一个客户端一条持久 WS | auth 一次；切频道发 subscribe 帧，不重连 |
 | 鉴权 | **首帧 auth 消息** | token 不进 URL/日志；支持续期 |
+| JWT 验签 | **RS256/EdDSA 非对称**（见 §6.1） | Gateway 只持公钥，被攻破也无法伪造 token |
+| 成员校验 | **Gateway 调 REST 授权端点 + 短 TTL 缓存**（见 §6.2） | 权威、不碰 DB schema、不增净新缓存基建 |
 | 顺序 | **帧内 `seq` + 客户端去重排序** | 容忍 NATS at-least-once 的乱序与重复 |
 | Gateway 角色 | **哑管道** | 不解析内层 `data`；加事件类型不需改/重启网关 |
 | 可靠性分层 | delta 可丢（best-effort）；终态帧不可丢（durable） | `message_done` 带全量 content，可自愈对齐 |
@@ -143,13 +145,46 @@
 
 | 检查 | 由谁做 | 时机 |
 |------|--------|------|
-| JWT 签名/过期验证 | **Gateway** | 首帧 auth |
-| 频道成员资格（能否 subscribe 某频道） | **见下方决策点** | subscribe 帧 |
+| JWT 签名/过期验证 | **Gateway**（验签，见 §6.1） | 首帧 auth |
+| 频道成员资格（能否 subscribe 某频道） | **Gateway 调 REST 授权端点 + 短 TTL 缓存**（见 §6.2） | subscribe 帧 |
 | 业务级权限（能否发消息等） | **Python REST API** | REST 调用时（不走 WS）|
 
 > ⚠️ **现状缺口**：今天的 `/ws/channels/{id}` handler 完全无鉴权（直接 accept）。Gateway 接管后首帧 auth 强制验签，补上这个洞。
 
-> 🔶 **待定**：subscribe 时的成员资格校验放哪里？两个选项——(a) Gateway 调 REST/查 Redis 缓存的成员表；(b) Gateway 只验 JWT，成员资格由 publish 端保证（只往合法成员的频道 subject 发）。倾向 (a) 但需确认缓存一致性方案。**留到实现前再定。**
+### 6.1 JWT：迁移到 RS256/EdDSA 非对称签名
+
+**现状**：HS256 对称密钥（`JWT_SECRET_KEY`），payload `{sub:user_id, role, exp, iat}`。对称密钥意味着持有者既能验也能签——Gateway 作为最暴露的边缘服务若被攻破即可伪造任意 token。
+
+**决策**：迁移到非对称签名（RS256 或 EdDSA/Ed25519）。
+- **Python（签发方）**：持**私钥**，`create_access_token` / `create_service_token` 改用私钥签名。
+- **Gateway（验证方）**：只持**公钥**，仅验签，无法签发。被攻破也无法伪造 token。
+- **`kid` 头**：JWT header 带 `kid`（key id），支持密钥轮换——新旧公钥并存期间按 kid 选公钥。
+- **token claims 不变**：仍是 `{sub, role, exp, iat}`，不新增 workspace_id（Gateway 只需 user_id 做身份；频道/工作区作用域在 §6.2 的成员校验里解决）。
+
+**迁移窗口**（token 有效期 24h，故窗口 ≥24h）：
+1. 生成密钥对，Python 同时部署私钥（签）+ 公钥；Gateway 部署公钥。
+2. Python 改为 RS256 签发，但**验证端临时同时接受 HS256(旧) 和 RS256(新)**，让窗口内未过期的旧 token 仍可用。
+3. 窗口结束（所有 HS256 token 自然过期）后，移除 HS256 接受逻辑。
+4. 全程 Gateway 只认 RS256，不接受 HS256。
+
+### 6.2 成员资格校验：REST 授权端点 + Gateway 短 TTL 缓存
+
+**现状**：成员资格存 PostgreSQL `ChannelMembership` 表，`get_membership(channel_id, member_id)` 为 PG 直查，**无任何缓存**。
+
+**决策**：subscribe 时由 Gateway 调用一个轻量内部授权端点，结果在 Gateway 内存做短 TTL LRU 缓存。
+
+```
+内部端点(仅 Gateway 可达,非公开):
+  GET /internal/authz/membership?user_id=<uid>&channel_id=<cid>
+  → 200 {"member": true,  "ttl": 60}
+  → 200 {"member": false, "ttl": 30}
+```
+
+- **缓存**：Gateway 内置 LRU，key=`(user_id, channel_id)`，TTL 30–60s（端点可在响应里指定 ttl）。吸收频繁切频道/重订阅。
+- **过期窗口**：用户被踢出频道后，最坏情况仍能收 ≤TTL 秒事件。可接受。
+- **可选主动失效**：Python 在成员变更时往 NATS 发 `agentnexus.authz.evict.{user_id}.{channel_id}`，Gateway 订阅后立即清缓存，把过期窗口压到近实时。**Phase 4 增强项，非必须。**
+- **Gateway↔内部端点鉴权**：Gateway 用 service token（同样 RS256 签发，§6.1）调内部端点；端点校验 service token 的特定 claim（如 `aud:"gateway"`）。
+- **为何不违反「哑管道」**：该原则只约束**数据平面**（不解析事件 `data`）。成员校验是**控制平面**，独立于事件转发。
 
 ---
 
