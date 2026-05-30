@@ -225,7 +225,73 @@ repeatedly outgrown by genuinely custom interactions; real third parties (not ju
 us) want to publish; the core model has been stable for months; and we are ready to
 invest in untrusted-code security.
 
-## 5. One-line summary
+## 5. Membership & Principal model (bot as first-class member)
+
+Decided 2026-05-30. The system is already a **hybrid**: bots are first-class at the
+*relation* layer but second-class at the *identity* layer. The schema shows this:
+
+- **Relation/message layer — already polymorphic (bot is first-class):**
+  `channel_memberships(member_id, member_type, role, ...)` and
+  `messages(sender_id, sender_type, ...)`. Bots and users share one membership
+  table, one message table, one role column. The gateway `check_bot_in_channel`
+  reads this table with `member_type='bot'`. **This is the source of truth for
+  "who is in a channel / who said what" — keep it.**
+- **Identity layer — split (bot is second-class):** separate `users`
+  (email/password/role/soft-delete) and `bot_accounts`
+  (model/template/token/binding/`created_by`). Fields barely overlap.
+
+So the real question is not "should a bot be a first-class member" (it already is at
+the relation layer) but "should the identity split be healed." **Decision: do not
+heal it; formalize the member abstraction above it instead.**
+
+### The four decisions
+
+1. **Do NOT merge `users` / `bot_accounts`.** The split is correct and reflects a
+   real *responsibility* difference: a user logs in and is an accountable subject; a
+   bot is owned/created by a user (`created_by`), authenticates by token, and is a
+   tool. Merging would force half-NULL columns (classic polymorphic-merge
+   anti-pattern), make constraints (unique email, token hash) ungainly, and — worst
+   — blur who is accountable for a bot's actions (audit, quota, abuse).
+
+2. **Relation layer is already first-class — keep it; fix the gaps above it.**
+   - **Unified Principal resolution (auth exit):** whether a request arrives by user
+     session or by bot token, resolve it to one `Principal{id, type, role}`.
+     Everything downstream consumes Principal, not "is this a session or a token."
+   - **Unified frontend Member component:** one component renders avatar/name/@ for
+     any member; `type` only drives a small badge, not a separate render path.
+   - **Collapse the fork points:** `messages.mention_bot_ids` vs `mention_user_ids`
+     being two columns is identity-split leaking upward. Under a first-class model an
+     @ is an @ of a *member*; converge toward polymorphic `mentions[{id,type}]`.
+     Every such `if sender_type == "bot"` branch is the cost of "half first-class."
+
+3. **Formal Principal abstraction layer — gated on "will there be a third member
+   type?"** This is the one strategic call.
+   - Only ever user + bot → relation-polymorphism + dual identity tables already
+     suffice; just finish the upper-layer consistency (#2). Don't touch table
+     structure.
+   - A third type coming (external webhook, remote MCP agent, org/team-as-member,
+     federated identity) → every `if sender_type == "bot"` is future debt; invest in
+     a real Principal abstraction (one interface, pluggable identity backends) so
+     "add a member type" becomes "implement an interface," not "edit branches
+     everywhere".
+   - **Direction taken:** because the Environment-plugin track likely introduces
+     scenario-defined actor types, do the **lightweight version**: define a
+     `Principal{id, type, role}` interface and unified resolution **now**, but do
+     **not** pre-create tables for types that don't exist yet.
+
+4. **Cycle detection + responsibility pass-through must enter the model WITH
+   first-class membership, not be patched on later.** A bot is unique among members:
+   it is *both* a member *and* a tool driven by another member.
+   - **Cycles/recursion:** bot A @ bot B @ bot A. Already hit in practice
+     (`tests/test_bot_at_bot_recursion.py`). First-class membership makes such
+     interactions more natural and more frequent — cycle/loop detection must be part
+     of the model, not a later fix.
+   - **Responsibility pass-through:** a bot's message looks like an independent
+     member's, but audit must always pierce through to `created_by` / the driving
+     principal. **The frontend may present a bot as a first-class member; the audit
+     layer must never let it be truly independent.**
+
+## 6. One-line summary
 
 **Session is the immutable past, Memory is the mutable present, the Environment
 template is the setting authored before the past began.** The template pours the
