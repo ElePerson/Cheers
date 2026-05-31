@@ -6,6 +6,7 @@
 
 ## 从这开始
 
+- [架构状态网页](index.html) — 由 `architecture-status.page.json` 通过 `make docs-pages` 生成
 - [架构总览](ARCHITECTURE_OVERVIEW.md)
 - [网关与传输协议](WIRE_PROTOCOL.md)
 - [消息内容格式](MESSAGE_CONTENT_FORMAT.md)

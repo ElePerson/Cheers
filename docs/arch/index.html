@@ -1,0 +1,1104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentNexus Architecture Status</title>
+  <style>
+:root {
+  color-scheme: light;
+  --bg: #f7f8fb;
+  --surface: #ffffff;
+  --surface-soft: #eef2f7;
+  --ink: #172033;
+  --muted: #5d687a;
+  --line: #d9e0ea;
+  --blue: #2358c8;
+  --blue-soft: #e7efff;
+  --green: #13795b;
+  --green-soft: #e6f5ef;
+  --amber: #9a5b00;
+  --amber-soft: #fff2d7;
+  --red: #b42318;
+  --red-soft: #fde8e5;
+  --violet: #6554c0;
+  --violet-soft: #efeaff;
+  --shadow: 0 12px 32px rgba(23, 32, 51, 0.08);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.62;
+}
+
+a {
+  color: var(--blue);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+code {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f3f5f9;
+  padding: 0.08rem 0.32rem;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+
+.page {
+  min-height: 100vh;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(10px);
+}
+
+.topbar-inner,
+.hero-inner,
+main,
+.footer {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.brand-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  font-weight: 800;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.nav a {
+  border-radius: 6px;
+  padding: 0.32rem 0.58rem;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+
+.nav a:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.hero {
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.hero-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 2rem;
+  padding: 3rem 0 2.2rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.65rem;
+  color: var(--blue);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.18;
+}
+
+h1 {
+  max-width: 760px;
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 4.2rem);
+}
+
+.lead {
+  max-width: 820px;
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 1.08rem;
+}
+
+.meta-row,
+.evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.meta-row {
+  margin-top: 1.35rem;
+}
+
+.pill,
+.evidence a {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.pill {
+  min-height: 30px;
+  padding: 0.18rem 0.7rem;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.status-summary,
+.metric-card,
+.goal-card,
+.decision-card,
+.backlog-card,
+.lane,
+.flow-step,
+.source-link,
+.timeline {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.status-summary {
+  align-self: start;
+  box-shadow: var(--shadow);
+  padding: 1rem;
+}
+
+.status-summary h2 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+}
+
+.score {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 1rem;
+}
+
+.score-item {
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: var(--surface-soft);
+}
+
+.score-item strong {
+  display: block;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.score-item span {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.progress-line {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.progress-row {
+  display: grid;
+  grid-template-columns: 8rem 1fr auto;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.bar {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: #edf1f6;
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+section {
+  padding: 2.3rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+section:last-child {
+  border-bottom: 0;
+}
+
+.section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: 1.55rem;
+}
+
+.section-heading p {
+  max-width: 680px;
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.metric-grid,
+.goal-grid,
+.decision-grid,
+.backlog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.metric-card,
+.goal-card,
+.decision-card,
+.backlog-card,
+.lane,
+.flow-step {
+  padding: 1rem;
+  min-width: 0;
+}
+
+.metric-card,
+.goal-card {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.metric-card b {
+  font-size: 1.8rem;
+  line-height: 1.08;
+}
+
+.metric-card span,
+.goal-card p,
+.decision-card p,
+.backlog-card p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.58rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.done {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.mostly {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.partial {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.open {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.future {
+  background: var(--violet-soft);
+  color: var(--violet);
+}
+
+.goal-card h3,
+.decision-card h3,
+.backlog-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.evidence {
+  margin-top: 0.1rem;
+}
+
+.evidence a {
+  padding: 0.12rem 0.52rem;
+  font-size: 0.78rem;
+}
+
+.evidence a:hover {
+  color: var(--blue);
+  border-color: #b9c8e8;
+}
+
+.topology {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr;
+  align-items: stretch;
+  gap: 1rem;
+}
+
+.lane h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.node-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.node {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 0.72rem;
+}
+
+.node strong {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.node span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.timeline {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.78rem 0.9rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: #f3f6fa;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+
+tr:last-child td {
+  border-bottom: 0;
+}
+
+.commit {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+.flow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.flow-step {
+  position: relative;
+}
+
+.flow-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -0.76rem;
+  width: 0.76rem;
+  height: 1px;
+  background: var(--line);
+}
+
+.flow-step small {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.flow-step strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.source-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.source-link {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0.9rem;
+  text-decoration: none;
+}
+
+.source-link strong {
+  color: var(--ink);
+}
+
+.source-link span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: right;
+}
+
+.note {
+  border-left: 4px solid var(--blue);
+  background: var(--blue-soft);
+  padding: 0.85rem 1rem;
+  color: #213a65;
+}
+
+.footer {
+  padding: 1.4rem 0 2.2rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+@media (max-width: 980px) {
+  .hero-inner,
+  .topology {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-grid,
+  .goal-grid,
+  .decision-grid,
+  .backlog-grid,
+  .source-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .flow {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-step:not(:last-child)::after {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar-inner,
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nav {
+    justify-content: flex-start;
+  }
+
+  .hero-inner {
+    padding-top: 2rem;
+  }
+
+  .score,
+  .metric-grid,
+  .goal-grid,
+  .decision-grid,
+  .backlog-grid,
+  .source-list {
+    grid-template-columns: 1fr;
+  }
+
+  .progress-row {
+    grid-template-columns: 1fr;
+    gap: 0.28rem;
+  }
+
+  th,
+  td {
+    padding: 0.68rem;
+  }
+}
+  </style>
+</head>
+<body>
+  <!-- Generated by scripts/generate-architecture-status-page.mjs from docs/arch/architecture-status.page.json. Do not edit directly. -->
+  <div class="page">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <span class="brand-mark">AN</span>
+          <span>AgentNexus Architecture</span>
+        </div>
+        <nav class="nav" aria-label="Page navigation">
+          <a href="#summary">完成度</a>
+          <a href="#topology">拓扑</a>
+          <a href="#changes">近期改动</a>
+          <a href="#goals">目标状态</a>
+          <a href="#backlog">后续</a>
+        </nav>
+      </div>
+    </header>
+    <div class="hero">
+      <div class="hero-inner">
+        <div>
+          <p class="eyebrow">Architecture status snapshot</p>
+          <h1>去中心化 Agent 网格的当前完成度</h1>
+          <p class="lead">本页基于 2026-05-31 的 <code>main</code> 分支和最近 8 次提交，对照 <a href="ARCHITECTURE_OVERVIEW.md">架构总览</a>、<a href="REFACTOR_PLAN.md">重构计划</a> 与 <a href="DECENTRALIZED_MESH.md">Decentralized Mesh</a>，汇总已经落地、部分落地和仍待实现的目标。</p>
+          <div class="meta-row" aria-label="Audit metadata">
+            <span class="pill">日期: 2026-05-31</span>
+            <span class="pill">分支: main</span>
+            <span class="pill">HEAD: 289f972</span>
+            <span class="pill">范围: 最近 8 次提交</span>
+          </div>
+        </div>
+
+        <aside class="status-summary" aria-labelledby="summary-card-title">
+          <h2 id="summary-card-title">一句话结论</h2>
+          <div class="score">
+            <div class="score-item">
+              <strong>6/7</strong>
+              <span>mesh 核心步骤已落地或基本落地</span>
+            </div>
+            <div class="score-item">
+              <strong>20+</strong>
+              <span>MCP 工具映射到 Resource API</span>
+            </div>
+            <div class="score-item">
+              <strong>1</strong>
+              <span>Rust gateway 是当前唯一后端形态</span>
+            </div>
+          </div>
+          <div class="progress-line" id="summary">
+            <div class="progress-row">
+              <span>去中心化路由</span>
+              <div class="bar"><span style="width: 100%; background: var(--green);"></span></div>
+              <b>完成</b>
+            </div>
+            <div class="progress-row">
+              <span>Resource API</span>
+              <div class="bar"><span style="width: 86%; background: var(--blue);"></span></div>
+              <b>基本完成</b>
+            </div>
+            <div class="progress-row">
+              <span>产品化能力</span>
+              <div class="bar"><span style="width: 42%; background: var(--amber);"></span></div>
+              <b>部分</b>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+    <main>
+      <section aria-labelledby="snapshot-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="snapshot-title">当前快照</h2>
+            <p>架构目标已经从“设计意图”推进到可追踪的 Rust gateway 代码路径，剩余缺口集中在环境插件、UI 和验证。</p>
+          </div>
+        </div>
+        <div class="metric-grid">
+          <article class="metric-card">
+            <span class="badge done">已完成</span>
+            <b>Mesh 行为反转</b>
+            <span>从“触发所有在线 bot”切到 <code>&lt;@bot:id&gt;</code> 精确路由；无 mention 时回落 <code>default_bot_id</code>。</span>
+          </article>
+          <article class="metric-card">
+            <span class="badge done">已完成</span>
+            <b>频道事件时钟</b>
+            <span><code>channel_seq</code> 在用户消息、bot finalize、bot send 和文件操作中统一分配。</span>
+          </article>
+          <article class="metric-card">
+            <span class="badge mostly">基本完成</span>
+            <b>资源层</b>
+            <span><code>channel.activity.read</code>、<code>messages_by_seq</code>、<code>fs.*</code> 与 MCP 工具面已接通。</span>
+          </article>
+        </div>
+      </section>
+      <section id="topology" aria-labelledby="topology-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="topology-title">当前拓扑</h2>
+            <p>平台侧保持单实例 Rust Backend，智能体全部通过外部 ACP / MCP 桥接入；Resource API 是 bot 访问平台资源的唯一协议面。</p>
+          </div>
+        </div>
+        <div class="topology" role="img" aria-label="Browser and external agents connect to the Rust Backend over REST, WebSocket, Agent Bridge, and Resource API.">
+          <div class="lane">
+            <h3>客户端</h3>
+            <div class="node-list">
+              <div class="node">
+                <strong>Browser / Mobile</strong>
+                <span>REST + browser WS，订阅频道并接收消息与流式 delta。</span>
+              </div>
+              <div class="node">
+                <strong>Frontend</strong>
+                <span>React + Vite 保持现有应用形态，协议 URL 基本不变。</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="lane">
+            <h3>Rust Backend</h3>
+            <div class="node-list">
+              <div class="node">
+                <strong>REST API</strong>
+                <span>workspaces / channels / messages / bots / files / friends / capability。</span>
+              </div>
+              <div class="node">
+                <strong>WS Gateway + Agent Bridge</strong>
+                <span>browser fan-out、control/data WS、stream registry、BotLocator。</span>
+              </div>
+              <div class="node">
+                <strong>Resource API</strong>
+                <span>channel reads、Grant-gated writes、activity stream、workspace file tree。</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="lane">
+            <h3>外部 Agent</h3>
+            <div class="node-list">
+              <div class="node">
+                <strong>ACP Connector</strong>
+                <span>直接持有 Agent Bridge control/data 连接。</span>
+              </div>
+              <div class="node">
+                <strong>agentnexus-mcp-server</strong>
+                <span>本地 stdio MCP 工具转换为 Resource API 调用。</span>
+              </div>
+              <div class="node">
+                <strong>Claude / Codex / OpenCode</strong>
+                <span>作为外部 peer 进入频道网格，不依赖内置 runtime。</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="changes" aria-labelledby="changes-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="changes-title">最近 8 次改动如何推进目标</h2>
+            <p>提交集中在 ACP 能力、mesh 路由、频道时钟、任务链、取消和资源 API。它们共同覆盖了 Decentralized Mesh §11 的前 6 个步骤。</p>
+          </div>
+        </div>
+        <div class="timeline">
+          <table>
+            <thead>
+              <tr>
+                <th>提交</th>
+                <th>日期</th>
+                <th>主题</th>
+                <th>架构影响</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="commit">289f972</td>
+                <td>2026-05-31</td>
+                <td>finish mesh resource api</td>
+                <td>补齐 <code>channel.activity.read</code>、<code>channel.messages.index/by-seq</code>、<code>fs.*</code>，并扩展 MCP tool surface。</td>
+              </tr>
+              <tr>
+                <td class="commit">7aec35d</td>
+                <td>2026-05-31</td>
+                <td>add mesh chain cancellation</td>
+                <td>加入 <code>cancel-chain</code> REST 入口、链状态更新和现有 cancel 帧广播。</td>
+              </tr>
+              <tr>
+                <td class="commit">89bef9d</td>
+                <td>2026-05-31</td>
+                <td>propagate mesh task chains</td>
+                <td>bot 回复 finalize 后重入 mention 路由，沿链继承 <code>chain_id</code>、<code>parent_task_id</code>、<code>depth</code>。</td>
+              </tr>
+              <tr>
+                <td class="commit">5365bbb</td>
+                <td>2026-05-31</td>
+                <td>allocate mesh channel sequences</td>
+                <td>把 <code>channel_seq</code> 纳入消息、stream done、dispatcher 失败收口和 resource 读模型。</td>
+              </tr>
+              <tr>
+                <td class="commit">51bb07d</td>
+                <td>2026-05-31</td>
+                <td>enforce mesh mention token semantics</td>
+                <td>确立扁平 token 语义，写入 <code>message_mentions</code>，bot 输出中的 legacy bare mention 会规范化。</td>
+              </tr>
+              <tr>
+                <td class="commit">139cfd0</td>
+                <td>2026-05-31</td>
+                <td>stabilize Rust backend compile</td>
+                <td>收敛 gateway API、resource、session、permission 等模块的编译契约。</td>
+              </tr>
+              <tr>
+                <td class="commit">00a4cfc</td>
+                <td>2026-05-31</td>
+                <td>connector privateKey validation test</td>
+                <td>补 ACP connector 配置校验测试，属于接入层质量补强。</td>
+              </tr>
+              <tr>
+                <td class="commit">a747a1e</td>
+                <td>2026-05-31</td>
+                <td>acp capability/session and message enhancements</td>
+                <td>增加 capability delegation、session 状态、消息模型和文件端点增强，为后续 mesh 能力打底。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section id="goals" aria-labelledby="goals-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="goals-title">架构目标完成度</h2>
+            <p>这里按“当前代码是否已经承担该职责”来判断，不把未验证的部署流程算作完全完成。</p>
+          </div>
+        </div>
+        <div class="goal-grid">
+          <article class="goal-card">
+            <span class="badge done">已完成</span>
+            <h3>Rust Backend 骨架与核心路由</h3>
+            <p>axum router、JWT 中间件、browser WS、ACP Bridge WS 和核心 REST 已在 <code>server/</code> 中统一。</p>
+            <div class="evidence">
+              <a href="../../server/src/router.rs">router.rs</a>
+              <a href="../../server/src/gateway/ws/acp_bridge.rs">acp_bridge.rs</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge done">已完成</span>
+            <h3>Mesh schema</h3>
+            <p><code>next_seq</code>、<code>channel_seq</code>、<code>message_mentions</code>、<code>task_chains</code>、<code>channel_operations</code>、<code>memory_files</code> 已进入 sqlx 迁移。</p>
+            <div class="evidence">
+              <a href="../../server/migrations/0003_decentralized_mesh.sql">0003 migration</a>
+              <a href="DECENTRALIZED_MESH.md">mesh design</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge done">已完成</span>
+            <h3>Mention 路由与 default bot</h3>
+            <p>用户消息只扫描 <code>&lt;@bot:id&gt;</code> / <code>&lt;@user:id&gt;</code> token；无 bot mention 时回落频道或 workspace 默认 bot。</p>
+            <div class="evidence">
+              <a href="../../server/src/domain/mentions.rs">mentions.rs</a>
+              <a href="../../server/src/domain/messages.rs">messages.rs</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge done">已完成</span>
+            <h3>channel_seq 事件时钟</h3>
+            <p>分配函数在事务内更新 <code>channels.next_seq</code>；用户消息 born final，bot placeholder finalize 时才取号。</p>
+            <div class="evidence">
+              <a href="../../server/src/domain/channel_seq.rs">channel_seq.rs</a>
+              <a href="../../server/src/gateway/stream.rs">stream.rs</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge done">已完成</span>
+            <h3>Bot@Bot 任务链</h3>
+            <p>root dispatch 创建链，bot 回复触发下一跳，dispatch gate 检查链状态，取消或暂停后阻止未来 hop。</p>
+            <div class="evidence">
+              <a href="../../server/src/domain/chains.rs">chains.rs</a>
+              <a href="../../server/src/gateway/dispatcher.rs">dispatcher.rs</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge mostly">基本完成</span>
+            <h3>链取消</h3>
+            <p>用户可通过消息解析到 <code>chain_id</code> 并取消整条链；当前未把 <code>chain.cancelled</code> 操作写入 activity log，这在设计中是可选项。</p>
+            <div class="evidence">
+              <a href="../../server/src/api/messages.rs">api/messages.rs</a>
+              <a href="../../server/src/domain/chains.rs">chains.rs</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge mostly">基本完成</span>
+            <h3>Resource API v1</h3>
+            <p>频道信息、成员、消息、activity、文件列表、memory 兼容层和 <code>fs.*</code> 已统一通过 resource dispatcher 暴露。</p>
+            <div class="evidence">
+              <a href="../../server/src/resource/mod.rs">resource/mod.rs</a>
+              <a href="../../server/src/resource/activity.rs">activity.rs</a>
+              <a href="../../server/src/resource/fs.rs">fs.rs</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge mostly">基本完成</span>
+            <h3>MCP 标准桥工具面</h3>
+            <p><code>agentnexus-mcp-server</code> 已把资源读写映射成 MCP tools，支持 session 默认频道和跨频道参数。</p>
+            <div class="evidence">
+              <a href="../../packages/agentnexus-mcp-server/src/tools.ts">tools.ts</a>
+              <a href="../../packages/agentnexus-mcp-server/src/client.ts">client.ts</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge partial">部分完成</span>
+            <h3>全量 REST 覆盖</h3>
+            <p>核心端点已经迁移到 Rust；DM、topic scope、admin 级资源和部分旧后端能力仍需要逐项对齐。</p>
+            <div class="evidence">
+              <a href="../../server/src/api">server/src/api</a>
+              <a href="REFACTOR_PLAN.md">refactor plan</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge partial">部分完成</span>
+            <h3>文件与 memory 资源</h3>
+            <p><code>memory_entries</code> 已退到 <code>memory_files</code> 树；旧 <code>channel.memory</code> 有兼容映射。S3 文件内容读写仍有 Phase 2 TODO。</p>
+            <div class="evidence">
+              <a href="../../server/src/resource/memory.rs">memory.rs</a>
+              <a href="../../server/src/resource/files.rs">files.rs</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge open">未完成</span>
+            <h3>Environment 动态 tools</h3>
+            <p>资源分发器仍是静态 <code>match</code>；按 channel / Environment 注册动态 resource handler 尚未实现。</p>
+            <div class="evidence">
+              <a href="../../server/src/resource/mod.rs">resource/mod.rs</a>
+              <a href="context-and-environment.md">context-and-environment</a>
+            </div>
+          </article>
+
+          <article class="goal-card">
+            <span class="badge future">未来计划</span>
+            <h3>多实例、E2EE、Vector DB</h3>
+            <p>单实例部署仍是本期决策；多实例 fan-out/locator、内容级 E2EE 和向量检索均保留为后续演进。</p>
+            <div class="evidence">
+              <a href="ARCHITECTURE_OVERVIEW.md">overview</a>
+              <a href="SECURITY.md">security</a>
+              <a href="E2EE_NOTES.md">e2ee notes</a>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section aria-labelledby="contract-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="contract-title">关键运行流</h2>
+            <p>下面是已经进入代码的核心契约：写后投递、事件时钟、任务链和资源一致性。</p>
+          </div>
+        </div>
+        <div class="flow">
+          <div class="flow-step">
+            <small>1</small>
+            <strong>消息写入</strong>
+            <span>验证成员、解析 token mention、事务分配 <code>channel_seq</code>、插入消息。</span>
+          </div>
+          <div class="flow-step">
+            <small>2</small>
+            <strong>终态 fan-out</strong>
+            <span>PG commit 后再广播浏览器终态帧，满足 Write-Before-Deliver。</span>
+          </div>
+          <div class="flow-step">
+            <small>3</small>
+            <strong>mesh dispatch</strong>
+            <span>有 <code>@bot</code> 派发指定 bot；否则使用 <code>default_bot_id</code>；否则静默。</span>
+          </div>
+          <div class="flow-step">
+            <small>4</small>
+            <strong>bot finalize</strong>
+            <span>placeholder finalize 时取 <code>channel_seq</code>，规范化 bot mention，并可触发下一跳。</span>
+          </div>
+          <div class="flow-step">
+            <small>5</small>
+            <strong>资源追赶</strong>
+            <span>bot 通过 <code>since_seq</code>、<code>by-seq</code> 和 activity stream 补齐上下文。</span>
+          </div>
+        </div>
+      </section>
+      <section aria-labelledby="decisions-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="decisions-title">已经明确的架构方向</h2>
+            <p>这些决策在当前代码或文档中已经形成约束，后续实现应继续沿用。</p>
+          </div>
+        </div>
+        <div class="decision-grid">
+          <article class="decision-card">
+            <h3>外部 agent 优先</h3>
+            <p>平台不再依赖内置 Python bot runtime；外置 ACP bot 和 MCP agent 是同一协议路径。</p>
+          </article>
+          <article class="decision-card">
+            <h3>频道只转发 @</h3>
+            <p>没有中央 coordinator 参与意图判断，路由规则可测试、可审计。</p>
+          </article>
+          <article class="decision-card">
+            <h3>资源写走 Grant</h3>
+            <p>Resource API 读只需频道成员，写需要成员身份和 ACP RBAC Grant。</p>
+          </article>
+          <article class="decision-card">
+            <h3>两类资源分治</h3>
+            <p>Class 1 用 <code>channel_seq</code> 追赶，Class 2 用 <code>memory_files.version</code> 乐观锁。</p>
+          </article>
+          <article class="decision-card">
+            <h3>单实例是本期约束</h3>
+            <p>fan-out 和 BotLocator 先走进程内或 Redis registry，跨实例扩展保留 trait 接口。</p>
+          </article>
+          <article class="decision-card">
+            <h3>旧兼容只保留在边界</h3>
+            <p><code>channel.memory</code> 映射到新文件树；核心合同已切到 <code>fs.*</code> 和 activity。</p>
+          </article>
+        </div>
+      </section>
+      <section id="backlog" aria-labelledby="backlog-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="backlog-title">剩余工作建议</h2>
+            <p>下一步重点不是再补临时 shim，而是把已实现的协议面验证、产品化，并把文档 checklist 同步到真实状态。</p>
+          </div>
+        </div>
+        <div class="backlog-grid">
+          <article class="backlog-card">
+            <span class="badge partial">验证</span>
+            <h3>空库启动和 cargo 测试</h3>
+            <p>按 sqlx migration discipline，从空 Postgres 跑 gateway，确认 <code>0001..0006</code> 可线性执行。</p>
+          </article>
+          <article class="backlog-card">
+            <span class="badge partial">验证</span>
+            <h3>MCP 端到端</h3>
+            <p>用真实 connector 验证 <code>read_activity</code>、<code>fs_write</code>、<code>messages_by_seq</code> 和链取消。</p>
+          </article>
+          <article class="backlog-card">
+            <span class="badge open">实现</span>
+            <h3>Environment 动态注册</h3>
+            <p>把 resource dispatcher 从静态 <code>match</code> 演进成可按 channel / template 注册的 handler。</p>
+          </article>
+          <article class="backlog-card">
+            <span class="badge open">实现</span>
+            <h3>DM / topic resource scope</h3>
+            <p>补齐架构文档中标出的 <code>channel.*</code> 之外的 resource scope。</p>
+          </article>
+          <article class="backlog-card">
+            <span class="badge open">产品化</span>
+            <h3>权限覆盖 UI 和 Lens</h3>
+            <p>前端还缺 channel override 设置界面，以及 Environment Lens 的声明式渲染。</p>
+          </article>
+          <article class="backlog-card">
+            <span class="badge partial">文档</span>
+            <h3>更新 Markdown checklist</h3>
+            <p><code>REFACTOR_PLAN.md</code> 里的 Phase 1 checkbox 仍是旧状态，应按本页结论同步。</p>
+          </article>
+        </div>
+        <p class="note">根因判断：最近几次改动解决的是架构合同已经定稿但 gateway 实现落后的问题。当前选择是把真实调用路径 <code>create_message</code>、<code>stream::handle_done</code>、<code>dispatcher</code>、<code>resource::dispatch</code> 对齐到同一个 mesh 合同，而不是增加临时参数或硬编码分支。</p>
+      </section>
+      <section aria-labelledby="sources-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="sources-title">主要依据</h2>
+            <p>这些文档和代码路径是本页判断的来源。</p>
+          </div>
+        </div>
+        <div class="source-list">
+          <a class="source-link" href="ARCHITECTURE_OVERVIEW.md">
+            <strong>Architecture Overview</strong>
+            <span>目标拓扑与部署模型</span>
+          </a>
+          <a class="source-link" href="DECENTRALIZED_MESH.md">
+            <strong>Decentralized Mesh</strong>
+            <span>mesh 步骤与资源一致性</span>
+          </a>
+          <a class="source-link" href="REFACTOR_PLAN.md">
+            <strong>Refactor Plan</strong>
+            <span>阶段计划与剩余项</span>
+          </a>
+          <a class="source-link" href="MESSAGE_CONTENT_FORMAT.md">
+            <strong>Message Content Format</strong>
+            <span>token 与 mention 表关系</span>
+          </a>
+          <a class="source-link" href="../../server/src/domain/messages.rs">
+            <strong>server/src/domain/messages.rs</strong>
+            <span>写入、路由、分页</span>
+          </a>
+          <a class="source-link" href="../../server/src/resource/mod.rs">
+            <strong>server/src/resource/mod.rs</strong>
+            <span>Resource API dispatcher</span>
+          </a>
+          <a class="source-link" href="../../server/src/domain/chains.rs">
+            <strong>server/src/domain/chains.rs</strong>
+            <span>任务链与取消</span>
+          </a>
+          <a class="source-link" href="../../packages/agentnexus-mcp-server/src/tools.ts">
+            <strong>agentnexus-mcp-server tools</strong>
+            <span>MCP 工具映射</span>
+          </a>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <p>Generated from local repository state on 2026-05-31. This is a generated documentation snapshot; update <code>architecture-status.page.json</code> and run <code>make docs-pages</code> instead of editing <code>index.html</code> directly.</p>
+    </footer>
+  </div>
+</body>
+</html>

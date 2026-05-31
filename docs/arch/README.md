@@ -6,6 +6,7 @@ This directory stores architecture, protocol, and gateway design docs.
 
 ## Start Here
 
+- [Architecture Status Webpage](index.html) — generated from `architecture-status.page.json` by `make docs-pages`
 - [Architecture Overview](ARCHITECTURE_OVERVIEW.md)
 - [Gateway Protocol](WIRE_PROTOCOL.md)
 - [Message Content Format](MESSAGE_CONTENT_FORMAT.md)

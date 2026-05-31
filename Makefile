@@ -1,4 +1,4 @@
-.PHONY: lint fix test
+.PHONY: lint fix test docs-pages
 
 lint:
 	cd gateway && cargo clippy --all-targets
@@ -8,3 +8,6 @@ fix:
 
 test:
 	cd gateway && cargo test
+
+docs-pages:
+	node scripts/generate-architecture-status-page.mjs
