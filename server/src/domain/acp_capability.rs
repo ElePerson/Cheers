@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 
 use base64::{engine::general_purpose::STANDARD, engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use ed25519_dalek::{PublicKey, Signature, Verifier};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::domain::sessions;
 use crate::errors::AppError;
 
 const CAPABILITY_CLOCK_TOLERANCE_SECS: i64 = 5 * 60;
@@ -17,6 +18,7 @@ pub const CAPABILITY_SCOPE_WORKSPACE: &str = "workspace";
 pub const CAPABILITY_SCOPE_CHANNEL: &str = "channel";
 pub const CAPABILITY_SCOPE_SESSION: &str = "session";
 pub const CAPABILITY_SCOPE_USER: &str = "user";
+const CAPABILITY_SESSION_PROVIDER: &str = "acp";
 
 #[derive(Debug)]
 struct CapabilityEnvelope {
@@ -44,6 +46,22 @@ struct DelegationRecord {
     delegated_to: Option<String>,
     status: String,
     revoked: bool,
+}
+
+#[derive(Debug)]
+enum SessionLocator {
+    SessionId(Uuid),
+    ProviderSessionKey(String),
+    ProviderSessionId(String),
+}
+
+#[derive(Debug)]
+struct SessionContext {
+    session_id: Uuid,
+    status: String,
+    current_scope_type: Option<String>,
+    current_scope_id: Option<String>,
+    provider_session_key: Option<String>,
 }
 
 #[derive(Debug)]
@@ -287,6 +305,117 @@ fn extract_session_id(frame: &Value) -> Option<String> {
         })
 }
 
+fn extract_provider_session_key(frame: &Value) -> Option<String> {
+    frame
+        .get("provider_session_key")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+}
+
+fn extract_provider_session_id(frame: &Value) -> Option<String> {
+    frame
+        .get("provider_session_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+}
+
+fn extract_session_locator(frame: &Value) -> Option<SessionLocator> {
+    if let Some(key) = extract_provider_session_key(frame) {
+        return Some(SessionLocator::ProviderSessionKey(key));
+    }
+    if let Some(id) = extract_provider_session_id(frame) {
+        return Some(SessionLocator::ProviderSessionId(id));
+    }
+    if let Some(value) = extract_session_id(frame) {
+        if let Ok(uuid) = Uuid::parse_str(&value) {
+            return Some(SessionLocator::SessionId(uuid));
+        }
+    }
+    None
+}
+
+fn is_session_active(status: &str) -> bool {
+    status == sessions::SESSION_STATUS_ACTIVE || status == sessions::SESSION_STATUS_BUSY
+}
+
+async fn resolve_active_session(
+    db: &PgPool,
+    bot_id: &Uuid,
+    provider_account_id: &str,
+    locator: SessionLocator,
+) -> Result<SessionContext, CapabilityError> {
+    let (query, value) = match locator {
+        SessionLocator::SessionId(session_id) => (
+            "SELECT session_id, status, current_scope_type, current_scope_id, provider_session_key
+             FROM agentnexus_sessions
+             WHERE bot_id = $1 AND provider = $2 AND provider_account_id = $3 AND session_id = $4
+             LIMIT 1",
+            session_id.to_string(),
+        ),
+        SessionLocator::ProviderSessionKey(provider_session_key) => (
+            "SELECT session_id, status, current_scope_type, current_scope_id, provider_session_key
+             FROM agentnexus_sessions
+             WHERE bot_id = $1 AND provider = $2 AND provider_account_id = $3 AND provider_session_key = $4
+             LIMIT 1",
+            provider_session_key,
+        ),
+        SessionLocator::ProviderSessionId(provider_session_id) => (
+            "SELECT session_id, status, current_scope_type, current_scope_id, provider_session_key
+             FROM agentnexus_sessions
+             WHERE bot_id = $1 AND provider = $2 AND provider_account_id = $3 AND provider_session_id = $4
+             ORDER BY updated_at DESC
+             LIMIT 1",
+            provider_session_id,
+        ),
+    };
+
+    let row = sqlx::query(
+        query,
+    )
+    .bind(bot_id.to_string())
+    .bind(CAPABILITY_SESSION_PROVIDER)
+    .bind(provider_account_id)
+    .bind(&value)
+    .fetch_optional(db)
+    .await
+    .map_err(|_| CapabilityError::Denied("session lookup failed".into()))?
+    .ok_or_else(|| CapabilityError::Denied("session not found".into()))?;
+
+    let status: String = row
+        .try_get("status")
+        .unwrap_or_else(|_| sessions::SESSION_STATUS_IDLE.to_string());
+    if !is_session_active(&status) {
+        return Err(CapabilityError::Denied("session is not active".into()));
+    }
+
+    let session_id: Uuid = row
+        .try_get("session_id")
+        .map_err(|_| CapabilityError::Denied("invalid session".into()))?;
+
+    Ok(SessionContext {
+        session_id,
+        status,
+        current_scope_type: row.try_get("current_scope_type").ok(),
+        current_scope_id: row.try_get("current_scope_id").ok(),
+        provider_session_key: row.try_get("provider_session_key").ok(),
+    })
+}
+
+async fn resolve_session_context(
+    db: &PgPool,
+    bot_id: &Uuid,
+    provider_account_id: &str,
+    frame: &Value,
+) -> Result<SessionContext, CapabilityError> {
+    let locator = extract_session_locator(frame)
+        .ok_or_else(|| CapabilityError::Denied("missing session context".into()))?;
+    resolve_active_session(db, bot_id, provider_account_id, locator).await
+}
+
 fn extract_resource(frame: &Value) -> Option<String> {
     frame
         .get("resource")
@@ -296,7 +425,15 @@ fn extract_resource(frame: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn verify_scope(delegation: &DelegationRecord, frame: &Value, action: &str, resource: Option<&str>) -> Result<(), CapabilityError> {
+async fn verify_scope(
+    db: &PgPool,
+    bot_id: &Uuid,
+    provider_account_id: &str,
+    delegation: &DelegationRecord,
+    frame: &Value,
+    action: &str,
+    resource: Option<&str>,
+) -> Result<(), CapabilityError> {
     let scope_id = delegation.scope_id.clone().unwrap_or_default();
     match delegation.scope_type.as_str() {
         CAPABILITY_SCOPE_GLOBAL => Ok(()),
@@ -311,19 +448,19 @@ fn verify_scope(delegation: &DelegationRecord, frame: &Value, action: &str, reso
             Err(CapabilityError::Denied("channel scope mismatch".into()))
         }
         CAPABILITY_SCOPE_SESSION => {
-            let session_scope = match &delegation.session_id {
-                Some(target) if !target.trim().is_empty() => target,
-                _ => &scope_id,
-            };
-            if let Some(frame_session_id) = extract_session_id(frame) {
-                if frame_session_id == session_scope.as_str() {
-                    return Ok(());
-                }
+            let expected_session_id = delegation
+                .session_id
+                .as_deref()
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .ok_or_else(|| {
+                    CapabilityError::Denied("session-scoped delegation missing session_id".into())
+                })?;
+
+            let context = resolve_session_context(db, bot_id, provider_account_id, frame).await?;
+            if context.session_id != expected_session_id {
+                return Err(CapabilityError::Denied("session scope mismatch".into()));
             }
-            if let Some(msg_id) = frame.get("msg_id").and_then(Value::as_str) {
-                let _ = msg_id;
-            }
-            Err(CapabilityError::Denied("session scope mismatch".into()))
+            Ok(())
         }
         CAPABILITY_SCOPE_USER => {
             if delegation.delegated_to.is_none() {
@@ -342,7 +479,23 @@ fn verify_scope(delegation: &DelegationRecord, frame: &Value, action: &str, reso
             }
             Ok(())
         }
-        CAPABILITY_SCOPE_WORKSPACE => Ok(()),
+        CAPABILITY_SCOPE_WORKSPACE => {
+            if scope_id.trim().is_empty() {
+                return Err(CapabilityError::Denied(
+                    "workspace-scoped delegation missing scope_id".into(),
+                ));
+            }
+            let context = resolve_session_context(db, bot_id, provider_account_id, frame).await?;
+            if context.current_scope_type.as_deref() != Some(CAPABILITY_SCOPE_WORKSPACE) {
+                return Err(CapabilityError::Denied(
+                    "session is not in workspace scope".into(),
+                ));
+            }
+            if context.current_scope_id.as_deref() != Some(scope_id.as_str()) {
+                return Err(CapabilityError::Denied("workspace scope mismatch".into()));
+            }
+            Ok(())
+        }
         _ => Err(CapabilityError::Denied(format!(
             "unsupported scope_type {}",
             delegation.scope_type
@@ -487,7 +640,12 @@ async fn consume_nonce_and_bump(
     Ok(())
 }
 
-pub async fn authorize_data_frame(db: &PgPool, bot_id: &Uuid, frame: &Value) -> Result<(), CapabilityError> {
+pub async fn authorize_data_frame(
+    db: &PgPool,
+    bot_id: &Uuid,
+    provider_account_id: &str,
+    frame: &Value,
+) -> Result<(), CapabilityError> {
     let frame_type = extract_frame_type(frame);
     if !frame_needs_capability(frame_type) {
         return Ok(());
@@ -507,7 +665,16 @@ pub async fn authorize_data_frame(db: &PgPool, bot_id: &Uuid, frame: &Value) -> 
 
     validate_public_key(&delegation.algorithm, &delegation.public_key)?;
     verify_signature(&delegation, frame_type, &envelope, frame)?;
-    verify_scope(&delegation, frame, action, extract_resource(frame).as_deref())?;
+    verify_scope(
+        db,
+        bot_id,
+        provider_account_id,
+        &delegation,
+        frame,
+        action,
+        extract_resource(frame).as_deref(),
+    )
+    .await?;
 
     ensure_delegation_active(&delegation).await?;
 
