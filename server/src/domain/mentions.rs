@@ -31,11 +31,7 @@ impl MemberType {
 ///
 /// 格式约定：`@<username>` 或 `@<display_name>`；实现时查 `users` + `bot_accounts`
 /// 表解析 name → id，需要频道成员范围内匹配。
-pub async fn parse(
-    db: &PgPool,
-    channel_id: Uuid,
-    content: &str,
-) -> Vec<Mention> {
+pub async fn parse(db: &PgPool, channel_id: Uuid, content: &str) -> Vec<Mention> {
     let mut mentions = Vec::new();
 
     for token in content.split_whitespace() {
@@ -110,34 +106,32 @@ pub async fn insert_batch(
         .bind(msg_id.to_string())
         .bind(mention.member_id.to_string())
         .bind(mention.member_type.as_str())
-        .execute(tx)
+        .execute(&mut **tx)
         .await?;
     }
 
     Ok(())
 }
 
-async fn resolve_user_id(
-    db: &PgPool,
-    channel_id: Uuid,
-    token: &str,
-) -> Option<Uuid> {
+async fn resolve_user_id(db: &PgPool, channel_id: Uuid, token: &str) -> Option<Uuid> {
     let token = token.trim();
-    sqlx::query("SELECT u.user_id
+    sqlx::query(
+        "SELECT u.user_id
          FROM channel_memberships cm
          JOIN users u ON u.user_id = cm.member_id
          WHERE cm.channel_id = $1
            AND cm.member_type = 'user'
            AND (u.username = $2 OR u.display_name = $2)
-         LIMIT 1")
-        .bind(channel_id.to_string())
-        .bind(token)
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|row| row.try_get::<String, _>("user_id").ok())
-        .and_then(|id| Uuid::parse_str(&id).ok())
+         LIMIT 1",
+    )
+    .bind(channel_id.to_string())
+    .bind(token)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+    .and_then(|row| row.try_get::<String, _>("user_id").ok())
+    .and_then(|id| Uuid::parse_str(&id).ok())
 }
 
 async fn resolve_typed_member_id(
@@ -153,37 +147,41 @@ async fn resolve_typed_member_id(
     }?;
 
     let row = if kind == "bot" {
-        sqlx::query("SELECT ba.bot_id
+        sqlx::query(
+            "SELECT ba.bot_id
              FROM channel_memberships cm
              JOIN bot_accounts ba ON ba.bot_id = cm.member_id
              WHERE cm.channel_id = $1
                AND cm.member_type = 'bot'
                AND ba.bot_id = $2
-             LIMIT 1")
-            .bind(channel_id.to_string())
-            .bind(member_id.to_string())
-            .fetch_optional(db)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|row| row.try_get::<String, _>("bot_id").ok())
-            .and_then(|id| Uuid::parse_str(&id).ok())
+             LIMIT 1",
+        )
+        .bind(channel_id.to_string())
+        .bind(member_id.to_string())
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.try_get::<String, _>("bot_id").ok())
+        .and_then(|id| Uuid::parse_str(&id).ok())
     } else {
-        sqlx::query("SELECT u.user_id
+        sqlx::query(
+            "SELECT u.user_id
              FROM channel_memberships cm
              JOIN users u ON u.user_id = cm.member_id
              WHERE cm.channel_id = $1
                AND cm.member_type = 'user'
                AND u.user_id = $2
-             LIMIT 1")
-            .bind(channel_id.to_string())
-            .bind(member_id.to_string())
-            .fetch_optional(db)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|row| row.try_get::<String, _>("user_id").ok())
-            .and_then(|id| Uuid::parse_str(&id).ok())
+             LIMIT 1",
+        )
+        .bind(channel_id.to_string())
+        .bind(member_id.to_string())
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.try_get::<String, _>("user_id").ok())
+        .and_then(|id| Uuid::parse_str(&id).ok())
     };
 
     row
@@ -198,7 +196,10 @@ fn kind_to_member_type(kind: &str) -> MemberType {
 }
 
 fn push_unique(mentions: &mut Vec<Mention>, member_id: Uuid, member_type: MemberType) {
-    if mentions.iter().any(|m| m.member_type == member_type && m.member_id == member_id) {
+    if mentions
+        .iter()
+        .any(|m| m.member_type == member_type && m.member_id == member_id)
+    {
         return;
     }
 
@@ -208,25 +209,23 @@ fn push_unique(mentions: &mut Vec<Mention>, member_id: Uuid, member_type: Member
     });
 }
 
-async fn resolve_bot_id(
-    db: &PgPool,
-    channel_id: Uuid,
-    token: &str,
-) -> Option<Uuid> {
+async fn resolve_bot_id(db: &PgPool, channel_id: Uuid, token: &str) -> Option<Uuid> {
     let token = token.trim();
-    sqlx::query("SELECT ba.bot_id
+    sqlx::query(
+        "SELECT ba.bot_id
          FROM channel_memberships cm
          JOIN bot_accounts ba ON ba.bot_id = cm.member_id
          WHERE cm.channel_id = $1
            AND cm.member_type = 'bot'
            AND (ba.username = $2 OR ba.display_name = $2)
-         LIMIT 1")
-        .bind(channel_id.to_string())
-        .bind(token)
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|row| row.try_get::<String, _>("bot_id").ok())
-        .and_then(|id| Uuid::parse_str(&id).ok())
+         LIMIT 1",
+    )
+    .bind(channel_id.to_string())
+    .bind(token)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+    .and_then(|row| row.try_get::<String, _>("bot_id").ok())
+    .and_then(|id| Uuid::parse_str(&id).ok())
 }

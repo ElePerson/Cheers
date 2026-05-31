@@ -36,7 +36,10 @@ use gateway::stream::StreamRegistry;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "server=debug,sqlx=warn,redis=warn".into()))
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "server=debug,sqlx=warn,redis=warn".into()),
+        )
         .with(tracing_subscriber::fmt::layer())
         .init();
 

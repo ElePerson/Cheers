@@ -67,9 +67,20 @@ pub async fn handle_update(
         .ok_or_else(|| super::resource_error("INVALID_PARAMS", "layer required"))?
         .to_string();
 
-    check_write_permission(db, bot_id, channel_id, "channel:memory", "write", session_id).await?;
+    check_write_permission(
+        db,
+        bot_id,
+        channel_id,
+        "channel:memory",
+        "write",
+        session_id,
+    )
+    .await?;
 
-    let mode = params.get("mode").and_then(|v| v.as_str()).unwrap_or("replace");
+    let mode = params
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("replace");
     let entries = params
         .get("entries")
         .and_then(|v| v.as_array())

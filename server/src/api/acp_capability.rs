@@ -9,10 +9,7 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::{
-    api::middleware::Claims,
-    app_state::AppState,
-    domain::acp_capability,
-    errors::AppError,
+    api::middleware::Claims, app_state::AppState, domain::acp_capability, errors::AppError,
 };
 
 #[derive(Deserialize)]
@@ -181,7 +178,9 @@ pub async fn list_delegations(
             use_count: row.try_get::<i32, _>("use_count").unwrap_or_default() as i64,
             expires_at: row.try_get("expires_at").ok(),
             public_key: row.try_get("public_key").unwrap_or_default(),
-            algorithm: row.try_get("algorithm").unwrap_or_else(|_| acp_capability::CAPABILITY_SUPPORTED_ALGORITHM.to_string()),
+            algorithm: row
+                .try_get("algorithm")
+                .unwrap_or_else(|_| acp_capability::CAPABILITY_SUPPORTED_ALGORITHM.to_string()),
             delegated_to: row.try_get("delegated_to").ok(),
             status: row.try_get("status").unwrap_or_else(|_| "active".into()),
             revoked: row.try_get("revoked").unwrap_or(false),
@@ -205,12 +204,8 @@ pub async fn list_reject_logs(
     ensure_bot_owner_or_admin(&state.db, &bot_id, &claims).await?;
 
     let params = parse_reject_log_query(query)?;
-    let page = list_reject_logs_by_filter(
-        &state.db,
-        Some(bot_id.as_str()),
-        &params,
-    )
-    .await?;
+    let bot_id_string = bot_id.to_string();
+    let page = list_reject_logs_by_filter(&state.db, Some(bot_id_string.as_str()), &params).await?;
 
     Ok(Json(page))
 }
@@ -221,7 +216,9 @@ pub async fn list_reject_logs_admin(
     Query(query): Query<CapabilityRejectLogAdminQuery>,
 ) -> Result<Json<CapabilityRejectLogPage>, AppError> {
     if !matches!(claims.role.as_str(), "admin" | "system_admin") {
-        return Err(AppError::Forbidden("only admin can query cross-bot rejection logs".into()));
+        return Err(AppError::Forbidden(
+            "only admin can query cross-bot rejection logs".into(),
+        ));
     }
 
     let bot_id = parse_optional_uuid(query.bot_id, "bot_id")?;
@@ -307,8 +304,16 @@ async fn list_reject_logs_by_filter(
             page: params.page,
             limit: params.limit,
             has_more,
-            next_page: if has_more { Some(params.page + 1) } else { None },
-            previous_page: if params.page > 1 { Some(params.page - 1) } else { None },
+            next_page: if has_more {
+                Some(params.page + 1)
+            } else {
+                None
+            },
+            previous_page: if params.page > 1 {
+                Some(params.page - 1)
+            } else {
+                None
+            },
         },
     })
 }
@@ -321,27 +326,40 @@ pub async fn create_delegation(
 ) -> Result<Json<DelegationItem>, AppError> {
     ensure_bot_owner_or_admin(&state.db, &bot_id, &claims).await?;
 
-    let scope_type = normalize_scope_type(body.scope_type.unwrap_or_else(|| acp_capability::CAPABILITY_SCOPE_CHANNEL.to_string()))?;
+    let scope_type = normalize_scope_type(
+        body.scope_type
+            .unwrap_or_else(|| acp_capability::CAPABILITY_SCOPE_CHANNEL.to_string()),
+    )?;
     let scope_id = trim_optional(body.scope_id);
     let session_id = trim_optional(body.session_id);
     let public_key = trim(body.public_key)?;
-    let algorithm = body.algorithm.unwrap_or_else(|| acp_capability::CAPABILITY_SUPPORTED_ALGORITHM.to_string());
+    let algorithm = body
+        .algorithm
+        .unwrap_or_else(|| acp_capability::CAPABILITY_SUPPORTED_ALGORITHM.to_string());
     let allowed_actions = normalize_strings(body.allowed_actions);
     let allowed_resources = normalize_strings(body.allowed_resources);
 
     if allowed_actions.is_empty() {
-        return Err(AppError::BadRequest("allowed_actions cannot be empty".into()));
+        return Err(AppError::BadRequest(
+            "allowed_actions cannot be empty".into(),
+        ));
     }
     if allowed_resources.is_empty() {
-        return Err(AppError::BadRequest("allowed_resources cannot be empty".into()));
+        return Err(AppError::BadRequest(
+            "allowed_resources cannot be empty".into(),
+        ));
     }
 
     if scope_type == acp_capability::CAPABILITY_SCOPE_SESSION && session_id.is_none() {
-        return Err(AppError::BadRequest("session scope requires session_id".into()));
+        return Err(AppError::BadRequest(
+            "session scope requires session_id".into(),
+        ));
     }
 
     if scope_type != acp_capability::CAPABILITY_SCOPE_SESSION && session_id.is_some() {
-        return Err(AppError::BadRequest("session_id is only valid for session scope".into()));
+        return Err(AppError::BadRequest(
+            "session_id is only valid for session scope".into(),
+        ));
     }
 
     if matches!(
@@ -352,11 +370,22 @@ pub async fn create_delegation(
             | acp_capability::CAPABILITY_SCOPE_WORKSPACE
     ) && scope_id.is_none()
     {
-        return Err(AppError::BadRequest(format!("scope_id required for scope_type={scope_type}")));
+        return Err(AppError::BadRequest(format!(
+            "scope_id required for scope_type={scope_type}"
+        )));
     }
 
-    if scope_type == acp_capability::CAPABILITY_SCOPE_USER && body.delegated_to.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_none() {
-        return Err(AppError::BadRequest("delegated_to is required for user scope".into()));
+    if scope_type == acp_capability::CAPABILITY_SCOPE_USER
+        && body
+            .delegated_to
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .is_none()
+    {
+        return Err(AppError::BadRequest(
+            "delegated_to is required for user scope".into(),
+        ));
     }
 
     if scope_type != acp_capability::CAPABILITY_SCOPE_USER && body.delegated_to.is_some() {
@@ -373,7 +402,9 @@ pub async fn create_delegation(
 
     if let Some(expires_at) = body.expires_at {
         if expires_at < Utc::now() {
-            return Err(AppError::BadRequest("expires_at must be in the future".into()));
+            return Err(AppError::BadRequest(
+                "expires_at must be in the future".into(),
+            ));
         }
     }
 
@@ -422,15 +453,17 @@ pub async fn create_delegation(
         session_id: row.try_get("session_id").ok(),
         allowed_actions: row.try_get("allowed_actions").unwrap_or_default(),
         allowed_resources: row.try_get("allowed_resources").unwrap_or_default(),
-            max_uses: row
-                .try_get::<Option<i32>, _>("max_uses")
-                .ok()
-                .flatten()
-                .map(i64::from),
+        max_uses: row
+            .try_get::<Option<i32>, _>("max_uses")
+            .ok()
+            .flatten()
+            .map(i64::from),
         use_count: row.try_get::<i32, _>("use_count").unwrap_or_default() as i64,
         expires_at: row.try_get("expires_at").ok(),
         public_key: row.try_get("public_key").unwrap_or_default(),
-        algorithm: row.try_get("algorithm").unwrap_or_else(|_| acp_capability::CAPABILITY_SUPPORTED_ALGORITHM.to_string()),
+        algorithm: row
+            .try_get("algorithm")
+            .unwrap_or_else(|_| acp_capability::CAPABILITY_SUPPORTED_ALGORITHM.to_string()),
         delegated_to: row.try_get("delegated_to").ok(),
         status: row.try_get("status").unwrap_or_else(|_| "active".into()),
         revoked: row.try_get("revoked").unwrap_or(false),
@@ -520,12 +553,17 @@ async fn ensure_bot_owner_or_admin(
         return Ok(());
     }
 
-    let created_by = row.try_get::<Option<String>, _>("created_by").ok().flatten();
+    let created_by = row
+        .try_get::<Option<String>, _>("created_by")
+        .ok()
+        .flatten();
     if created_by.as_deref() == Some(claims.sub.as_str()) {
         return Ok(());
     }
 
-    Err(AppError::Forbidden("only bot owner or admin can manage capability delegations".into()))
+    Err(AppError::Forbidden(
+        "only bot owner or admin can manage capability delegations".into(),
+    ))
 }
 
 fn default_page() -> i64 {
@@ -536,7 +574,9 @@ fn default_reject_log_limit() -> i64 {
     50
 }
 
-fn parse_reject_log_query(query: CapabilityRejectLogQuery) -> Result<RejectLogListParams, AppError> {
+fn parse_reject_log_query(
+    query: CapabilityRejectLogQuery,
+) -> Result<RejectLogListParams, AppError> {
     let delegation_id = trim_optional(query.delegation_id);
     let start_at = parse_rfc3339_datetime(query.start_at.as_deref(), "start_at")?;
     let end_at = parse_rfc3339_datetime(query.end_at.as_deref(), "end_at")?;
@@ -565,8 +605,9 @@ fn parse_rfc3339_datetime(
             if raw.is_empty() {
                 return Ok(None);
             }
-            let dt = DateTime::parse_from_rfc3339(raw)
-                .map_err(|_| AppError::BadRequest(format!("{field_name} must be RFC3339 datetime")))?;
+            let dt = DateTime::parse_from_rfc3339(raw).map_err(|_| {
+                AppError::BadRequest(format!("{field_name} must be RFC3339 datetime"))
+            })?;
             Ok(Some(dt.with_timezone(&Utc)))
         }
         None => Ok(None),
@@ -598,15 +639,17 @@ async fn count_reject_logs(
 }
 
 fn parse_optional_uuid(raw: Option<String>, field_name: &str) -> Result<Option<String>, AppError> {
-    raw.map(|value| {
-        let value = value.trim();
-        if value.is_empty() {
-            Ok::<Option<String>, AppError>(None)
-        } else {
-            Uuid::parse_str(value)
-                .map(|uuid| Some(uuid.to_string()))
-                .map_err(|_| AppError::BadRequest(format!("{field_name} must be UUID")))
+    match raw {
+        Some(value) => {
+            let value = value.trim();
+            if value.is_empty() {
+                Ok(None)
+            } else {
+                Uuid::parse_str(value)
+                    .map(|uuid| Some(uuid.to_string()))
+                    .map_err(|_| AppError::BadRequest(format!("{field_name} must be UUID")))
+            }
         }
-    })
-    .transpose()?
+        None => Ok(None),
+    }
 }

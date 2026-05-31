@@ -2,7 +2,7 @@ use axum::{Extension, Json};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use crate::{errors::AppError, api::middleware::Claims};
+use crate::{api::middleware::Claims, errors::AppError};
 
 #[derive(Deserialize)]
 pub struct McpInput {
@@ -18,7 +18,8 @@ fn parse_input(body: McpInput) -> Result<Value, AppError> {
         return Ok(config);
     }
     if let Some(content) = body.content.or(body.raw) {
-        return serde_json::from_str(&content).map_err(|e| AppError::BadRequest(format!("invalid JSON: {e}")));
+        return serde_json::from_str(&content)
+            .map_err(|e| AppError::BadRequest(format!("invalid JSON: {e}")));
     }
     if let Some(servers) = body.mcp_servers {
         return Ok(json!({"mcpServers": servers}));
@@ -27,9 +28,16 @@ fn parse_input(body: McpInput) -> Result<Value, AppError> {
 }
 
 fn preview(config: Value, source: &str) -> Result<Value, AppError> {
-    let root = config.as_object().ok_or_else(|| AppError::BadRequest("MCP config must be an object".into()))?;
-    let servers_value = root.get("mcpServers").or_else(|| root.get("mcp_servers")).unwrap_or(&config);
-    let servers = servers_value.as_object().ok_or_else(|| AppError::BadRequest("mcpServers must be an object".into()))?;
+    let root = config
+        .as_object()
+        .ok_or_else(|| AppError::BadRequest("MCP config must be an object".into()))?;
+    let servers_value = root
+        .get("mcpServers")
+        .or_else(|| root.get("mcp_servers"))
+        .unwrap_or(&config);
+    let servers = servers_value
+        .as_object()
+        .ok_or_else(|| AppError::BadRequest("mcpServers must be an object".into()))?;
     let mut normalized = Map::new();
     let mut previews = Vec::new();
     let mut errors = Vec::new();
@@ -38,20 +46,36 @@ fn preview(config: Value, source: &str) -> Result<Value, AppError> {
             errors.push(format!("{name}: server config must be an object"));
             continue;
         };
-        let command = obj.get("command").and_then(Value::as_str).map(str::to_string);
+        let command = obj
+            .get("command")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         let url = obj.get("url").and_then(Value::as_str).map(str::to_string);
         if command.is_none() && url.is_none() {
             errors.push(format!("{name}: either command or url is required"));
         }
-        let args = obj.get("args").and_then(Value::as_array).map(|items| {
-            items.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>()
-        }).unwrap_or_default();
-        let env_keys = obj.get("env").and_then(Value::as_object).map(|env| {
-            let mut keys = env.keys().cloned().collect::<Vec<_>>();
-            keys.sort();
-            keys
-        }).unwrap_or_default();
-        let transport = obj.get("transport")
+        let args = obj
+            .get("args")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let env_keys = obj
+            .get("env")
+            .and_then(Value::as_object)
+            .map(|env| {
+                let mut keys = env.keys().cloned().collect::<Vec<_>>();
+                keys.sort();
+                keys
+            })
+            .unwrap_or_default();
+        let transport = obj
+            .get("transport")
             .and_then(Value::as_str)
             .unwrap_or(if url.is_some() { "http" } else { "stdio" });
         normalized.insert(name.clone(), json!({

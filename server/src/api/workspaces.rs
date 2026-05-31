@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::{app_state::AppState, errors::AppError, api::middleware::Claims};
+use crate::{api::middleware::Claims, app_state::AppState, errors::AppError};
 
 #[derive(Serialize)]
 pub struct WorkspaceDto {
@@ -50,7 +50,12 @@ fn current_user_id(claims: &Claims) -> String {
     claims.sub.clone()
 }
 
-async fn ensure_workspace_admin(state: &AppState, workspace_id: &str, user_id: &str, role: &str) -> Result<(), AppError> {
+async fn ensure_workspace_admin(
+    state: &AppState,
+    workspace_id: &str,
+    user_id: &str,
+    role: &str,
+) -> Result<(), AppError> {
     if matches!(role, "system_admin" | "admin") {
         return Ok(());
     }
@@ -66,7 +71,11 @@ async fn ensure_workspace_admin(state: &AppState, workspace_id: &str, user_id: &
     .await?
     .try_get::<bool, _>("ok")
     .unwrap_or(false);
-    if ok { Ok(()) } else { Err(AppError::Forbidden("workspace admin required".into())) }
+    if ok {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden("workspace admin required".into()))
+    }
 }
 
 pub async fn list_workspaces(
@@ -84,13 +93,17 @@ pub async fn list_workspaces(
     .bind(&claims.role)
     .fetch_all(&state.db)
     .await?;
-    Ok(Json(rows.into_iter().map(|r| WorkspaceDto {
-        workspace_id: r.try_get("workspace_id").unwrap_or_default(),
-        name: r.try_get("name").unwrap_or_default(),
-        avatar_url: r.try_get("avatar_url").ok(),
-        default_bot_id: r.try_get("default_bot_id").ok(),
-        kind: r.try_get("kind").unwrap_or_else(|_| "team".to_string()),
-    }).collect()))
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| WorkspaceDto {
+                workspace_id: r.try_get("workspace_id").unwrap_or_default(),
+                name: r.try_get("name").unwrap_or_default(),
+                avatar_url: r.try_get("avatar_url").ok(),
+                default_bot_id: r.try_get("default_bot_id").ok(),
+                kind: r.try_get("kind").unwrap_or_else(|_| "team".to_string()),
+            })
+            .collect(),
+    ))
 }
 
 pub async fn create_workspace(
@@ -143,7 +156,13 @@ pub async fn update_workspace(
     Path(workspace_id): Path<String>,
     Json(body): Json<WorkspaceUpdateRequest>,
 ) -> Result<Json<WorkspaceDto>, AppError> {
-    ensure_workspace_admin(&state, &workspace_id, &current_user_id(&claims), &claims.role).await?;
+    ensure_workspace_admin(
+        &state,
+        &workspace_id,
+        &current_user_id(&claims),
+        &claims.role,
+    )
+    .await?;
     let row = sqlx::query(
         "UPDATE workspaces
          SET name = COALESCE($2, name),
@@ -173,7 +192,13 @@ pub async fn delete_workspace(
     Extension(claims): Extension<Claims>,
     Path(workspace_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    ensure_workspace_admin(&state, &workspace_id, &current_user_id(&claims), &claims.role).await?;
+    ensure_workspace_admin(
+        &state,
+        &workspace_id,
+        &current_user_id(&claims),
+        &claims.role,
+    )
+    .await?;
     sqlx::query("DELETE FROM workspaces WHERE workspace_id = $1")
         .bind(&workspace_id)
         .execute(&state.db)
@@ -186,7 +211,13 @@ pub async fn list_workspace_members(
     Extension(claims): Extension<Claims>,
     Path(workspace_id): Path<String>,
 ) -> Result<Json<Vec<WorkspaceMemberDto>>, AppError> {
-    ensure_workspace_admin(&state, &workspace_id, &current_user_id(&claims), &claims.role).await?;
+    ensure_workspace_admin(
+        &state,
+        &workspace_id,
+        &current_user_id(&claims),
+        &claims.role,
+    )
+    .await?;
     let rows = sqlx::query(
         "SELECT u.user_id, u.username, u.display_name, wm.role
          FROM workspace_memberships wm
@@ -197,20 +228,25 @@ pub async fn list_workspace_members(
     .bind(&workspace_id)
     .fetch_all(&state.db)
     .await?;
-    Ok(Json(rows.into_iter().map(|r| WorkspaceMemberDto {
-        user_id: r.try_get("user_id").unwrap_or_default(),
-        username: r.try_get("username").unwrap_or_default(),
-        display_name: r.try_get("display_name").ok(),
-        role: r.try_get("role").unwrap_or_else(|_| "member".to_string()),
-    }).collect()))
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| WorkspaceMemberDto {
+                user_id: r.try_get("user_id").unwrap_or_default(),
+                username: r.try_get("username").unwrap_or_default(),
+                display_name: r.try_get("display_name").ok(),
+                role: r.try_get("role").unwrap_or_else(|_| "member".to_string()),
+            })
+            .collect(),
+    ))
 }
 
 async fn resolve_user_id(state: &AppState, identifier: &str) -> Result<String, AppError> {
-    let row = sqlx::query("SELECT user_id FROM users WHERE user_id = $1 OR username = $1 OR email = $1")
-        .bind(identifier)
-        .fetch_optional(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    let row =
+        sqlx::query("SELECT user_id FROM users WHERE user_id = $1 OR username = $1 OR email = $1")
+            .bind(identifier)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
     Ok(row.try_get("user_id").unwrap_or_default())
 }
 
@@ -220,10 +256,18 @@ pub async fn add_workspace_member(
     Path(workspace_id): Path<String>,
     Json(body): Json<InviteMemberRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    ensure_workspace_admin(&state, &workspace_id, &current_user_id(&claims), &claims.role).await?;
+    ensure_workspace_admin(
+        &state,
+        &workspace_id,
+        &current_user_id(&claims),
+        &claims.role,
+    )
+    .await?;
     let role = body.role.unwrap_or_else(|| "member".into());
     if !matches!(role.as_str(), "owner" | "admin" | "member") {
-        return Err(AppError::BadRequest("role must be owner, admin, or member".into()));
+        return Err(AppError::BadRequest(
+            "role must be owner, admin, or member".into(),
+        ));
     }
     let user_id = resolve_user_id(&state, body.identifier.trim()).await?;
     sqlx::query(
@@ -236,7 +280,9 @@ pub async fn add_workspace_member(
     .bind(&role)
     .execute(&state.db)
     .await?;
-    Ok(Json(serde_json::json!({"workspace_id": workspace_id, "user_id": user_id, "role": role})))
+    Ok(Json(
+        serde_json::json!({"workspace_id": workspace_id, "user_id": user_id, "role": role}),
+    ))
 }
 
 pub async fn invite_workspace_member(
@@ -253,7 +299,13 @@ pub async fn remove_workspace_member(
     Extension(claims): Extension<Claims>,
     Path((workspace_id, user_id)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    ensure_workspace_admin(&state, &workspace_id, &current_user_id(&claims), &claims.role).await?;
+    ensure_workspace_admin(
+        &state,
+        &workspace_id,
+        &current_user_id(&claims),
+        &claims.role,
+    )
+    .await?;
     sqlx::query("DELETE FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2")
         .bind(&workspace_id)
         .bind(&user_id)

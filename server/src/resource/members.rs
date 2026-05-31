@@ -13,7 +13,11 @@ pub async fn handle(db: &PgPool, bot_id: Uuid, params: &Value) -> ResourceResult
 
     check_bot_in_channel(db, bot_id, channel_id).await?;
 
-    let limit = params.get("limit").and_then(|v| v.as_i64()).unwrap_or(100).min(500);
+    let limit = params
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(100)
+        .min(500);
 
     let rows = sqlx::query(
         r#"

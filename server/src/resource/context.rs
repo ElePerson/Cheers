@@ -2,8 +2,8 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use super::{channel_info, members, memory, messages};
 use super::{check_bot_in_channel, ResourceResult};
-use super::{channel_info, members, messages, memory};
 
 /// channel.context — 聚合查询（一次 round-trip 拿常用上下文）
 pub async fn handle(db: &PgPool, bot_id: Uuid, params: &Value) -> ResourceResult {
@@ -18,11 +18,7 @@ pub async fn handle(db: &PgPool, bot_id: Uuid, params: &Value) -> ResourceResult
     let include = params
         .get("include")
         .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .collect::<Vec<_>>()
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
         .unwrap_or_default();
 
     let mut result = serde_json::json!({});

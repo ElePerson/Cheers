@@ -160,7 +160,9 @@ impl ConnectionManager {
         .await?;
 
         let is_member: bool = row.try_get("is_member").unwrap_or(false);
-        self.membership_cache.set((user_id, channel_id), is_member).await;
+        self.membership_cache
+            .set((user_id, channel_id), is_member)
+            .await;
         Ok(is_member)
     }
 }

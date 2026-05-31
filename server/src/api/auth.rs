@@ -26,7 +26,9 @@ pub async fn login(
 ) -> Result<Json<LoginResponse>, AppError> {
     let user = auth::authenticate(&state.db, &body.login, &body.password).await?;
 
-    let user_uuid: Uuid = user.id.parse()
+    let user_uuid: Uuid = user
+        .id
+        .parse()
         .map_err(|_| AppError::Internal("invalid user id".into()))?;
 
     let token = auth::create_access_token(&state.config, user_uuid, &user.role)?;

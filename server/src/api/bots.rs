@@ -1,10 +1,13 @@
-use axum::{extract::{Path, State}, Extension, Json};
+use axum::{
+    extract::{Path, State},
+    Extension, Json,
+};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::{app_state::AppState, errors::AppError, api::middleware::Claims};
+use crate::{api::middleware::Claims, app_state::AppState, errors::AppError};
 
 #[derive(Deserialize)]
 pub struct BotAcpSecurityConfig {
@@ -99,14 +102,14 @@ pub async fn create_bot(
     .bind(body.template_id)
     .bind(body.custom_system_prompt)
     .bind(status)
-        .bind(scope)
-        .bind(body.intro)
-        .bind(binding_type)
-        .bind(bridge_provider)
-        .bind(binding_config)
-        .bind(&claims.sub)
-        .fetch_one(&state.db)
-        .await?;
+    .bind(scope)
+    .bind(body.intro)
+    .bind(binding_type)
+    .bind(bridge_provider)
+    .bind(binding_config)
+    .bind(&claims.sub)
+    .fetch_one(&state.db)
+    .await?;
     Ok(Json(json!({
         "bot_id": row.try_get::<String, _>("bot_id").unwrap_or_default(),
         "username": row.try_get::<String, _>("username").unwrap_or_default(),
@@ -132,7 +135,9 @@ fn normalize_binding_config(
         Some(Value::Object(map)) => map,
         Some(Value::Null) => Map::new(),
         Some(_) => {
-            return Err(AppError::BadRequest("binding_config must be a JSON object".into()));
+            return Err(AppError::BadRequest(
+                "binding_config must be a JSON object".into(),
+            ));
         }
         None => Map::new(),
     };
@@ -145,8 +150,11 @@ fn normalize_binding_config(
         sec_obj.insert("mode".into(), Value::String(mode));
         sec_obj.insert("algorithm".into(), Value::String(algorithm));
 
-    if let Some(allow_plaintext_fallback) = sec.allow_plaintext_fallback {
-            sec_obj.insert("allow_plaintext_fallback".into(), Value::Bool(allow_plaintext_fallback));
+        if let Some(allow_plaintext_fallback) = sec.allow_plaintext_fallback {
+            sec_obj.insert(
+                "allow_plaintext_fallback".into(),
+                Value::Bool(allow_plaintext_fallback),
+            );
         }
 
         sec_obj.insert(
@@ -169,13 +177,12 @@ pub async fn get_bot_status(
     Extension(_claims): Extension<Claims>,
     Path(bot_id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let row = sqlx::query(
-        "SELECT bot_id, status, binding_type FROM bot_accounts WHERE bot_id = $1",
-    )
-    .bind(&bot_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    let row =
+        sqlx::query("SELECT bot_id, status, binding_type FROM bot_accounts WHERE bot_id = $1")
+            .bind(&bot_id)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
     let status: String = row.try_get("status").unwrap_or_else(|_| "offline".into());
     Ok(Json(json!({
         "bot_id": row.try_get::<String, _>("bot_id").unwrap_or(bot_id),
@@ -200,5 +207,7 @@ pub async fn test_bot(
     if !exists {
         return Err(AppError::NotFound);
     }
-    Ok(Json(json!({"bot_id": bot_id, "ok": true, "message": "bot configuration is readable"})))
+    Ok(Json(
+        json!({"bot_id": bot_id, "ok": true, "message": "bot configuration is readable"}),
+    ))
 }

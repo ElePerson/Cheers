@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 
-use base64::{engine::general_purpose::STANDARD, engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{
+    engine::general_purpose::STANDARD, engine::general_purpose::URL_SAFE_NO_PAD, Engine as _,
+};
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{PublicKey, Signature, Verifier};
 use serde_json::{json, Value};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::sessions;
@@ -211,7 +213,9 @@ fn parse_envelope(frame: &Value) -> Result<CapabilityEnvelope, CapabilityError> 
         return Err(CapabilityError::Denied("delegation_id must be UUID".into()));
     }
 
-    let ts_value = obj.get("ts").ok_or_else(|| CapabilityError::Denied("missing ts".into()))?;
+    let ts_value = obj
+        .get("ts")
+        .ok_or_else(|| CapabilityError::Denied("missing ts".into()))?;
     let ts_secs = parse_unix_seconds(ts_value)
         .ok_or_else(|| CapabilityError::Denied("ts must be unix seconds or RFC3339".into()))?;
 
@@ -231,7 +235,12 @@ fn parse_envelope(frame: &Value) -> Result<CapabilityEnvelope, CapabilityError> 
         .map(ToString::to_string)
         .ok_or_else(|| CapabilityError::Denied("missing signature".into()))?;
 
-    let request_id = obj.get("request_id").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(ToString::to_string);
+    let request_id = obj
+        .get("request_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string);
 
     Ok(CapabilityEnvelope {
         delegation_id,
@@ -243,17 +252,13 @@ fn parse_envelope(frame: &Value) -> Result<CapabilityEnvelope, CapabilityError> 
 }
 
 fn parse_unix_seconds(value: &Value) -> Option<i64> {
-    value
-        .as_i64()
-        .or_else(|| {
-            value
-                .as_str()
-                .and_then(|raw| {
-                    DateTime::parse_from_rfc3339(raw)
-                        .map(|t| t.timestamp())
-                        .ok()
-                })
+    value.as_i64().or_else(|| {
+        value.as_str().and_then(|raw| {
+            DateTime::parse_from_rfc3339(raw)
+                .map(|t| t.timestamp())
+                .ok()
         })
+    })
 }
 
 fn now_epoch() -> i64 {
@@ -267,7 +272,13 @@ fn extract_frame_type(frame: &Value) -> &str {
 fn frame_needs_capability(frame_type: &str) -> bool {
     matches!(
         frame_type,
-        "send" | "delta" | "done" | "resource_req" | "session_update" | "permission_request" | "trace"
+        "send"
+            | "delta"
+            | "done"
+            | "resource_req"
+            | "session_update"
+            | "permission_request"
+            | "trace"
     )
 }
 
@@ -340,7 +351,10 @@ fn signing_payload(frame_type: &str, envelope: &CapabilityEnvelope, frame: &Valu
 }
 
 fn action_allowed(allowed: &[String], action: &str) -> bool {
-    if allowed.iter().any(|v| v == CAPABILITY_ACTION_WILDCARD || v == action) {
+    if allowed
+        .iter()
+        .any(|v| v == CAPABILITY_ACTION_WILDCARD || v == action)
+    {
         return true;
     }
     false
@@ -353,11 +367,17 @@ fn resource_matches(grant_resource: &str, requested: &str) -> bool {
     if let Some(prefix) = grant_resource.strip_suffix(":*") {
         return requested.starts_with(&format!("{prefix}:")) || requested == prefix;
     }
+    if let Some(prefix) = grant_resource.strip_suffix(".*") {
+        return requested.starts_with(&format!("{prefix}.")) || requested == prefix;
+    }
     grant_resource == requested
 }
 
 fn resource_allowed(resources: &[String], resource: &str) -> bool {
-    resources.is_empty() || resources.iter().any(|value| resource_matches(value, resource))
+    resources.is_empty()
+        || resources
+            .iter()
+            .any(|value| resource_matches(value, resource))
 }
 
 fn extract_channel_id(frame: &Value) -> Option<String> {
@@ -369,7 +389,7 @@ fn extract_channel_id(frame: &Value) -> Option<String> {
         .or_else(|| {
             frame
                 .get("params")
-                .and_then(Value::get("channel_id"))
+                .and_then(|params| params.get("channel_id"))
                 .and_then(Value::as_str)
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty())
@@ -459,17 +479,15 @@ async fn resolve_active_session(
         ),
     };
 
-    let row = sqlx::query(
-        query,
-    )
-    .bind(bot_id.to_string())
-    .bind(CAPABILITY_SESSION_PROVIDER)
-    .bind(provider_account_id)
-    .bind(&value)
-    .fetch_optional(db)
-    .await
-    .map_err(|_| CapabilityError::Denied("session lookup failed".into()))?
-    .ok_or_else(|| CapabilityError::Denied("session not found".into()))?;
+    let row = sqlx::query(query)
+        .bind(bot_id.to_string())
+        .bind(CAPABILITY_SESSION_PROVIDER)
+        .bind(provider_account_id)
+        .bind(&value)
+        .fetch_optional(db)
+        .await
+        .map_err(|_| CapabilityError::Denied("session lookup failed".into()))?
+        .ok_or_else(|| CapabilityError::Denied("session not found".into()))?;
 
     let status: String = row
         .try_get("status")
@@ -525,7 +543,10 @@ fn verify_scope_with_context(
         CAPABILITY_SCOPE_GLOBAL => Ok(()),
         CAPABILITY_SCOPE_CHANNEL => {
             let frame_scope = extract_channel_id(frame).ok_or_else(|| {
-                denied_with_context("channel-scoped delegation requires channel_id", context.clone())
+                denied_with_context(
+                    "channel-scoped delegation requires channel_id",
+                    context.clone(),
+                )
             })?;
             if frame_scope == scope_id {
                 return Ok(());
@@ -544,8 +565,12 @@ fn verify_scope_with_context(
                     )
                 })?;
 
-            let session_context = session_context
-                .ok_or_else(|| denied_with_context("session context is required for session scope", context.clone()))?;
+            let session_context = session_context.ok_or_else(|| {
+                denied_with_context(
+                    "session context is required for session scope",
+                    context.clone(),
+                )
+            })?;
             if session_context.session_id != expected_session_id {
                 return Err(denied_with_context("session scope mismatch", context));
             }
@@ -645,6 +670,7 @@ async fn verify_scope(
         delegation,
         frame_type,
         action,
+        frame,
         resource,
         request_id,
         session_context.as_ref(),
@@ -669,9 +695,8 @@ fn verify_signature(
     let public_key_bytes = decode_b64(&delegation.public_key)?;
     let mut public_key_bytes_arr: [u8; 32] = [0u8; 32];
     public_key_bytes_arr.copy_from_slice(&public_key_bytes);
-    let public_key = PublicKey::from_bytes(&public_key_bytes_arr).map_err(|_| {
-        CapabilityError::InvalidSignature("invalid delegation public key".into())
-    })?;
+    let public_key = PublicKey::from_bytes(&public_key_bytes_arr)
+        .map_err(|_| CapabilityError::InvalidSignature("invalid delegation public key".into()))?;
 
     let signature_bytes = decode_b64(&envelope.signature)?;
     if signature_bytes.len() != 64 {
@@ -681,7 +706,8 @@ fn verify_signature(
     }
     let mut signature_arr: [u8; 64] = [0u8; 64];
     signature_arr.copy_from_slice(&signature_bytes);
-    let signature = Signature::from_bytes(&signature_arr);
+    let signature = Signature::from_bytes(&signature_arr)
+        .map_err(|_| CapabilityError::InvalidSignature("invalid signature".into()))?;
 
     let message = signing_payload(frame_type, envelope, frame);
     public_key
@@ -708,22 +734,39 @@ async fn load_delegation(
     .ok_or_else(|| CapabilityError::Denied("delegation not found".into()))?;
 
     Ok(DelegationRecord {
-        delegation_id: row.try_get("delegation_id").map_err(|_| CapabilityError::Denied("invalid delegation".into()))?,
-        bot_id: row.try_get("bot_id").map_err(|_| CapabilityError::Denied("invalid delegation".into()))?,
-        scope_type: row.try_get("scope_type").unwrap_or_else(|_| "global".to_string()),
+        delegation_id: row
+            .try_get("delegation_id")
+            .map_err(|_| CapabilityError::Denied("invalid delegation".into()))?,
+        bot_id: row
+            .try_get("bot_id")
+            .map_err(|_| CapabilityError::Denied("invalid delegation".into()))?,
+        scope_type: row
+            .try_get("scope_type")
+            .unwrap_or_else(|_| "global".to_string()),
         scope_id: row.try_get("scope_id").ok(),
         session_id: row.try_get("session_id").ok(),
         allowed_actions: row.try_get("allowed_actions").unwrap_or_default(),
         allowed_resources: row.try_get("allowed_resources").unwrap_or_default(),
-        max_uses: row.try_get::<Option<i32>, _>("max_uses").ok().flatten().map(|value| value as i64),
-        use_count: row.try_get::<i32, _>("use_count").map_err(|_| CapabilityError::Denied("invalid delegation".into()))? as i64,
-        expires_at: row.try_get::<Option<DateTime<Utc>>, _>("expires_at").map_err(|_| {
-            CapabilityError::Denied("invalid delegation".into())
-        })?,
+        max_uses: row
+            .try_get::<Option<i32>, _>("max_uses")
+            .ok()
+            .flatten()
+            .map(|value| value as i64),
+        use_count: row
+            .try_get::<i32, _>("use_count")
+            .map_err(|_| CapabilityError::Denied("invalid delegation".into()))?
+            as i64,
+        expires_at: row
+            .try_get::<Option<DateTime<Utc>>, _>("expires_at")
+            .map_err(|_| CapabilityError::Denied("invalid delegation".into()))?,
         public_key: row.try_get("public_key").unwrap_or_default(),
-        algorithm: row.try_get("algorithm").unwrap_or_else(|_| CAPABILITY_SUPPORTED_ALGORITHM.to_string()),
+        algorithm: row
+            .try_get("algorithm")
+            .unwrap_or_else(|_| CAPABILITY_SUPPORTED_ALGORITHM.to_string()),
         delegated_to: row.try_get("delegated_to").ok(),
-        status: row.try_get("status").unwrap_or_else(|_| "active".to_string()),
+        status: row
+            .try_get("status")
+            .unwrap_or_else(|_| "active".to_string()),
         revoked: row.try_get("revoked").unwrap_or(false),
     })
 }
@@ -808,8 +851,10 @@ pub async fn log_capability_reject(
     let request_session_id = context.and_then(|ctx| ctx.request_session_id.as_deref());
     let resolved_session_id = context.and_then(|ctx| ctx.resolved_session_id.as_deref());
     let resolved_session_status = context.and_then(|ctx| ctx.resolved_session_status.as_deref());
-    let resolved_session_scope_type = context.and_then(|ctx| ctx.resolved_session_scope_type.as_deref());
-    let resolved_session_scope_id = context.and_then(|ctx| ctx.resolved_session_scope_id.as_deref());
+    let resolved_session_scope_type =
+        context.and_then(|ctx| ctx.resolved_session_scope_type.as_deref());
+    let resolved_session_scope_id =
+        context.and_then(|ctx| ctx.resolved_session_scope_id.as_deref());
     let session_locator_source = context.and_then(|ctx| ctx.session_locator_source.as_deref());
     let session_locator_value = context.and_then(|ctx| ctx.session_locator_value.as_deref());
 
@@ -861,7 +906,9 @@ pub async fn authorize_data_frame(
     let request_id = envelope.request_id.as_deref();
 
     if (now_epoch() - envelope.ts_secs).abs() > CAPABILITY_CLOCK_TOLERANCE_SECS {
-        return Err(CapabilityError::Denied("timestamp too far from wall clock".into()));
+        return Err(CapabilityError::Denied(
+            "timestamp too far from wall clock".into(),
+        ));
     }
 
     let delegation_id = Uuid::parse_str(&envelope.delegation_id)
@@ -892,13 +939,22 @@ pub async fn authorize_data_frame(
     }
 
     if action == "resource_req" {
-        let resource = resource.clone().ok_or_else(|| CapabilityError::Denied("missing resource".into()))?;
+        let resource = resource
+            .clone()
+            .ok_or_else(|| CapabilityError::Denied("missing resource".into()))?;
         if !resource_allowed(&delegation.allowed_resources, &resource) {
             return Err(CapabilityError::Denied("resource not allowed".into()));
         }
     }
 
-    consume_nonce_and_bump(db, &delegation_id, &envelope, frame_type, resource.as_deref()).await?;
+    consume_nonce_and_bump(
+        db,
+        &delegation_id,
+        &envelope,
+        frame_type,
+        resource.as_deref(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -946,11 +1002,12 @@ mod tests {
             scope_type: scope_type.to_string(),
             scope_id: scope_id.map(str::to_string),
             session_id: session_id.map(str::to_string),
-            allowed_actions: vec!["send".to_string(), "stream".to_string(), "resource_req".to_string()],
-            allowed_resources: allowed_resources
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
+            allowed_actions: vec![
+                "send".to_string(),
+                "stream".to_string(),
+                "resource_req".to_string(),
+            ],
+            allowed_resources: allowed_resources.into_iter().map(str::to_string).collect(),
             max_uses: None,
             use_count: 0,
             expires_at: None,
@@ -999,13 +1056,7 @@ mod tests {
         let cases = vec![
             VerifyScopeCase {
                 name: "global scope passes",
-                delegation: make_delegation(
-                    CAPABILITY_SCOPE_GLOBAL,
-                    None,
-                    None,
-                    None,
-                    vec![],
-                ),
+                delegation: make_delegation(CAPABILITY_SCOPE_GLOBAL, None, None, None, vec![]),
                 frame_type: "send",
                 action: "send",
                 frame: json!({"channel_id":"any"}),
@@ -1062,7 +1113,12 @@ mod tests {
                 frame: json!({"provider_session_key":"k-1"}),
                 resource: None,
                 locator: Some(SessionLocator::ProviderSessionKey("k-1".to_string())),
-                session_context: Some(make_session_context(&sid, sessions::SESSION_STATUS_ACTIVE, Some("channel"), Some(&ch))),
+                session_context: Some(make_session_context(
+                    &sid,
+                    sessions::SESSION_STATUS_ACTIVE,
+                    Some("channel"),
+                    Some(&ch),
+                )),
                 expected_err: None,
             },
             VerifyScopeCase {
@@ -1079,7 +1135,12 @@ mod tests {
                 frame: json!({"provider_session_key":"k-1"}),
                 resource: None,
                 locator: Some(SessionLocator::ProviderSessionKey("k-1".to_string())),
-                session_context: Some(make_session_context(&sid2, sessions::SESSION_STATUS_ACTIVE, Some("channel"), Some(&ch))),
+                session_context: Some(make_session_context(
+                    &sid2,
+                    sessions::SESSION_STATUS_ACTIVE,
+                    Some("channel"),
+                    Some(&ch),
+                )),
                 expected_err: Some("session scope mismatch"),
             },
             VerifyScopeCase {
@@ -1113,7 +1174,12 @@ mod tests {
                 frame: json!({"provider_session_key":"k-1"}),
                 resource: None,
                 locator: Some(SessionLocator::ProviderSessionKey("k-1".to_string())),
-                session_context: Some(make_session_context(&ws, sessions::SESSION_STATUS_BUSY, Some("workspace"), Some("ws-1"))),
+                session_context: Some(make_session_context(
+                    &ws,
+                    sessions::SESSION_STATUS_BUSY,
+                    Some("workspace"),
+                    Some("ws-1"),
+                )),
                 expected_err: None,
             },
             VerifyScopeCase {
@@ -1130,18 +1196,17 @@ mod tests {
                 frame: json!({"provider_session_key":"k-1"}),
                 resource: None,
                 locator: Some(SessionLocator::ProviderSessionKey("k-1".to_string())),
-                session_context: Some(make_session_context(&ws, sessions::SESSION_STATUS_BUSY, Some("workspace"), Some("ws-2"))),
+                session_context: Some(make_session_context(
+                    &ws,
+                    sessions::SESSION_STATUS_BUSY,
+                    Some("workspace"),
+                    Some("ws-2"),
+                )),
                 expected_err: Some("workspace scope mismatch"),
             },
             VerifyScopeCase {
                 name: "user scope denied without target",
-                delegation: make_delegation(
-                    CAPABILITY_SCOPE_USER,
-                    None,
-                    None,
-                    None,
-                    vec![],
-                ),
+                delegation: make_delegation(CAPABILITY_SCOPE_USER, None, None, None, vec![]),
                 frame_type: "resource_req",
                 action: "resource_req",
                 frame: json!({"resource":"channel.files.list"}),
@@ -1193,12 +1258,12 @@ mod tests {
                 case.action,
                 &case.frame,
                 case.resource,
+                None,
                 case.session_context.as_ref(),
                 case.locator.as_ref(),
             );
             if let Some(expected_err) = case.expected_err {
-                let err = result
-                    .unwrap_err();
+                let err = result.unwrap_err();
                 assert!(
                     err.to_string().contains(expected_err),
                     "{name}: expect '{expected_err}', got '{err}'",

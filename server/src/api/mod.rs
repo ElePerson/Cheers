@@ -1,5 +1,5 @@
-pub mod auth;
 pub mod acp_capability;
+pub mod auth;
 pub mod bots;
 pub mod channels;
 pub mod files;

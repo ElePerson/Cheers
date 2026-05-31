@@ -12,7 +12,7 @@ use crate::app_state::AppState;
 /// JWT Claims（RS256，payload 不变：{sub, role, exp, iat}）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String,   // user_id
+    pub sub: String, // user_id
     pub role: String,
     pub exp: u64,
     pub iat: u64,
@@ -25,8 +25,7 @@ pub async fn jwt_auth(
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let token = extract_bearer(req.headers())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let token = extract_bearer(req.headers()).ok_or(StatusCode::UNAUTHORIZED)?;
 
     let claims = verify_rs256(&token, &state.config.jwt_public_key_pem)
         .or_else(|_| {

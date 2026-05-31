@@ -124,12 +124,17 @@ pub async fn evaluate(
     // 筛选匹配 resource + action 的 grant
     let candidates: Vec<&BotGrant> = grants
         .iter()
-        .filter(|g| resource_matches(&g.resource, resource) && g.actions.iter().any(|a| a == action))
+        .filter(|g| {
+            resource_matches(&g.resource, resource) && g.actions.iter().any(|a| a == action)
+        })
         .collect();
 
     // deny-wins
     if let Some(deny) = candidates.iter().find(|g| g.effect == "deny") {
-        return Ok(EvaluationResult::deny(format!("denied by grant {}", deny.code)));
+        return Ok(EvaluationResult::deny(format!(
+            "denied by grant {}",
+            deny.code
+        )));
     }
     if let Some(allow) = candidates.iter().find(|g| g.effect == "allow") {
         return Ok(EvaluationResult::allow(allow.code.clone()));

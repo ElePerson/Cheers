@@ -23,14 +23,16 @@ pub async fn handle(db: &PgPool, bot_id: Uuid, params: &Value) -> ResourceResult
     .map_err(|_| super::resource_error("INTERNAL_ERROR", "db error"))?
     .ok_or_else(|| not_found("channel"))?;
 
-    let member_count: i64 = sqlx::query(
-        "SELECT COUNT(*) AS cnt FROM channel_memberships WHERE channel_id = $1",
-    )
-    .bind(channel_id.to_string())
-    .fetch_one(db)
-    .await
-    .map_err(|_| super::resource_error("INTERNAL_ERROR", "db error"))
-    .and_then(|r| r.try_get::<i64, _>("cnt").map_err(|_| super::resource_error("INTERNAL_ERROR", "count error")))?;
+    let member_count: i64 =
+        sqlx::query("SELECT COUNT(*) AS cnt FROM channel_memberships WHERE channel_id = $1")
+            .bind(channel_id.to_string())
+            .fetch_one(db)
+            .await
+            .map_err(|_| super::resource_error("INTERNAL_ERROR", "db error"))
+            .and_then(|r| {
+                r.try_get::<i64, _>("cnt")
+                    .map_err(|_| super::resource_error("INTERNAL_ERROR", "count error"))
+            })?;
 
     Ok(serde_json::json!({
         "channel_id": row.try_get::<String, _>("id").unwrap_or_default(),

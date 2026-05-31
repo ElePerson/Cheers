@@ -11,11 +11,7 @@ use uuid::Uuid;
 use super::{check_bot_in_channel, not_found, ResourceResult};
 
 /// 处理 `resource_req { resource: "channel.activity.read", params: { channel_id, since_seq?, limit? } }`
-pub async fn handle_read(
-    db: &PgPool,
-    bot_id: Uuid,
-    params: &Value,
-) -> ResourceResult {
+pub async fn handle_read(db: &PgPool, bot_id: Uuid, params: &Value) -> ResourceResult {
     let channel_id: Uuid = params
         .get("channel_id")
         .and_then(|v| v.as_str())
@@ -25,7 +21,11 @@ pub async fn handle_read(
     check_bot_in_channel(db, bot_id, channel_id).await?;
 
     let _since_seq: Option<i64> = params.get("since_seq").and_then(|v| v.as_i64());
-    let _limit: i64 = params.get("limit").and_then(|v| v.as_i64()).unwrap_or(50).min(200);
+    let _limit: i64 = params
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(50)
+        .min(200);
 
     todo!("mesh step 6: SELECT … FROM messages UNION ALL SELECT … FROM channel_operations WHERE channel_id=$1 AND channel_seq > $2 ORDER BY channel_seq LIMIT $3")
 }
@@ -33,11 +33,7 @@ pub async fn handle_read(
 /// 处理 `resource_req { resource: "channel.messages.index", params: { channel_id } }`
 ///
 /// 返回 `{ min_seq, max_seq, count }` 供 bot 做 gap 自愈（DECENTRALIZED_MESH §4）。
-pub async fn handle_index(
-    db: &PgPool,
-    bot_id: Uuid,
-    params: &Value,
-) -> ResourceResult {
+pub async fn handle_index(db: &PgPool, bot_id: Uuid, params: &Value) -> ResourceResult {
     let channel_id: Uuid = params
         .get("channel_id")
         .and_then(|v| v.as_str())

@@ -15,8 +15,8 @@ use super::{
     registry::BotLocator,
     stream::{StreamEntry, StreamRegistry},
 };
-use crate::gateway::realtime::{fanout::Fanout, frame::WireFrame};
 use crate::domain::sessions;
+use crate::gateway::realtime::{fanout::Fanout, frame::WireFrame};
 use crate::infra::db::models::MESSAGE_SCHEMA_VERSION;
 
 /// 派发参数。
@@ -106,9 +106,7 @@ pub async fn dispatch(
         params.session_id,
     );
 
-    let delivered = bot_locator
-        .dispatch_task(params.bot_id, task_frame)
-        .await;
+    let delivered = bot_locator.dispatch_task(params.bot_id, task_frame).await;
 
     if !delivered {
         // bot 不在线：清理占位（或标记为失败，让前端看到错误提示）
@@ -120,7 +118,9 @@ pub async fn dispatch(
         return DispatchResult::BotOffline;
     }
 
-    DispatchResult::Dispatched { placeholder_msg_id: placeholder_id }
+    DispatchResult::Dispatched {
+        placeholder_msg_id: placeholder_id,
+    }
 }
 
 // ── 辅助函数 ──────────────────────────────────────────────────────────────────
@@ -145,12 +145,10 @@ enum IdempotencyState {
 async fn check_idempotency(db: &PgPool, placeholder_id: Uuid) -> IdempotencyState {
     use sqlx::Row;
 
-    match sqlx::query(
-        "SELECT is_partial, content FROM messages WHERE msg_id = $1",
-    )
-    .bind(placeholder_id.to_string())
-    .fetch_optional(db)
-    .await
+    match sqlx::query("SELECT is_partial, content FROM messages WHERE msg_id = $1")
+        .bind(placeholder_id.to_string())
+        .fetch_optional(db)
+        .await
     {
         Err(e) => IdempotencyState::DbError(e.to_string()),
         Ok(None) => IdempotencyState::NotFound,

@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 /// 消息领域逻辑。
 ///
 /// 核心流程（写后投递原则）：
@@ -7,17 +8,16 @@
 ///   4. 解析 bot 触发条件
 ///   5. 对每个触发的 bot 调 dispatcher::dispatch
 use std::sync::Arc;
-use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
-use tracing::{debug, info, warn};
 use serde_json::json;
 use sqlx::{PgPool, Row};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    errors::AppError,
     domain::{mentions, sessions},
+    errors::AppError,
     gateway::{
         dispatcher::{self, DispatchParams},
         realtime::{fanout::Fanout, frame::WireFrame},
@@ -73,15 +73,14 @@ pub async fn create_message(
     }
 
     // ── 2. 查发送者名字（用于 DTO）───────────────────────────────────────
-    let sender_name: Option<String> = sqlx::query(
-        "SELECT display_name FROM users WHERE user_id = $1",
-    )
-    .bind(params.user_id.to_string())
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten()
-    .and_then(|r| r.try_get("display_name").ok());
+    let sender_name: Option<String> =
+        sqlx::query("SELECT display_name FROM users WHERE user_id = $1")
+            .bind(params.user_id.to_string())
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|r| r.try_get("display_name").ok());
 
     // ── 3. 先落库（写后投递：INSERT 成功才广播）────────────────────────
     let mentions = mentions::parse(db, params.channel_id, &params.content).await;
@@ -101,15 +100,15 @@ pub async fn create_message(
     )
     .bind(msg_id.to_string())
     .bind(params.channel_id.to_string())
-        .bind(params.user_id.to_string())
-        .bind(&params.content)
-        .bind(msg_type)
-        .bind(params.reply_to_msg_id.map(|id| id.to_string()))
-        .bind(json!(file_ids.clone()))
-        .bind(now)
-        .execute(&mut tx)
-        .await
-        .map_err(AppError::Db)?;
+    .bind(params.user_id.to_string())
+    .bind(&params.content)
+    .bind(msg_type)
+    .bind(params.reply_to_msg_id.map(|id| id.to_string()))
+    .bind(json!(file_ids.clone()))
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
 
     mentions::insert_batch(&mut tx, msg_id, &mentions)
         .await
@@ -223,22 +222,28 @@ fn provider_session_key_for_bot_workspace(workspace_id: Uuid, bot_id: Uuid) -> S
     format!("agentnexus:workspace:{workspace_id}:bot:{bot_id}")
 }
 
-async fn resolve_provider_account_id_for_bot(db: &PgPool, bot_id: Uuid) -> Result<String, AppError> {
-    let binding_config = sqlx::query(
-        "SELECT binding_config FROM bot_accounts WHERE bot_id = $1",
-    )
-    .bind(bot_id.to_string())
-    .fetch_optional(db)
-    .await
-    .map_err(AppError::Db)?
-    .and_then(|row| row.try_get::<Option<serde_json::Value>, _>("binding_config").ok())
-    .ok_or(AppError::NotFound)?;
+async fn resolve_provider_account_id_for_bot(
+    db: &PgPool,
+    bot_id: Uuid,
+) -> Result<String, AppError> {
+    let binding_config = sqlx::query("SELECT binding_config FROM bot_accounts WHERE bot_id = $1")
+        .bind(bot_id.to_string())
+        .fetch_optional(db)
+        .await
+        .map_err(AppError::Db)?
+        .and_then(|row| {
+            row.try_get::<Option<serde_json::Value>, _>("binding_config")
+                .ok()
+        })
+        .ok_or(AppError::NotFound)?;
 
     let value = binding_config.ok_or(AppError::NotFound)?;
     resolve_provider_account_id_from_binding_config(&value).ok_or(AppError::NotFound)
 }
 
-fn resolve_provider_account_id_from_binding_config(binding_config: &serde_json::Value) -> Option<String> {
+fn resolve_provider_account_id_from_binding_config(
+    binding_config: &serde_json::Value,
+) -> Option<String> {
     fn trim_or_none(value: &serde_json::Value) -> Option<String> {
         let value = value.as_str()?.trim();
         if value.is_empty() {
@@ -247,7 +252,10 @@ fn resolve_provider_account_id_from_binding_config(binding_config: &serde_json::
         Some(value.to_string())
     }
 
-    if let Some(acp) = binding_config.get("acp").and_then(serde_json::Value::as_object) {
+    if let Some(acp) = binding_config
+        .get("acp")
+        .and_then(serde_json::Value::as_object)
+    {
         for key in [
             "provider_account_id",
             "provider_account",
@@ -280,16 +288,14 @@ fn resolve_provider_account_id_from_binding_config(binding_config: &serde_json::
 
 async fn resolve_channel_workspace_id(db: &PgPool, channel_id: Uuid) -> Result<Uuid, AppError> {
     use sqlx::Row;
-    let workspace_id = sqlx::query(
-        "SELECT workspace_id FROM channels WHERE channel_id = $1",
-    )
-    .bind(channel_id.to_string())
-    .fetch_optional(db)
-    .await
-    .map_err(AppError::Db)?
-    .and_then(|row| row.try_get::<String, _>("workspace_id").ok())
-    .and_then(|value| Uuid::parse_str(&value).ok())
-    .ok_or_else(|| AppError::BadRequest("invalid channel".into()))?;
+    let workspace_id = sqlx::query("SELECT workspace_id FROM channels WHERE channel_id = $1")
+        .bind(channel_id.to_string())
+        .fetch_optional(db)
+        .await
+        .map_err(AppError::Db)?
+        .and_then(|row| row.try_get::<String, _>("workspace_id").ok())
+        .and_then(|value| Uuid::parse_str(&value).ok())
+        .ok_or_else(|| AppError::BadRequest("invalid channel".into()))?;
 
     Ok(workspace_id)
 }
@@ -582,11 +588,11 @@ pub async fn list_channel_messages(
                  ORDER BY m.created_at DESC, m.msg_id DESC
                  LIMIT $2",
             )
-                .bind(channel_id.to_string())
-                .bind(requested_limit + 1)
-                .fetch_all(db)
-                .await
-                .map_err(AppError::Db)?;
+            .bind(channel_id.to_string())
+            .bind(requested_limit + 1)
+            .fetch_all(db)
+            .await
+            .map_err(AppError::Db)?;
             (rows, true, true, false)
         }
         (Some(_), Some(_)) => unreachable!(),
@@ -664,7 +670,10 @@ fn normalize_message_file_refs(
     normalized
 }
 
-async fn load_message_files(db: &PgPool, file_ids: &[String]) -> Result<Vec<MessageFileRef>, AppError> {
+async fn load_message_files(
+    db: &PgPool,
+    file_ids: &[String],
+) -> Result<Vec<MessageFileRef>, AppError> {
     let file_refs = load_message_files_map(db, file_ids).await?;
     Ok(normalize_message_file_refs(file_ids, &file_refs))
 }
@@ -694,19 +703,27 @@ async fn load_message_files_map(
         let size_bytes = row
             .try_get::<Option<i32>, _>("size_bytes")
             .ok()
-            .and_then(|size| i64::try_from(size).ok());
+            .flatten()
+            .map(i64::from);
 
         refs.insert(
             file_id.clone(),
             MessageFileRef {
                 file_id: file_id.clone(),
-                original_filename: row.try_get::<Option<String>, _>("original_filename").ok(),
-                content_type: row.try_get::<Option<String>, _>("content_type").ok(),
+                original_filename: row
+                    .try_get::<Option<String>, _>("original_filename")
+                    .ok()
+                    .flatten(),
+                content_type: row
+                    .try_get::<Option<String>, _>("content_type")
+                    .ok()
+                    .flatten(),
                 size_bytes,
-                status: row.try_get::<Option<String>, _>("status").ok(),
+                status: row.try_get::<Option<String>, _>("status").ok().flatten(),
                 expires_at: row
                     .try_get::<Option<chrono::DateTime<Utc>>, _>("expires_at")
                     .ok()
+                    .flatten()
                     .map(|at| at.to_rfc3339()),
                 preview_url: Some(format!("/api/v1/files/{}/preview", file_id)),
                 download_url: Some(format!("/api/v1/files/{}/download", file_id)),
@@ -750,12 +767,13 @@ async fn load_message_mentions(
         let msg_id = row.try_get::<String, _>("msg_id").unwrap_or_default();
         let member_type = row.try_get::<String, _>("member_type").unwrap_or_default();
         let mention = MessageMention {
-            member_id: row
-                .try_get::<String, _>("member_id")
-                .unwrap_or_default(),
+            member_id: row.try_get::<String, _>("member_id").unwrap_or_default(),
             member_type,
-            username: row.try_get::<Option<String>, _>("username").ok(),
-            display_name: row.try_get::<Option<String>, _>("display_name").ok(),
+            username: row.try_get::<Option<String>, _>("username").ok().flatten(),
+            display_name: row
+                .try_get::<Option<String>, _>("display_name")
+                .ok()
+                .flatten(),
         };
         by_msg.entry(msg_id).or_insert_with(Vec::new).push(mention);
     }

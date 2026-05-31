@@ -25,13 +25,27 @@ pub const SESSION_STATUS_ERROR: &str = "error";
 
 pub fn normalize_scope_type(raw: &str) -> &str {
     match raw {
-        SESSION_SCOPE_CHANNEL | SESSION_SCOPE_TASK | SESSION_SCOPE_TOPIC | SESSION_SCOPE_DM
-        | SESSION_SCOPE_WORKSPACE | SESSION_SCOPE_GLOBAL | SESSION_SCOPE_USER => raw,
+        SESSION_SCOPE_CHANNEL
+        | SESSION_SCOPE_TASK
+        | SESSION_SCOPE_TOPIC
+        | SESSION_SCOPE_DM
+        | SESSION_SCOPE_WORKSPACE
+        | SESSION_SCOPE_GLOBAL
+        | SESSION_SCOPE_USER => raw,
         _ => SESSION_SCOPE_CHANNEL,
     }
 }
 
-fn scope_columns(scope_type: &str, scope_id: &str, task_id: Option<&str>) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+fn scope_columns(
+    scope_type: &str,
+    scope_id: &str,
+    task_id: Option<&str>,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     let scope_id = scope_id.to_string();
     match scope_type {
         SESSION_SCOPE_CHANNEL => (Some(scope_id), None, None, None),
@@ -41,22 +55,44 @@ fn scope_columns(scope_type: &str, scope_id: &str, task_id: Option<&str>) -> (Op
             let task = scope_id;
             (None, None, None, Some(task))
         }
-        SESSION_SCOPE_WORKSPACE | SESSION_SCOPE_GLOBAL | SESSION_SCOPE_USER => (None, None, None, None),
+        SESSION_SCOPE_WORKSPACE | SESSION_SCOPE_GLOBAL | SESSION_SCOPE_USER => {
+            (None, None, None, None)
+        }
         _ => (Some(scope_id), None, None, None),
     }
 }
 
-fn fallback_task_id(
-    scope_type: &str,
-    scope_id: &str,
-    provided: Option<&str>,
-) -> Option<String> {
+fn fallback_task_id(scope_type: &str, scope_id: &str, provided: Option<&str>) -> Option<String> {
     match scope_type {
         SESSION_SCOPE_TASK => Some(scope_id.to_string()),
-        SESSION_SCOPE_CHANNEL => provided.and_then(|v| if v.is_empty() { None } else { Some(v.to_string()) }),
-        SESSION_SCOPE_TOPIC => provided.and_then(|v| if v.is_empty() { None } else { Some(v.to_string()) }),
-        SESSION_SCOPE_DM => provided.and_then(|v| if v.is_empty() { None } else { Some(v.to_string()) }),
-        _ => provided.and_then(|v| if v.is_empty() { None } else { Some(v.to_string()) }),
+        SESSION_SCOPE_CHANNEL => provided.and_then(|v| {
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        }),
+        SESSION_SCOPE_TOPIC => provided.and_then(|v| {
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        }),
+        SESSION_SCOPE_DM => provided.and_then(|v| {
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        }),
+        _ => provided.and_then(|v| {
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        }),
     }
 }
 
@@ -83,7 +119,9 @@ pub async fn acquire_scope_session(
     }
     let provider_account_id = provider_account_id.trim();
     if provider_account_id.is_empty() {
-        return Err(AppError::BadRequest("provider_account_id can not be empty".into()));
+        return Err(AppError::BadRequest(
+            "provider_account_id can not be empty".into(),
+        ));
     }
 
     let now = Utc::now();
@@ -119,7 +157,8 @@ pub async fn acquire_scope_session(
     .await
     .map_err(AppError::Db)?;
 
-    let session_uuid = Uuid::parse_str(&session_id).map_err(|_| AppError::Internal("invalid session_id".into()))?;
+    let session_uuid = Uuid::parse_str(&session_id)
+        .map_err(|_| AppError::Internal("invalid session_id".into()))?;
     upsert_session_binding(
         db,
         &session_uuid,
@@ -132,7 +171,9 @@ pub async fn acquire_scope_session(
     )
     .await?;
 
-    Ok(SessionHandle { session_id: session_uuid })
+    Ok(SessionHandle {
+        session_id: session_uuid,
+    })
 }
 
 async fn upsert_session_binding(
@@ -145,7 +186,8 @@ async fn upsert_session_binding(
     task_id: Option<String>,
     role: &str,
 ) -> Result<(), AppError> {
-    let (channel_id, topic_id, dm_id, binding_task_id) = scope_columns(scope_type, scope_id, task_id.as_deref());
+    let (channel_id, topic_id, dm_id, binding_task_id) =
+        scope_columns(scope_type, scope_id, task_id.as_deref());
     sqlx::query(
         "INSERT INTO agentnexus_session_bindings (
             binding_id, session_id, bot_id, provider, provider_account_id, provider_agent_id,
@@ -295,25 +337,15 @@ async fn resolve_session_id(
     provider_session_id: Option<&str>,
 ) -> Result<Uuid, AppError> {
     if let Some(provider_session_key) = provider_session_key {
-        if let Ok(session_id) = resolve_session_id_by_key(
-            db,
-            bot_id,
-            provider_account_id,
-            provider_session_key,
-        )
-        .await
+        if let Ok(session_id) =
+            resolve_session_id_by_key(db, bot_id, provider_account_id, provider_session_key).await
         {
             return Ok(session_id);
         }
     }
     if let Some(provider_session_id) = provider_session_id {
-        resolve_session_id_by_provider_id(
-            db,
-            bot_id,
-            provider_account_id,
-            provider_session_id,
-        )
-        .await
+        resolve_session_id_by_provider_id(db, bot_id, provider_account_id, provider_session_id)
+            .await
     } else {
         Err(AppError::NotFound)
     }
