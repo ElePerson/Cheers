@@ -12,7 +12,7 @@ use std::sync::{
 
 use dashmap::DashMap;
 use serde_json::{json, Value};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::{
@@ -101,8 +101,11 @@ pub async fn handle_delta(
         .and_then(|s| s.parse().ok())
         .ok_or("missing msg_id")?;
     let delta = frame.get("delta").and_then(|v| v.as_str()).unwrap_or("");
-    let entry = registry.entries.get(&msg_id).ok_or("stream not registered")?;
-    mark_session_alive(db, bot_id, provider_account_id, frame, Some(entry.session_id)).await;
+    let entry = registry
+        .entries
+        .get(&msg_id)
+        .ok_or("stream not registered")?;
+    mark_session_alive(db, bot_id, provider_account_id, frame, entry.session_id).await;
 
     // R1: 所有权校验 —— 以 PG 为准，不信任内存注册表
     let channel_id = verify_ownership(db, bot_id, msg_id).await?;
@@ -195,7 +198,10 @@ pub async fn handle_done(
     let msg_type = details
         .try_get::<String, _>("msg_type")
         .unwrap_or_else(|_| "text".to_string());
-    let reply_to_msg_id = details.try_get::<Option<String>, _>("reply_to_msg_id").ok();
+    let reply_to_msg_id = details
+        .try_get::<Option<String>, _>("reply_to_msg_id")
+        .ok()
+        .flatten();
 
     let wire = WireFrame::channel(
         channel_id,
@@ -300,7 +306,9 @@ pub async fn handle_session_update(
         }
     });
     if provider_session_key.is_none() && provider_session_id.is_none() && metadata.is_none() {
-        return Err("session_update missing provider_session_key, provider_session_id, and metadata");
+        return Err(
+            "session_update missing provider_session_key, provider_session_id, and metadata",
+        );
     }
 
     sessions::apply_session_update(
@@ -357,7 +365,10 @@ pub async fn handle_send(
         .ok_or("missing channel_id")?;
 
     let content = frame.get("content").and_then(|v| v.as_str()).unwrap_or("");
-    let msg_type = frame.get("msg_type").and_then(|v| v.as_str()).unwrap_or("text");
+    let msg_type = frame
+        .get("msg_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("text");
     let file_ids = parse_file_ids(frame.get("file_ids"));
     let msg_id = Uuid::new_v4();
 
@@ -401,7 +412,11 @@ pub async fn handle_send(
 
 fn parse_file_ids(value: Option<&Value>) -> Vec<String> {
     let mut file_ids = Vec::new();
-    for v in value.and_then(|v| v.as_array()).unwrap_or(&[]).iter() {
+    for v in value
+        .and_then(|v| v.as_array())
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+    {
         let Some(raw) = v.as_str() else {
             continue;
         };
@@ -488,11 +503,7 @@ async fn mark_session_alive(
 
 /// R1: 校验 msg_id 的占位 owner == bot_id，且占位仍 active（is_partial=true 或内容为空）。
 /// 返回 channel_id（用于后续 fanout）。
-async fn verify_ownership(
-    db: &PgPool,
-    bot_id: Uuid,
-    msg_id: Uuid,
-) -> Result<Uuid, &'static str> {
+async fn verify_ownership(db: &PgPool, bot_id: Uuid, msg_id: Uuid) -> Result<Uuid, &'static str> {
     use sqlx::Row;
 
     let row = sqlx::query(

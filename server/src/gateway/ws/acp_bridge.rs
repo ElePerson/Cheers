@@ -44,10 +44,7 @@ struct BotInfo {
 // ── Control WS ────────────────────────────────────────────────────────────────
 
 /// GET /ws/acp-bridge/control
-pub async fn control_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> Response {
+pub async fn control_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| handle_control(socket, state))
 }
 
@@ -64,7 +61,9 @@ async fn handle_control(mut socket: WebSocket, state: AppState) {
     let connection_id = Uuid::new_v4();
     let (task_tx, mut task_rx) = mpsc::channel::<Value>(64);
 
-    state.bot_registry.bind_control(bot.bot_id, connection_id, task_tx);
+    state
+        .bot_registry
+        .bind_control(bot.bot_id, connection_id, task_tx);
 
     // ── 3. 发 hello 帧（membership snapshot）─────────────────────────────
     let memberships = load_memberships(&state.db, bot.bot_id).await;
@@ -138,10 +137,7 @@ async fn handle_control_frame(frame: &Value, state: &AppState, bot_id: Uuid) {
 // ── Data WS ───────────────────────────────────────────────────────────────────
 
 /// GET /ws/acp-bridge/data
-pub async fn data_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> Response {
+pub async fn data_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| handle_data(socket, state))
 }
 
@@ -240,13 +236,17 @@ async fn handle_data(mut socket: WebSocket, state: AppState) {
                                             detail = %err,
                                             "data frame rejected by capability check"
                                         );
-                                    } else {
-                                        tracing::warn!(
-                                            bot_id = %bot.bot_id,
-                                            frame_type = frame.get("type").and_then(Value::as_str).unwrap_or("unknown"),
-                                            err = %err,
-                                            "data frame rejected by capability check"
-                                        );
+                                        } else {
+                                        let frame_type = frame
+                                            .get("type")
+                                            .and_then(|value| value.as_str())
+                                            .unwrap_or("unknown");
+                                            tracing::warn!(
+                                                bot_id = %bot.bot_id,
+                                                frame_type = frame_type,
+                                                err = %err,
+                                                "data frame rejected by capability check"
+                                            );
                                     }
                                     let _ = ws_send(
                                         &mut socket,
@@ -284,17 +284,12 @@ async fn handle_data(mut socket: WebSocket, state: AppState) {
     tracing::info!(bot_id = %bot.bot_id, "data disconnected");
 }
 
-async fn handle_data_frame(
-    frame: &Value,
-    state: &AppState,
-    bot: &BotInfo,
-    socket: &mut WebSocket,
-) {
+async fn handle_data_frame(frame: &Value, state: &AppState, bot: &BotInfo, socket: &mut WebSocket) {
     let ftype = frame.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match ftype {
         // ── 流式输出（写后投递）────────────────────────────────────────────
-            "delta" => {
+        "delta" => {
             if let Err(e) = handle_delta(
                 &state.stream_registry,
                 &state.fanout,
@@ -344,7 +339,9 @@ async fn handle_data_frame(
             // TODO: fan-out permission_request 帧给频道内用户
         }
         "session_update" => {
-            if let Err(e) = handle_session_update(&state.db, bot.bot_id, &bot.provider_account_id, frame).await {
+            if let Err(e) =
+                handle_session_update(&state.db, bot.bot_id, &bot.provider_account_id, frame).await
+            {
                 tracing::warn!(bot_id = %bot.bot_id, err = e, "session_update rejected");
                 let _ = ws_send(socket, &json!({ "type": "error", "detail": e })).await;
             }
@@ -373,10 +370,7 @@ async fn handle_data_frame(
 // 注意：也支持 HTTP header Authorization: Bearer agb_xxx（由 axum 在 upgrade 时读取，
 // 但 WebSocketUpgrade extractor 暂不直接暴露 headers，所以统一用首帧方式）。
 
-async fn auth_bot_from_first_frame(
-    socket: &mut WebSocket,
-    state: &AppState,
-) -> Option<BotInfo> {
+async fn auth_bot_from_first_frame(socket: &mut WebSocket, state: &AppState) -> Option<BotInfo> {
     use tokio::time::{sleep, Duration};
 
     let timeout = sleep(Duration::from_secs(10));
@@ -438,8 +432,11 @@ async fn resolve_bot(db: &PgPool, token: &str) -> Option<BotInfo> {
         return None;
     }
 
-    let bot_id = row.try_get::<String, _>("bot_id").ok()?.parse().ok()?;
-    let binding_config = row.try_get::<Option<Value>, _>("binding_config").ok().flatten();
+    let bot_id: Uuid = row.try_get::<String, _>("bot_id").ok()?.parse().ok()?;
+    let binding_config = row
+        .try_get::<Option<Value>, _>("binding_config")
+        .ok()
+        .flatten();
     let provider_account_id = resolve_bot_provider_account_id(binding_config.as_ref())
         .unwrap_or_else(|| bot_id.to_string());
     Some(BotInfo {

@@ -105,7 +105,9 @@ impl MessageDto {
             sender_id: row.try_get("sender_id").ok(),
             sender_name: row.try_get("sender_name").ok(),
             content: row.try_get("content").unwrap_or_default(),
-            msg_type: row.try_get("msg_type").unwrap_or_else(|_| "text".to_string()),
+            msg_type: row
+                .try_get("msg_type")
+                .unwrap_or_else(|_| "text".to_string()),
             is_partial: row.try_get("is_partial").unwrap_or(false),
             reply_to_msg_id: row.try_get("reply_to_msg_id").ok(),
             file_ids: match row.try_get::<Vec<String>, _>("file_ids") {
@@ -113,8 +115,8 @@ impl MessageDto {
                 Err(_) => row
                     .try_get::<Value, _>("file_ids")
                     .ok()
-                .and_then(|value| serde_json::from_value(value).ok())
-                .unwrap_or_default(),
+                    .and_then(|value| serde_json::from_value(value).ok())
+                    .unwrap_or_default(),
             },
             mentions: Vec::new(),
             files: Vec::new(),

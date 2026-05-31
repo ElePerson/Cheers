@@ -19,11 +19,26 @@ pub async fn handle_read(db: &PgPool, bot_id: Uuid, params: &Value) -> ResourceR
 
     check_bot_in_channel(db, bot_id, channel_id).await?;
 
-    let before = params.get("before").and_then(|v| v.as_str()).map(str::to_string);
-    let before_id = params.get("before_id").and_then(|v| v.as_str()).map(str::to_string);
-    let around_id = params.get("around_id").and_then(|v| v.as_str()).map(str::to_string);
-    let after = params.get("after").and_then(|v| v.as_str()).map(str::to_string);
-    let after_id = params.get("after_id").and_then(|v| v.as_str()).map(str::to_string);
+    let before = params
+        .get("before")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let before_id = params
+        .get("before_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let around_id = params
+        .get("around_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let after = params
+        .get("after")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let after_id = params
+        .get("after_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let resolved_before = before.or(before_id).or(around_id);
     let resolved_after = after.or(after_id);
     let limit = params
@@ -39,30 +54,38 @@ pub async fn handle_read(db: &PgPool, bot_id: Uuid, params: &Value) -> ResourceR
         ));
     }
 
-    let page = domain_messages::list_channel_messages(db, &channel_id, resolved_before, resolved_after, limit)
-        .await
-        .map_err(|_| super::resource_error("INTERNAL_ERROR", "db error"))?;
+    let page = domain_messages::list_channel_messages(
+        db,
+        &channel_id,
+        resolved_before,
+        resolved_after,
+        limit,
+    )
+    .await
+    .map_err(|_| super::resource_error("INTERNAL_ERROR", "db error"))?;
     let has_more = page.has_more;
-    let mut messages = page.messages;
+    let messages = page.messages;
 
     let messages: Vec<Value> = messages
         .into_iter()
-        .map(|message| serde_json::to_value(message).unwrap_or_else(|_| {
-            serde_json::json!({
-                "v": MESSAGE_SCHEMA_VERSION,
-                "msg_id": "",
-                "channel_id": channel_id.to_string(),
-                "sender_type": "system",
-                "content": "",
-                "msg_type": "text",
-                "is_partial": false,
-                "reply_to_msg_id": null,
-                "file_ids": [],
-                "mentions": [],
-                "files": [],
-                "created_at": Utc::now(),
+        .map(|message| {
+            serde_json::to_value(message).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "v": MESSAGE_SCHEMA_VERSION,
+                    "msg_id": "",
+                    "channel_id": channel_id.to_string(),
+                    "sender_type": "system",
+                    "content": "",
+                    "msg_type": "text",
+                    "is_partial": false,
+                    "reply_to_msg_id": null,
+                    "file_ids": [],
+                    "mentions": [],
+                    "files": [],
+                    "created_at": Utc::now(),
+                })
             })
-        }))
+        })
         .collect();
 
     Ok(serde_json::json!({
@@ -90,10 +113,22 @@ pub async fn handle_create(
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| super::resource_error("INVALID_PARAMS", "channel_id required"))?;
 
-    check_write_permission(db, bot_id, channel_id, "channel:messages", "create", session_id).await?;
+    check_write_permission(
+        db,
+        bot_id,
+        channel_id,
+        "channel:messages",
+        "create",
+        session_id,
+    )
+    .await?;
 
     let msg_id = Uuid::new_v4();
-    let content = params.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let content = params
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let msg_type = params
         .get("msg_type")
         .and_then(|v| v.as_str())
@@ -118,7 +153,7 @@ pub async fn handle_create(
     .bind(bot_id.to_string())
     .bind(&content)
     .bind(&msg_type)
-    .bind(reply_to_msg_id)
+    .bind(&reply_to_msg_id)
     .bind(&serde_json::json!(file_ids.clone()))
     .bind(now)
     .execute(db)
@@ -167,7 +202,11 @@ pub async fn handle_create(
 
 fn parse_file_ids(value: Option<&Value>) -> Vec<String> {
     let mut file_ids = Vec::new();
-    for v in value.and_then(|v| v.as_array()).unwrap_or(&[]).iter() {
+    for v in value
+        .and_then(|v| v.as_array())
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+    {
         let Some(raw) = v.as_str() else {
             continue;
         };
@@ -182,7 +221,10 @@ fn parse_file_ids(value: Option<&Value>) -> Vec<String> {
     file_ids
 }
 
-async fn load_message_file_refs(db: &PgPool, file_ids: &[String]) -> Result<Vec<MessageFileRef>, ()> {
+async fn load_message_file_refs(
+    db: &PgPool,
+    file_ids: &[String],
+) -> Result<Vec<MessageFileRef>, ()> {
     if file_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -203,13 +245,20 @@ async fn load_message_file_refs(db: &PgPool, file_ids: &[String]) -> Result<Vec<
         let size_bytes = row.try_get::<Option<i64>, _>("size_bytes").ok().flatten();
         refs.push(MessageFileRef {
             file_id: file_id.clone(),
-            original_filename: row.try_get::<Option<String>, _>("original_filename").ok(),
-            content_type: row.try_get::<Option<String>, _>("content_type").ok(),
+            original_filename: row
+                .try_get::<Option<String>, _>("original_filename")
+                .ok()
+                .flatten(),
+            content_type: row
+                .try_get::<Option<String>, _>("content_type")
+                .ok()
+                .flatten(),
             size_bytes,
-            status: row.try_get::<Option<String>, _>("status").ok(),
+            status: row.try_get::<Option<String>, _>("status").ok().flatten(),
             expires_at: row
                 .try_get::<Option<chrono::DateTime<Utc>>, _>("expires_at")
                 .ok()
+                .flatten()
                 .map(|at| at.to_rfc3339()),
             preview_url: Some(format!("/api/v1/files/{}/preview", file_id)),
             download_url: Some(format!("/api/v1/files/{}/download", file_id)),

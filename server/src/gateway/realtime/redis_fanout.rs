@@ -49,7 +49,10 @@ impl RedisFanout {
         let publisher = redis::aio::ConnectionManager::new(client.clone()).await?;
         let local = InProcessFanout::new();
 
-        let fanout = Arc::new(Self { publisher, local: local.clone() });
+        let fanout = Arc::new(Self {
+            publisher,
+            local: local.clone(),
+        });
 
         // 启动后台订阅任务
         tokio::spawn(subscribe_loop(client, local));
@@ -115,10 +118,7 @@ async fn subscribe_loop(client: redis::Client, local: Arc<InProcessFanout>) {
     }
 }
 
-async fn do_subscribe(
-    client: redis::Client,
-    local: Arc<InProcessFanout>,
-) -> anyhow::Result<()> {
+async fn do_subscribe(client: redis::Client, local: Arc<InProcessFanout>) -> anyhow::Result<()> {
     let conn = client.get_async_connection().await?;
     let mut pubsub = conn.into_pubsub();
 

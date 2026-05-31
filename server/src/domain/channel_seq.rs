@@ -24,7 +24,7 @@ pub async fn allocate(
         "UPDATE channels SET next_seq = next_seq + 1 WHERE channel_id = $1 RETURNING next_seq",
     )
     .bind(channel_id.to_string())
-    .fetch_one(tx)
+    .fetch_one(&mut **tx)
     .await?;
 
     row.try_get::<i64, _>("next_seq")

@@ -1,10 +1,13 @@
-use axum::{extract::{Query, State}, Extension, Json};
+use axum::{
+    extract::{Query, State},
+    Extension, Json,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::{app_state::AppState, errors::AppError, api::middleware::Claims};
+use crate::{api::middleware::Claims, app_state::AppState, errors::AppError};
 
 #[derive(Deserialize)]
 pub struct FriendQuery {
@@ -18,7 +21,11 @@ pub struct FriendRequest {
 }
 
 fn pair_key(a: &str, b: &str) -> String {
-    if a <= b { format!("{a}:{b}") } else { format!("{b}:{a}") }
+    if a <= b {
+        format!("{a}:{b}")
+    } else {
+        format!("{b}:{a}")
+    }
 }
 
 pub async fn search_users(
@@ -39,12 +46,18 @@ pub async fn search_users(
     .bind(term)
     .fetch_all(&state.db)
     .await?;
-    Ok(Json(rows.into_iter().map(|r| json!({
-        "user_id": r.try_get::<String, _>("user_id").unwrap_or_default(),
-        "username": r.try_get::<String, _>("username").unwrap_or_default(),
-        "display_name": r.try_get::<String, _>("display_name").ok(),
-        "avatar_url": r.try_get::<String, _>("avatar_url").ok(),
-    })).collect()))
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| {
+                json!({
+                    "user_id": r.try_get::<String, _>("user_id").unwrap_or_default(),
+                    "username": r.try_get::<String, _>("username").unwrap_or_default(),
+                    "display_name": r.try_get::<String, _>("display_name").ok(),
+                    "avatar_url": r.try_get::<String, _>("avatar_url").ok(),
+                })
+            })
+            .collect(),
+    ))
 }
 
 pub async fn list_friends(
@@ -79,12 +92,14 @@ pub async fn add_friend(
     if body.friend_id == claims.sub {
         return Err(AppError::BadRequest("cannot add yourself".into()));
     }
-    let exists = sqlx::query("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = $1 AND is_deleted = FALSE) AS ok")
-        .bind(&body.friend_id)
-        .fetch_one(&state.db)
-        .await?
-        .try_get::<bool, _>("ok")
-        .unwrap_or(false);
+    let exists = sqlx::query(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE user_id = $1 AND is_deleted = FALSE) AS ok",
+    )
+    .bind(&body.friend_id)
+    .fetch_one(&state.db)
+    .await?
+    .try_get::<bool, _>("ok")
+    .unwrap_or(false);
     if !exists {
         return Err(AppError::NotFound);
     }
@@ -101,7 +116,9 @@ pub async fn add_friend(
     .bind(pair)
     .execute(&state.db)
     .await?;
-    Ok(Json(json!({"friend_id": body.friend_id, "status": "accepted"})))
+    Ok(Json(
+        json!({"friend_id": body.friend_id, "status": "accepted"}),
+    ))
 }
 
 pub async fn remove_friend(
@@ -109,7 +126,9 @@ pub async fn remove_friend(
     Extension(claims): Extension<Claims>,
     Query(q): Query<FriendQuery>,
 ) -> Result<Json<Value>, AppError> {
-    let friend_id = q.friend_id.ok_or_else(|| AppError::BadRequest("friend_id is required".into()))?;
+    let friend_id = q
+        .friend_id
+        .ok_or_else(|| AppError::BadRequest("friend_id is required".into()))?;
     sqlx::query("DELETE FROM friendships WHERE pair_key = $1")
         .bind(pair_key(&claims.sub, &friend_id))
         .execute(&state.db)

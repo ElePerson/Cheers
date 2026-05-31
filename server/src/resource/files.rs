@@ -13,7 +13,11 @@ pub async fn handle_list(db: &PgPool, bot_id: Uuid, params: &Value) -> ResourceR
 
     check_bot_in_channel(db, bot_id, channel_id).await?;
 
-    let limit = params.get("limit").and_then(|v| v.as_i64()).unwrap_or(50).min(200);
+    let limit = params
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(50)
+        .min(200);
 
     let rows = sqlx::query(
         r#"
@@ -109,7 +113,15 @@ pub async fn handle_create(
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| super::resource_error("INVALID_PARAMS", "channel_id required"))?;
 
-    check_write_permission(db, bot_id, channel_id, "channel:files", "create", session_id).await?;
+    check_write_permission(
+        db,
+        bot_id,
+        channel_id,
+        "channel:files",
+        "create",
+        session_id,
+    )
+    .await?;
 
     // TODO: 实际写入 S3（Phase 2）
     let file_id = Uuid::new_v4().to_string();

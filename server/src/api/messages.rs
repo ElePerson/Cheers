@@ -5,14 +5,14 @@ use axum::{
     Extension, Json,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use tracing::info;
+use uuid::Uuid;
 
 use crate::{
+    api::middleware::Claims,
     app_state::AppState,
     domain::messages::{self, CreateMessageParams},
     errors::AppError,
-    api::middleware::Claims,
 };
 
 // ── POST /api/v1/channels/{channel_id}/messages ────────────────────────────
@@ -93,7 +93,9 @@ pub struct ListMessagesQuery {
     pub limit: i64,
 }
 
-fn default_limit() -> i64 { 50 }
+fn default_limit() -> i64 {
+    50
+}
 
 pub async fn list_messages(
     State(state): State<AppState>,
@@ -111,7 +113,8 @@ pub async fn list_messages(
     let limit = q.limit.clamp(1, 200);
     let before = q.before.or(q.before_id).or(q.around_id);
     let after = q.after.or(q.after_id);
-    let page = messages::list_messages(&state.db, user_id, channel_id, before, after, limit).await?;
+    let page =
+        messages::list_messages(&state.db, user_id, channel_id, before, after, limit).await?;
     let messages = page.messages;
     let has_more = page.has_more;
     info!(

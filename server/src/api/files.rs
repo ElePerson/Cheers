@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::{app_state::AppState, api::middleware::Claims, errors::AppError};
+use crate::{api::middleware::Claims, app_state::AppState, errors::AppError};
 
 #[derive(Deserialize)]
 pub struct PresignRequest {
@@ -44,12 +44,7 @@ struct FileRecord {
 }
 
 fn safe_filename(raw: &str) -> Result<String, AppError> {
-    let name = raw
-        .trim()
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or("")
-        .trim();
+    let name = raw.trim().rsplit(['/', '\\']).next().unwrap_or("").trim();
     if name.is_empty() || matches!(name, "." | "..") {
         return Err(AppError::BadRequest("filename is required".into()));
     }
@@ -93,19 +88,46 @@ async fn load_file_record(state: &AppState, file_id: &str) -> Result<FileRecord,
 
     Ok(FileRecord {
         file_id: row.try_get::<String, _>("file_id").unwrap_or_default(),
-        channel_id: row.try_get::<Option<String>, _>("channel_id").ok(),
-        workspace_id: row.try_get::<Option<String>, _>("workspace_id").ok(),
-        uploader_id: row.try_get::<Option<String>, _>("uploader_id").ok(),
-        object_key: row.try_get::<Option<String>, _>("object_key").ok(),
-        original_filename: row.try_get::<Option<String>, _>("original_filename").ok(),
-        content_type: row.try_get::<Option<String>, _>("content_type").ok(),
+        channel_id: row
+            .try_get::<Option<String>, _>("channel_id")
+            .ok()
+            .flatten(),
+        workspace_id: row
+            .try_get::<Option<String>, _>("workspace_id")
+            .ok()
+            .flatten(),
+        uploader_id: row
+            .try_get::<Option<String>, _>("uploader_id")
+            .ok()
+            .flatten(),
+        object_key: row
+            .try_get::<Option<String>, _>("object_key")
+            .ok()
+            .flatten(),
+        original_filename: row
+            .try_get::<Option<String>, _>("original_filename")
+            .ok()
+            .flatten(),
+        content_type: row
+            .try_get::<Option<String>, _>("content_type")
+            .ok()
+            .flatten(),
         status: row
             .try_get::<String, _>("status")
             .unwrap_or_else(|_| "pending_upload".to_string()),
-        size_bytes: row.try_get::<Option<i32>, _>("size_bytes").ok(),
-        summary_3lines: row.try_get::<Option<String>, _>("summary_3lines").ok(),
-        last_error: row.try_get::<Option<String>, _>("last_error").ok(),
-        expires_at: row.try_get::<Option<DateTime<Utc>>, _>("expires_at").ok(),
+        size_bytes: row.try_get::<Option<i32>, _>("size_bytes").ok().flatten(),
+        summary_3lines: row
+            .try_get::<Option<String>, _>("summary_3lines")
+            .ok()
+            .flatten(),
+        last_error: row
+            .try_get::<Option<String>, _>("last_error")
+            .ok()
+            .flatten(),
+        expires_at: row
+            .try_get::<Option<DateTime<Utc>>, _>("expires_at")
+            .ok()
+            .flatten(),
     })
 }
 
@@ -121,7 +143,11 @@ async fn mark_file_expired(state: &AppState, file_id: &str) -> Result<(), AppErr
     Ok(())
 }
 
-async fn ensure_channel_member(state: &AppState, claims: &Claims, channel_id: &str) -> Result<(), AppError> {
+async fn ensure_channel_member(
+    state: &AppState,
+    claims: &Claims,
+    channel_id: &str,
+) -> Result<(), AppError> {
     if matches!(claims.role.as_str(), "system_admin" | "admin") {
         return Ok(());
     }
@@ -147,7 +173,11 @@ async fn ensure_channel_member(state: &AppState, claims: &Claims, channel_id: &s
     }
 }
 
-async fn ensure_workspace_member(state: &AppState, claims: &Claims, workspace_id: &str) -> Result<(), AppError> {
+async fn ensure_workspace_member(
+    state: &AppState,
+    claims: &Claims,
+    workspace_id: &str,
+) -> Result<(), AppError> {
     if matches!(claims.role.as_str(), "system_admin" | "admin") {
         return Ok(());
     }
@@ -173,7 +203,11 @@ async fn ensure_workspace_member(state: &AppState, claims: &Claims, workspace_id
     }
 }
 
-async fn ensure_file_scope(state: &AppState, claims: &Claims, file: &FileRecord) -> Result<(), AppError> {
+async fn ensure_file_scope(
+    state: &AppState,
+    claims: &Claims,
+    file: &FileRecord,
+) -> Result<(), AppError> {
     if matches!(claims.role.as_str(), "system_admin" | "admin") {
         return Ok(());
     }
@@ -253,10 +287,7 @@ fn attachment_response(
         HeaderValue::from_str(&content_disposition)
             .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
     );
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("no-store"),
-    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if let Some(ttl) = ttl_seconds {
         if ttl > 0 {
             let value = format!("private, max-age={ttl}");
@@ -341,7 +372,9 @@ pub async fn confirm_upload(
     }
 
     if file.status != "pending_upload" {
-        return Err(AppError::BadRequest("file is not in pending_upload state".into()));
+        return Err(AppError::BadRequest(
+            "file is not in pending_upload state".into(),
+        ));
     }
 
     if let Some(expires_at) = file.expires_at {

@@ -69,12 +69,15 @@ impl Default for InProcessBotLocator {
 
 impl BotRegistry for InProcessBotLocator {
     fn bind_control(&self, bot_id: Uuid, conn_id: Uuid, task_tx: mpsc::Sender<Value>) {
-        self.sessions.insert(bot_id, BotSession {
+        self.sessions.insert(
             bot_id,
-            connection_id: conn_id,
-            control_tx: task_tx,
-            data_tx: None,
-        });
+            BotSession {
+                bot_id,
+                connection_id: conn_id,
+                control_tx: task_tx,
+                data_tx: None,
+            },
+        );
     }
 
     fn bind_data(&self, bot_id: Uuid, data_tx: mpsc::Sender<Value>) {

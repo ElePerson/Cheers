@@ -12,9 +12,9 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::{
+    api::middleware::{verify_token, Claims},
     app_state::AppState,
     gateway::realtime::frame::WireFrame,
-    api::middleware::{verify_token, Claims},
 };
 
 // ── 关闭码 ────────────────────────────────────────────────────────────────────
@@ -56,10 +56,7 @@ enum ServerControl {
 // ── Axum upgrade handler ──────────────────────────────────────────────────────
 
 /// axum 路由挂载：`Router::new().route("/ws", get(ws_handler))`
-pub async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> Response {
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
@@ -139,7 +136,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     }
 
     // ── 清理 ──────────────────────────────────────────────────────────────────
-    state.conn_manager.on_disconnect(user_id, conn_id, &subscribed);
+    state
+        .conn_manager
+        .on_disconnect(user_id, conn_id, &subscribed);
 }
 
 // ── 鉴权阶段 ─────────────────────────────────────────────────────────────────
@@ -212,7 +211,13 @@ async fn handle_client_frame(
     let frame: ClientFrame = match serde_json::from_str(text) {
         Ok(f) => f,
         Err(_) => {
-            send_control(socket, &ServerControl::Error { detail: "invalid JSON".into() }).await;
+            send_control(
+                socket,
+                &ServerControl::Error {
+                    detail: "invalid JSON".into(),
+                },
+            )
+            .await;
             return;
         }
     };
@@ -225,7 +230,13 @@ async fn handle_client_frame(
                     send_control(socket, &ServerControl::AuthOk { user_id }).await;
                 }
                 Err(e) => {
-                    send_control(socket, &ServerControl::AuthErr { reason: e.to_string() }).await;
+                    send_control(
+                        socket,
+                        &ServerControl::AuthErr {
+                            reason: e.to_string(),
+                        },
+                    )
+                    .await;
                 }
             }
         }
@@ -237,7 +248,11 @@ async fn handle_client_frame(
                 return;
             }
 
-            match state.conn_manager.subscribe(user_id, conn_id, channel_id, tx.clone()).await {
+            match state
+                .conn_manager
+                .subscribe(user_id, conn_id, channel_id, tx.clone())
+                .await
+            {
                 Ok(()) => {
                     subscribed.push(channel_id);
                     send_control(socket, &ServerControl::Subscribed { channel_id }).await;

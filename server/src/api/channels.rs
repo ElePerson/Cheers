@@ -1,10 +1,13 @@
-use axum::{extract::{Path, State}, Extension, Json};
+use axum::{
+    extract::{Path, State},
+    Extension, Json,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::{app_state::AppState, errors::AppError, api::middleware::Claims};
+use crate::{api::middleware::Claims, app_state::AppState, errors::AppError};
 
 #[derive(Serialize)]
 pub struct ChannelDto {
@@ -78,7 +81,12 @@ fn dto(row: sqlx::postgres::PgRow) -> ChannelDto {
     }
 }
 
-async fn is_channel_member(state: &AppState, channel_id: &str, user_id: &str, role: &str) -> Result<bool, AppError> {
+async fn is_channel_member(
+    state: &AppState,
+    channel_id: &str,
+    user_id: &str,
+    role: &str,
+) -> Result<bool, AppError> {
     if matches!(role, "system_admin" | "admin") {
         return Ok(true);
     }
@@ -97,7 +105,12 @@ async fn is_channel_member(state: &AppState, channel_id: &str, user_id: &str, ro
     Ok(ok)
 }
 
-async fn ensure_channel_admin(state: &AppState, channel_id: &str, user_id: &str, role: &str) -> Result<(), AppError> {
+async fn ensure_channel_admin(
+    state: &AppState,
+    channel_id: &str,
+    user_id: &str,
+    role: &str,
+) -> Result<(), AppError> {
     if matches!(role, "system_admin" | "admin") {
         return Ok(());
     }
@@ -113,7 +126,11 @@ async fn ensure_channel_admin(state: &AppState, channel_id: &str, user_id: &str,
     .await?
     .try_get::<bool, _>("ok")
     .unwrap_or(false);
-    if ok { Ok(()) } else { Err(AppError::Forbidden("channel admin required".into())) }
+    if ok {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden("channel admin required".into()))
+    }
 }
 
 pub async fn list_channels(
@@ -283,13 +300,19 @@ pub async fn list_channel_members(
     .bind(&channel_id)
     .fetch_all(&state.db)
     .await?;
-    Ok(Json(rows.into_iter().map(|r| json!({
-        "member_id": r.try_get::<String, _>("member_id").unwrap_or_default(),
-        "member_type": r.try_get::<String, _>("member_type").unwrap_or_default(),
-        "role": r.try_get::<String, _>("role").unwrap_or_else(|_| "member".into()),
-        "username": r.try_get::<String, _>("username").ok(),
-        "display_name": r.try_get::<String, _>("display_name").ok(),
-    })).collect()))
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| {
+                json!({
+                    "member_id": r.try_get::<String, _>("member_id").unwrap_or_default(),
+                    "member_type": r.try_get::<String, _>("member_type").unwrap_or_default(),
+                    "role": r.try_get::<String, _>("role").unwrap_or_else(|_| "member".into()),
+                    "username": r.try_get::<String, _>("username").ok(),
+                    "display_name": r.try_get::<String, _>("display_name").ok(),
+                })
+            })
+            .collect(),
+    ))
 }
 
 pub async fn add_channel_member(
@@ -300,7 +323,9 @@ pub async fn add_channel_member(
 ) -> Result<Json<Value>, AppError> {
     ensure_channel_admin(&state, &channel_id, &claims.sub, &claims.role).await?;
     if !matches!(body.member_type.as_str(), "user" | "bot") {
-        return Err(AppError::BadRequest("member_type must be user or bot".into()));
+        return Err(AppError::BadRequest(
+            "member_type must be user or bot".into(),
+        ));
     }
     sqlx::query(
         "INSERT INTO channel_memberships (channel_id, member_id, member_type, role, added_by)
@@ -313,7 +338,9 @@ pub async fn add_channel_member(
     .bind(&claims.sub)
     .execute(&state.db)
     .await?;
-    Ok(Json(json!({"channel_id": channel_id, "member_id": body.member_id, "member_type": body.member_type})))
+    Ok(Json(
+        json!({"channel_id": channel_id, "member_id": body.member_id, "member_type": body.member_type}),
+    ))
 }
 
 pub async fn remove_channel_member(
@@ -359,10 +386,18 @@ pub async fn put_channel_context(
 ) -> Result<Json<Value>, AppError> {
     ensure_channel_admin(&state, &channel_id, &claims.sub, &claims.role).await?;
     let mut layers: Vec<(String, String)> = Vec::new();
-    if let Some(v) = body.anchor { layers.push(("ANCHOR".into(), v)); }
-    if let Some(v) = body.decisions { layers.push(("DECISIONS".into(), v)); }
-    if let Some(v) = body.files_index { layers.push(("FILES_INDEX".into(), v)); }
-    if let Some(v) = body.recent { layers.push(("RECENT".into(), v)); }
+    if let Some(v) = body.anchor {
+        layers.push(("ANCHOR".into(), v));
+    }
+    if let Some(v) = body.decisions {
+        layers.push(("DECISIONS".into(), v));
+    }
+    if let Some(v) = body.files_index {
+        layers.push(("FILES_INDEX".into(), v));
+    }
+    if let Some(v) = body.recent {
+        layers.push(("RECENT".into(), v));
+    }
     if let Some(Value::Object(map)) = body.layers {
         for (key, value) in map {
             if let Some(content) = value.as_str() {

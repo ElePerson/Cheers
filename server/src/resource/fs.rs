@@ -36,7 +36,15 @@ pub async fn handle_write(
     session_id: Option<&str>,
 ) -> ResourceResult {
     let (channel_id, _path) = extract_channel_path(params)?;
-    check_write_permission(db, bot_id, channel_id, "channel:memory", "write", session_id).await?;
+    check_write_permission(
+        db,
+        bot_id,
+        channel_id,
+        "channel:memory",
+        "write",
+        session_id,
+    )
+    .await?;
     let _if_version: Option<i64> = params.get("if_version").and_then(|v| v.as_i64());
     let _content: &str = params.get("content").and_then(|v| v.as_str()).unwrap_or("");
     todo!("mesh step 6: tx: UPDATE memory_files SET content, version=version+1 WHERE channel_id AND path AND version=if_version; INSERT channel_operations op_type=fs.write")
@@ -50,9 +58,23 @@ pub async fn handle_edit(
     session_id: Option<&str>,
 ) -> ResourceResult {
     let (channel_id, _path) = extract_channel_path(params)?;
-    check_write_permission(db, bot_id, channel_id, "channel:memory", "write", session_id).await?;
-    let _old = params.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
-    let _new = params.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
+    check_write_permission(
+        db,
+        bot_id,
+        channel_id,
+        "channel:memory",
+        "write",
+        session_id,
+    )
+    .await?;
+    let _old = params
+        .get("old_string")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let _new = params
+        .get("new_string")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let _if_version: Option<i64> = params.get("if_version").and_then(|v| v.as_i64());
     todo!("mesh step 6: REPLACE in content string; UPDATE version; INSERT channel_operations")
 }
@@ -65,7 +87,15 @@ pub async fn handle_append(
     session_id: Option<&str>,
 ) -> ResourceResult {
     let (channel_id, _path) = extract_channel_path(params)?;
-    check_write_permission(db, bot_id, channel_id, "channel:memory", "write", session_id).await?;
+    check_write_permission(
+        db,
+        bot_id,
+        channel_id,
+        "channel:memory",
+        "write",
+        session_id,
+    )
+    .await?;
     let _content: &str = params.get("content").and_then(|v| v.as_str()).unwrap_or("");
     todo!("mesh step 6: UPDATE memory_files SET content=content||$append, version=version+1")
 }
@@ -78,7 +108,15 @@ pub async fn handle_rm(
     session_id: Option<&str>,
 ) -> ResourceResult {
     let (channel_id, _path) = extract_channel_path(params)?;
-    check_write_permission(db, bot_id, channel_id, "channel:memory", "write", session_id).await?;
+    check_write_permission(
+        db,
+        bot_id,
+        channel_id,
+        "channel:memory",
+        "write",
+        session_id,
+    )
+    .await?;
     todo!("mesh step 6: DELETE FROM memory_files WHERE channel_id=$1 AND path=$2; INSERT channel_operations op_type=fs.rm")
 }
 
@@ -94,7 +132,15 @@ pub async fn handle_mv(
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| super::resource_error("BAD_REQUEST", "missing channel_id"))?;
-    check_write_permission(db, bot_id, channel_id, "channel:memory", "write", session_id).await?;
+    check_write_permission(
+        db,
+        bot_id,
+        channel_id,
+        "channel:memory",
+        "write",
+        session_id,
+    )
+    .await?;
     let _from: &str = params.get("from").and_then(|v| v.as_str()).unwrap_or("");
     let _to: &str = params.get("to").and_then(|v| v.as_str()).unwrap_or("");
     todo!("mesh step 6: UPDATE memory_files SET path=replace(path, $from, $to) WHERE channel_id=$1 AND path LIKE $from || '%'")

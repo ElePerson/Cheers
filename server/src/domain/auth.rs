@@ -2,11 +2,7 @@ use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::{
-    config::Config,
-    errors::AppError,
-    api::middleware::Claims,
-};
+use crate::{api::middleware::Claims, config::Config, errors::AppError};
 
 // ── JWT 签发 ─────────────────────────────────────────────────────────────────
 
@@ -26,8 +22,7 @@ pub fn create_access_token(config: &Config, user_id: Uuid, role: &str) -> Result
     let key = EncodingKey::from_rsa_pem(config.jwt_private_key_pem.as_bytes())
         .map_err(|e| AppError::Internal(format!("invalid private key: {e}")))?;
 
-    encode(&header, &claims, &key)
-        .map_err(|e| AppError::Internal(format!("jwt encode: {e}")))
+    encode(&header, &claims, &key).map_err(|e| AppError::Internal(format!("jwt encode: {e}")))
 }
 
 // ── 用户查找 + 密码验证 ────────────────────────────────────────────────────────
@@ -41,7 +36,7 @@ pub struct AuthUser {
 /// 通过 username 或 email 查找用户，验证密码，返回用户信息。
 pub async fn authenticate(
     db: &PgPool,
-    login: &str,   // username 或 email
+    login: &str, // username 或 email
     password: &str,
 ) -> Result<AuthUser, AppError> {
     let row = sqlx::query(

@@ -21,9 +21,15 @@ use uuid::Uuid;
 
 use super::registry::{BotLocator, BotRegistry};
 
-fn control_subject(bot_id: Uuid) -> String { format!("agentnexus:bot:{bot_id}:control") }
-fn data_subject(bot_id: Uuid) -> String    { format!("agentnexus:bot:{bot_id}:data") }
-fn online_key(bot_id: Uuid) -> String      { format!("agentnexus:bot:{bot_id}:online") }
+fn control_subject(bot_id: Uuid) -> String {
+    format!("agentnexus:bot:{bot_id}:control")
+}
+fn data_subject(bot_id: Uuid) -> String {
+    format!("agentnexus:bot:{bot_id}:data")
+}
+fn online_key(bot_id: Uuid) -> String {
+    format!("agentnexus:bot:{bot_id}:online")
+}
 
 // ── RedisBotLocator（派发侧）─────────────────────────────────────────────────
 
@@ -75,7 +81,13 @@ pub struct RedisBotRegistry {
     client: redis::Client,
     publisher: redis::aio::ConnectionManager,
     /// 取消令牌：bot_id → CancelSender（drop 时取消订阅任务）
-    cancel_map: dashmap::DashMap<Uuid, (tokio::sync::oneshot::Sender<()>, tokio::sync::oneshot::Sender<()>)>,
+    cancel_map: dashmap::DashMap<
+        Uuid,
+        (
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Sender<()>,
+        ),
+    >,
 }
 
 impl RedisBotRegistry {

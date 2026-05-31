@@ -23,10 +23,10 @@ pub enum ChainStatus {
 impl ChainStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ChainStatus::Active    => "active",
-            ChainStatus::Paused    => "paused",
+            ChainStatus::Active => "active",
+            ChainStatus::Paused => "paused",
             ChainStatus::Cancelled => "cancelled",
-            ChainStatus::Done      => "done",
+            ChainStatus::Done => "done",
         }
     }
 }
@@ -43,10 +43,7 @@ pub async fn create(
 
 /// dispatch 前的派发门：检查 chain 是否仍 active。
 /// 返回 `false` 时调用方必须 drop，不能派发下一跳（这是取消的权威路径）。
-pub async fn is_active(
-    db: &PgPool,
-    chain_id: Uuid,
-) -> Result<bool, sqlx::Error> {
+pub async fn is_active(db: &PgPool, chain_id: Uuid) -> Result<bool, sqlx::Error> {
     todo!("mesh step 4: SELECT status FROM task_chains WHERE chain_id=$1")
 }
 
