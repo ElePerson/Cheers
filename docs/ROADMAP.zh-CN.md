@@ -2,7 +2,7 @@
 
 > **语言**：中文 | [English](ROADMAP.md)
 
-本文档描述 AgentNexus 的里程碑规划与当前进度。详细任务拆解见 [docs/develop/TodoList.md](develop/TodoList.md)，完整设计依据见 [docs/develop/开发计划与里程碑.md](develop/开发计划与里程碑.md)。
+本文档描述 AgentNexus 的里程碑规划与当前进度。详细任务拆解见 [docs/INDEX.zh-CN.md](INDEX.zh-CN.md) 的历史任务记录，完整设计背景可参考 [docs/arch/ARCHITECTURE_OVERVIEW.md](arch/ARCHITECTURE_OVERVIEW.md)。
 
 ---
 
@@ -75,7 +75,7 @@
 - [ ] 访问申请 API（待审批与审核流程）
 - [ ] Coordinator 知识扩展（能回答公共平台相关问题）
 
-详见 [docs/develop/公共平台访问申请API规范.md](develop/公共平台访问申请API规范.md)。
+详情可参考 [文档索引](INDEX.zh-CN.md) 中的历史规范说明（已归档，不再作为日常入口）。
 
 ---
 
@@ -87,7 +87,7 @@
 - [ ] Agent 自主加入协议（A2A 握手、Agent Card、Receptionist Agent）
 - [ ] 资源监控增强（Task DAG 可视化、风险分级）
 
-详见 [docs/develop/附件四_Agent自主加入协议摘要.md](develop/附件四_Agent自主加入协议摘要.md)。
+可参考 [文档索引](INDEX.zh-CN.md) 中的历史协议设计说明（已归档，不再作为当前实施依据）。
 
 ---
 

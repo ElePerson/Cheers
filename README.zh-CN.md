@@ -11,7 +11,7 @@
 
 ## 文档
 
-文档按受众分为两类：`docs/help/` 面向最终用户与运维管理员，`docs/develop/` 面向开发与设计。
+文档按受众分为两类：`docs/help/` 面向最终用户与运维管理员，`docs/arch` 面向架构与研发设计。
 
 **用户 / 运维（`docs/help/`）**
 
@@ -20,19 +20,21 @@
 - [RustFS 对象存储部署说明](docs/help/RustFS对象存储部署说明.md)
 - [Agent Bridge 接入指南](docs/help/AgentBridge接入指南.md)（OpenClaw 与 ACP / OpenCode ACP）
 
-**开发 / 设计（`docs/develop/`）**
+**开发 / 设计（`docs/arch`）**
 
-- [总体架构设计](docs/develop/总体架构设计.md) · [详细设计](docs/develop/详细设计.md) · [关键技术文档](docs/develop/关键技术文档.md)
-- [易用性设计](docs/develop/易用性设计.md)（交互、用语与扩展点）
-- [需求汇总](docs/develop/需求汇总.md)
-- [开发计划与里程碑](docs/develop/开发计划与里程碑.md) · [TodoList](docs/develop/TodoList.md) · [功能测试清单](docs/develop/功能测试清单.md)
-- [开源发布检查清单](docs/develop/开源发布检查清单.md)
+- [架构总览](docs/arch/ARCHITECTURE_OVERVIEW.md)
+- [去中心化网格改造计划](docs/arch/REFACTOR_PLAN.md)
+- [网关与传输协议](docs/arch/WIRE_PROTOCOL.md)
+- [ACP 接入与资源协议](docs/arch/ACP_INTEGRATION.md)
+- [权限模型与可信级别](docs/arch/BOT_PERMISSION.md)
+- [网关代码结构](docs/arch/GATEWAY_CODE_ARCH.md)
+- [统一架构索引](docs/INDEX.zh-CN.md)
 
 ## 技术栈
 
-- **后端**：Python 3.13+ / FastAPI / WebSocket / PostgreSQL（主库 + Context Store）/ Redis（可选）
-- **前端**：React / Tailwind CSS
-- **Agent**：Agent Bridge（OpenClaw / ACP provider）与 HTTP Bot
+- **后端**：Rust + Axum + SQLx（网关）+ PostgreSQL / Redis / SQLAlchemy 的历史数据兼容（待清理）
+- **前端**：React / TypeScript / Tailwind CSS / Vite
+- **Agent**：基于 ACP 的外部接入（`agentnexus-mcp-server` / ACP Connector）
 - **部署**：Docker Compose
 
 ## 快速启动
