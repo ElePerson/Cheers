@@ -21,23 +21,28 @@ This is the English default edition prepared for the open-source documentation s
 - For implementation details, verify against the current code and the user/operations documentation first.
 - Historical design notes may describe planned features; when in doubt, treat README, `docs/help/`, and the current code as authoritative.
 
-## Integration Test Requirements (Mandatory)
+## Stack & Tests
 
-Integration tests **must** pass against a fully running Docker Compose stack (frontend + backend). In-memory mocks or unit-level fixtures alone are insufficient for integration coverage.
+The platform is **external-agent-first** (no Python service): the **Rust gateway**
+(`gateway/`) is the only backend, the **React frontend** (`frontend/`) is kept, and
+agents connect externally (`packages/agentnexus-mcp-server` is the standard bridge). See
+[docs/arch/ARCHITECTURE_OVERVIEW.md](docs/arch/ARCHITECTURE_OVERVIEW.md).
 
 ```bash
-# Start the full stack
+# Gateway unit/build checks
+cd gateway && cargo build && cargo test
+
+# Full stack (Docker Compose: gateway + frontend + postgres + redis + rustfs)
 cp docker-compose.yml.template docker-compose.yml
-docker compose up -d --wait
-
-# Run integration tests
-INTEGRATION_BASE_URL=http://localhost:8000 \
-  cd backend && pytest ../tests -m integration -v
-
+docker compose up -d --wait     # gateway runs sqlx migrations on startup
 docker compose down
 ```
 
-**Multiple stacks** can run in parallel by setting a unique `COMPOSE_PROJECT_NAME` and distinct host ports per stack (see `CLAUDE.zh-CN.md` for the full example). Integration tests must read the target URL from `INTEGRATION_BASE_URL`; never hard-code a port. Tag all integration tests with `@pytest.mark.integration`.
+> Integration tests against the running stack are being re-established on the Rust
+> gateway (the old `pytest -m integration` suite was removed with the Python backend).
+> When added, they must read the target URL from `INTEGRATION_BASE_URL` (never hard-code
+> a port) so multiple stacks can run in parallel via a unique `COMPOSE_PROJECT_NAME` +
+> distinct host ports.
 
 ## Related Documentation
 

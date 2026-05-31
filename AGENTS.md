@@ -21,30 +21,33 @@ This is the English default edition prepared for the open-source documentation s
 - For implementation details, verify against the current code and the user/operations documentation first.
 - Historical design notes may describe planned features; when in doubt, treat README, `docs/help/`, and the current code as authoritative.
 
-## Alembic Migration Discipline (Mandatory)
+## sqlx Migration Discipline (Mandatory)
 
-Treat migration files as database protocol changes, not ordinary source files.
+The gateway uses sqlx migrations (`gateway/migrations/<NNNN>_<desc>.sql`), run
+automatically on startup (`main.rs: sqlx::migrate!`). Treat them as database protocol
+changes, not ordinary source files.
 
-- After every merge or rebase that touches `backend/alembic/versions/*.py`, run `cd backend && uv run ./scripts/check_alembic_heads.sh`. CI must fail if Alembic reports anything other than one head.
-- When multiple branches add migrations in parallel, rebase or merge `develop` first, then choose the next revision and `down_revision`. The desired chain is linear, for example `059 -> 060 -> 061`, not two independent `060` revisions.
-- When repairing a migration, update the file contents (`revision` and `down_revision`), not only the filename. Alembic reads the Python variables inside the file.
-- Before release, verify both graph shape and SQL execution from an empty database: `uv run ./scripts/check_alembic_heads.sh`, then `uv run alembic upgrade head`, then `uv run alembic -c alembic_context.ini upgrade head`.
-- For deployment debugging, inspect the real container/image state, not only the host Git checkout:
+- **Sequential, linear, never reused prefixes.** The chain is `0001 -> 0002 -> 0003 …`.
+  When two branches add migrations in parallel, rebase first and renumber so there are no
+  two `0003_*.sql` files.
+- **Never edit an already-applied migration's body.** sqlx checksums each applied
+  migration; changing its content makes startup fail with a checksum mismatch. To change
+  schema, add a **new** numbered migration (e.g. `ALTER … ADD COLUMN IF NOT EXISTS …`,
+  `DROP … IF EXISTS …`).
+- **Idempotent DDL.** Use `IF NOT EXISTS` / `IF EXISTS` so a partially-applied or
+  re-run migration is safe. Note Postgres does **not** support `ADD CONSTRAINT IF NOT
+  EXISTS` — put constraints inline in `CREATE TABLE`.
+- **ids are `VARCHAR(36)`**, matching the baseline (not `UUID`); keep FKs consistent.
+- **Verify from an empty DB** before release: `cd gateway && cargo build` embeds the
+  migrations; start a clean Postgres and let the gateway run them on boot, or
+  `sqlx migrate run` against a scratch database.
+- After a gateway code or migration change, **rebuild and recreate** the service (do not
+  only restart):
 
 ```bash
-docker compose run --rm --entrypoint bash backend -lc \
-  "cd /app && /app/.venv/bin/alembic heads --verbose"
+docker compose build --no-cache gateway
+docker compose up -d --force-recreate --no-deps gateway
 ```
-
-- Rebuilding an image and restarting a container are different operations. After backend code or migration changes, rebuild and recreate the backend service instead of only restarting it:
-
-```bash
-docker compose build --no-cache backend
-docker compose up -d --force-recreate --no-deps backend
-```
-
-- Do not create ad hoc `alembic merge` revisions directly on a server. Fix the migration chain in the repository, commit it, push it, rebuild the image, and redeploy.
-- Inside backend containers, use `/app/.venv/bin/alembic` explicitly; do not assume bare `alembic` or `python -m alembic` is available.
 
 ## ACP Connector Release Order (Mandatory)
 
@@ -61,37 +64,29 @@ Required order:
 
 Do not tag from a feature branch or before the PR is merged; the release workflow validates that the tag matches the package version in the checked-out commit.
 
-## Integration Test Requirements (Mandatory)
+## Stack & Tests
 
-Integration tests **must** pass against a fully running Docker Compose stack (frontend + backend). In-memory mocks or unit-level fixtures alone are insufficient for integration coverage.
-
-### Test Environment Resolution
-
-Before every local backend or integration test run, inspect the actual Docker Compose stack and `.env` values instead of assuming default ports:
-
-```bash
-docker compose ps
-docker compose port backend 8000
-docker compose port frontend 80
-docker compose port postgres 5432
-rg -n "^(BACKEND_HOST_PORT|FRONTEND_HOST_PORT|POSTGRES_HOST_PORT|POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_DB|TEST_DATABASE_URL)=" .env
-```
-
-`tests/conftest.py` defaults `TEST_DATABASE_URL` to `postgresql+asyncpg://agentnexus:agentnexus@localhost:5433/agentnexus_test`. If the real Docker Compose Postgres host port or credentials from `.env` differ, either start the stack with a matching `POSTGRES_HOST_PORT=5433` and test database, or pass an explicit `TEST_DATABASE_URL` for the actual container mapping. Do not hard-code a remembered port in commands or test notes after the stack has been changed.
+External-agent-first: the **Rust gateway** (`gateway/`) is the only backend, the
+**React frontend** (`frontend/`) is kept, agents connect externally
+(`packages/agentnexus-mcp-server` is the standard bridge). See
+[docs/arch/ARCHITECTURE_OVERVIEW.md](docs/arch/ARCHITECTURE_OVERVIEW.md).
 
 ```bash
-# Start the full stack
+# Gateway unit/build checks
+cd gateway && cargo build && cargo test
+
+# Full stack (gateway + frontend + postgres + redis + rustfs)
 cp docker-compose.yml.template docker-compose.yml
-docker compose up -d --wait
-
-# Run integration tests
-INTEGRATION_BASE_URL=http://localhost:8000 \
-  cd backend && pytest ../tests -m integration -v
-
+docker compose up -d --wait     # gateway runs sqlx migrations on startup
+docker compose ps
+docker compose port gateway 8000   # never assume a port; read the real mapping
 docker compose down
 ```
 
-**Multiple stacks** can run in parallel by setting a unique `COMPOSE_PROJECT_NAME` and distinct host ports per stack (see `AGENTS.zh-CN.md` for the full example). Integration tests must read the target URL from `INTEGRATION_BASE_URL`; never hard-code a port. Tag all integration tests with `@pytest.mark.integration`.
+> The old `pytest -m integration` suite was removed with the Python backend. Integration
+> tests are being re-established on the gateway; when added they must read the target URL
+> from `INTEGRATION_BASE_URL` (never hard-code a port) so multiple stacks can run in
+> parallel via a unique `COMPOSE_PROJECT_NAME` + distinct host ports.
 
 ## Related Documentation
 
