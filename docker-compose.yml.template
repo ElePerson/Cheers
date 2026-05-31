@@ -1,67 +1,31 @@
 services:
-  backend:
+  gateway:
     build:
-      context: ./backend
+      context: ./gateway
     restart: unless-stopped
     ports:
-      - "${BACKEND_HOST_PORT:-8000}:8000"
+      - "${GATEWAY_HOST_PORT:-8000}:8000"
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-agentnexus}:${POSTGRES_PASSWORD:-agentnexus}@postgres:5432/${POSTGRES_DB:-agentnexus}
-      - CONTEXT_DB_URL=postgresql+asyncpg://${POSTGRES_USER:-agentnexus}:${POSTGRES_PASSWORD:-agentnexus}@postgres:5432/${POSTGRES_DB:-agentnexus}
+      # sqlx 用纯 postgres:// （非 SQLAlchemy 的 +asyncpg）
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-agentnexus}:${POSTGRES_PASSWORD:-agentnexus}@postgres:5432/${POSTGRES_DB:-agentnexus}
+      - PORT=8000
       - REDIS_URL=redis://redis:6379/0
-      - DATA_DIR=data
-      - STORAGE_BACKEND=${STORAGE_BACKEND:-s3}
-      - STORAGE_S3_ENDPOINT=http://rustfs:9000
-      - STORAGE_S3_PUBLIC_ENDPOINT=${STORAGE_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
-      - STORAGE_S3_REGION=${STORAGE_S3_REGION:-us-east-1}
-      - STORAGE_S3_ACCESS_KEY=${RUSTFS_ACCESS_KEY:-agentnexus-local-access-key}
-      - STORAGE_S3_SECRET_KEY=${RUSTFS_SECRET_KEY:-agentnexus-local-secret-key}
-      - STORAGE_S3_BUCKET=${STORAGE_S3_BUCKET:-agentnexus-files}
-      - STORAGE_S3_FORCE_PATH_STYLE=${STORAGE_S3_FORCE_PATH_STYLE:-true}
-      - STORAGE_S3_AUTO_CREATE_BUCKET=${STORAGE_S3_AUTO_CREATE_BUCKET:-true}
-      - STORAGE_S3_VERIFY_SSL=${STORAGE_S3_VERIFY_SSL:-true}
-      - STORAGE_PRESIGN_EXPIRES_SECONDS=${STORAGE_PRESIGN_EXPIRES_SECONDS:-900}
-      - FILE_UPLOAD_MAX_BYTES=${FILE_UPLOAD_MAX_BYTES:-26214400}
-      - FILE_RETENTION_DAYS=${FILE_RETENTION_DAYS:-365}
-      - FILE_RETENTION_CLEANUP_INTERVAL_SECONDS=${FILE_RETENTION_CLEANUP_INTERVAL_SECONDS:-86400}
-      - FILE_PENDING_UPLOAD_TTL_SECONDS=${FILE_PENDING_UPLOAD_TTL_SECONDS:-3600}
-      - FILE_UPLOAD_ALLOWED_TYPES=${FILE_UPLOAD_ALLOWED_TYPES:-application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/ofd,application/rtf,text/csv,text/html,text/plain,text/markdown,application/zip,application/vnd.rar,application/x-7z-compressed,application/x-tar,application/gzip,application/epub+zip,image/png,image/jpeg,image/webp,image/gif}
-      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost}
-      - KKFILEVIEW_ENABLED=${KKFILEVIEW_ENABLED:-true}
-      - KKFILEVIEW_BASE_URL=${KKFILEVIEW_BASE_URL:-http://localhost/preview}
-      - KKFILEVIEW_TOKEN_TTL_SECONDS=${KKFILEVIEW_TOKEN_TTL_SECONDS:-600}
-      - LLM_LOCALHOST_ALIAS=${LLM_LOCALHOST_ALIAS:-host.docker.internal}
-      - HELPER_LLM_BASE_URL=${HELPER_LLM_BASE_URL:-}
-      - HELPER_LLM_MODEL=${HELPER_LLM_MODEL:-}
-      - HELPER_LLM_API_KEY=${HELPER_LLM_API_KEY:-}
-      - HELPER_LLM_TEMPERATURE=${HELPER_LLM_TEMPERATURE:-0.7}
-      - HELPER_LLM_MAX_TOKENS=${HELPER_LLM_MAX_TOKENS:-1000}
-      - AGENT_BRIDGE_ENABLED=${AGENT_BRIDGE_ENABLED:-true}
-      - AGENT_BRIDGE_TOKEN=${AGENT_BRIDGE_TOKEN:-}
-      - AGENT_BRIDGE_TIMEOUT_SECONDS=${AGENT_BRIDGE_TIMEOUT_SECONDS:-600}
-      - OPENCODE_BOT_ENABLED=${OPENCODE_BOT_ENABLED:-false}
-      - OPENCODE_BOT_ID=${OPENCODE_BOT_ID:-bot-opencode-001}
-      - OPENCODE_BOT_USERNAME=${OPENCODE_BOT_USERNAME:-opencode}
-      - OPENCODE_BOT_DISPLAY_NAME=${OPENCODE_BOT_DISPLAY_NAME:-OpenCode}
-      - OPENCODE_BOT_DESCRIPTION=${OPENCODE_BOT_DESCRIPTION:-OpenCode ACP coding assistant}
-      - OPENCODE_BOT_SCOPE=${OPENCODE_BOT_SCOPE:-everyone}
-      - OPENCODE_BOT_TOKEN=${OPENCODE_BOT_TOKEN:-}
-      - OPENCLAW_PLUGIN_PACKAGE=${OPENCLAW_PLUGIN_PACKAGE:-@haowei0520/openclaw-channel-agentnexus}
-      - OPENCLAW_PLUGIN_RELEASE_DIR=${OPENCLAW_PLUGIN_RELEASE_DIR:-/app/release}
-      - OPENCLAW_PLUGIN_FILE=${OPENCLAW_PLUGIN_FILE:-openclaw-channel-agentnexus.tgz}
-      - DB_MIGRATION_MODE=${DB_MIGRATION_MODE:-upgrade}
-      - DB_MIGRATION_TARGET=${DB_MIGRATION_TARGET:-head}
-      - CONTEXT_DB_MIGRATION_MODE=${CONTEXT_DB_MIGRATION_MODE:-upgrade}
-      - CONTEXT_DB_MIGRATION_TARGET=${CONTEXT_DB_MIGRATION_TARGET:-head}
-      - ALLOW_DB_DOWNGRADE=${ALLOW_DB_DOWNGRADE:-0}
-      - SEED_DATA=${SEED_DATA:-1}
-      - AGENTNEXUS_DOCS_DIR=/app/docs
-    volumes:
-      - ./data/backend:/app/data
-      - ./docs:/app/docs:ro
-      - ./release:/app/release:ro
+      # JWT RS256：必填，由 .env 提供（缺失则 gateway 启动 panic）
+      - JWT_PRIVATE_KEY=${JWT_PRIVATE_KEY:-}
+      - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY:-}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+      # S3 / RustFS
+      - S3_ENDPOINT=http://rustfs:9000
+      - S3_BUCKET=${STORAGE_S3_BUCKET:-agentnexus-files}
+      - S3_ACCESS_KEY=${RUSTFS_ACCESS_KEY:-agentnexus-local-access-key}
+      - S3_SECRET_KEY=${RUSTFS_SECRET_KEY:-agentnexus-local-secret-key}
+      # SMTP（可选）
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,7 +34,7 @@ services:
       rustfs:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)\""]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -82,7 +46,7 @@ services:
     env_file:
       - .env
     environment:
-      - AGENTNEXUS_WS_BASE=${OPENCODE_BOT_WS_BASE:-ws://backend:8000}
+      - AGENTNEXUS_WS_BASE=${OPENCODE_BOT_WS_BASE:-ws://gateway:8000}
       - OPENCODE_BOT_USERNAME=${OPENCODE_BOT_USERNAME:-opencode}
       - OPENCODE_BOT_TOKEN=${OPENCODE_BOT_TOKEN:-}
       - OPENCODE_OPENAI_API_KEY=${OPENCODE_OPENAI_API_KEY:-}
@@ -99,29 +63,10 @@ services:
       - ./data/opencode-bot:/app/state
       - ./data/opencode-workspace:/workspace
     depends_on:
-      backend:
+      gateway:
         condition: service_healthy
 
-  db-migrate:
-    build:
-      context: ./backend
-    profiles:
-      - tools
-    restart: "no"
-    env_file:
-      - .env
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-agentnexus}:${POSTGRES_PASSWORD:-agentnexus}@postgres:5432/${POSTGRES_DB:-agentnexus}
-      - CONTEXT_DB_URL=postgresql+asyncpg://${POSTGRES_USER:-agentnexus}:${POSTGRES_PASSWORD:-agentnexus}@postgres:5432/${POSTGRES_DB:-agentnexus}
-      - MIGRATE_ONLY=${MIGRATE_ONLY:-1}
-      - DB_MIGRATION_MODE=${DB_MIGRATION_MODE:-upgrade}
-      - DB_MIGRATION_TARGET=${DB_MIGRATION_TARGET:-head}
-      - CONTEXT_DB_MIGRATION_MODE=${CONTEXT_DB_MIGRATION_MODE:-upgrade}
-      - CONTEXT_DB_MIGRATION_TARGET=${CONTEXT_DB_MIGRATION_TARGET:-head}
-      - ALLOW_DB_DOWNGRADE=${ALLOW_DB_DOWNGRADE:-0}
-    depends_on:
-      postgres:
-        condition: service_healthy
+  # db-migrate 服务已移除：gateway 启动时自动跑 sqlx 迁移（main.rs: sqlx::migrate!）。
 
   frontend:
     build: ./frontend
@@ -129,7 +74,7 @@ services:
     ports:
       - "${FRONTEND_HOST_PORT:-80}:80"
     depends_on:
-      - backend
+      - gateway
       - kkfileview
 
   kkfileview:

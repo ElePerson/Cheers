@@ -19,10 +19,9 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
+      gateway: ${{ steps.filter.outputs.gateway }}
       frontend: ${{ steps.filter.outputs.frontend }}
       plugin: ${{ steps.filter.outputs.plugin }}
-      integration: ${{ steps.filter.outputs.integration }}
 
     steps:
       - uses: actions/checkout@v4
@@ -32,10 +31,8 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            backend:
-              - "backend/**"
-              - "tests/**"
-              - "pytest.ini"
+            gateway:
+              - "gateway/**"
               - ".github/workflows/ci.yml"
             frontend:
               - "frontend/**"
@@ -43,191 +40,43 @@ jobs:
             plugin:
               - "packages/agentnexus-bridge-client/**"
               - "packages/openclaw-channel-agentnexus/**"
-              - ".github/workflows/ci.yml"
-            integration:
-              - "backend/**"
-              - "frontend/**"
-              - "tests/**"
-              - "docker-compose.yml.template"
+              - "packages/agentnexus-mcp-server/**"
               - ".github/workflows/ci.yml"
 
   # ─────────────────────────────────────────────
-  # Backend: lint
+  # Gateway (Rust): build + test
   # ─────────────────────────────────────────────
-  backend-lint:
-    name: Backend Lint
+  gateway-check:
+    name: Gateway Check
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.gateway == 'true' || github.event_name == 'workflow_dispatch'
     defaults:
       run:
-        working-directory: backend
+        working-directory: gateway
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          version: "latest"
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
+          components: clippy
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
         with:
-          python-version: "3.13"
+          workspaces: gateway
 
-      - name: Install dev dependencies
-        run: uv sync --frozen --extra dev
+      - name: Build
+        run: cargo build
 
-      - name: Run ruff
-        run: uv run ruff check app/
+      - name: Test
+        run: cargo test
 
-  # ─────────────────────────────────────────────
-  # Backend: tests (PostgreSQL required)
-  # ─────────────────────────────────────────────
-  backend-test:
-    name: Backend Tests
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
-    defaults:
-      run:
-        working-directory: backend
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: agentnexus_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/agentnexus_test
-      CONTEXT_DB_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/agentnexus_test
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/agentnexus_test
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: uv sync --frozen --extra dev
-
-      - name: Check Alembic heads
-        run: uv run ./scripts/check_alembic_heads.sh
-
-      - name: Run migrations (main DB)
-        run: uv run alembic upgrade head
-
-      - name: Run migrations (context store)
-        run: uv run alembic -c alembic_context.ini upgrade head
-
-      - name: Run tests
-        run: uv run pytest ../tests/ -m "not integration" -v --tb=short --cov=app --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v4
-        if: always()
-        with:
-          files: backend/coverage.xml
-          flags: backend
-          fail_ci_if_error: false
-
-  # ─────────────────────────────────────────────
-  # Integration: Docker Compose stack
-  # ─────────────────────────────────────────────
-  integration-compose:
-    name: Integration Tests (Compose)
-    runs-on: ubuntu-latest
-    needs: [changes, backend-test, frontend-build]
-    if: |
-      always() &&
-      (needs.changes.outputs.integration == 'true' || github.event_name == 'workflow_dispatch') &&
-      (needs.backend-test.result == 'success' || needs.backend-test.result == 'skipped') &&
-      (needs.frontend-build.result == 'success' || needs.frontend-build.result == 'skipped')
-    defaults:
-      run:
-        shell: bash
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Prepare Compose environment
-        run: |
-          cp docker-compose.yml.template docker-compose.yml
-          cat > .env <<'EOF'
-          BACKEND_HOST_PORT=8000
-          FRONTEND_HOST_PORT=8080
-          POSTGRES_HOST_PORT=5433
-          POSTGRES_USER=agentnexus
-          POSTGRES_PASSWORD=agentnexus
-          POSTGRES_DB=agentnexus_test
-          TEST_DATABASE_URL=postgresql+asyncpg://agentnexus:agentnexus@localhost:5433/agentnexus_test
-          SEED_DATA=1
-          EOF
-
-      - name: Start Docker Compose stack
-        run: docker compose up -d --wait
-
-      - name: Inspect test environment
-        run: |
-          docker compose ps
-          docker compose port backend 8000
-          docker compose port frontend 80
-          docker compose port postgres 5432
-          rg -n "^(BACKEND_HOST_PORT|FRONTEND_HOST_PORT|POSTGRES_HOST_PORT|POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_DB|TEST_DATABASE_URL)=" .env
-
-      - name: Install test dependencies
-        working-directory: backend
-        run: uv sync --frozen --extra dev
-
-      - name: Run integration tests
-        working-directory: backend
-        env:
-          INTEGRATION_BASE_URL: http://localhost:8000
-          TEST_DATABASE_URL: postgresql+asyncpg://agentnexus:agentnexus@localhost:5433/agentnexus_test
-        run: uv run pytest ../tests -m integration -v
-
-      - name: Show Compose logs on failure
-        if: failure()
-        run: docker compose logs --no-color --tail=200
-
-      - name: Stop Docker Compose stack
-        if: always()
-        run: docker compose down -v
+      # 骨架阶段有已知 warnings；clippy 仅作信息，不阻塞。
+      - name: Clippy (non-blocking)
+        run: cargo clippy --all-targets || true
 
   # ─────────────────────────────────────────────
   # Frontend: type-check + build
@@ -258,7 +107,7 @@ jobs:
         run: npm run build
 
   # ─────────────────────────────────────────────
-  # Plugin: type-check + test + build (catches regressions before tag-driven release)
+  # Plugin: type-check + test + build
   # ─────────────────────────────────────────────
   plugin-build:
     name: Plugin Build

@@ -1,6 +1,6 @@
 /**
  * AgentNexus bridge WebSocket protocol. Keep this aligned with
- * backend/app/api/v1/agent_bridge/routes.py. Update these types whenever the
+ * gateway/src/transport/ws/acp_bridge.rs. Update these types whenever the
  * server protocol changes.
  *
  * Each bot WebSocket connection (control / data) represents exactly one

@@ -1,7 +1,10 @@
-.PHONY: lint fix
+.PHONY: lint fix test
 
 lint:
-	cd backend && uv run ruff check app/
+	cd gateway && cargo clippy --all-targets
 
 fix:
-	cd backend && uv run ruff check --fix app/
+	cd gateway && cargo fmt && cargo clippy --fix --allow-dirty --allow-staged
+
+test:
+	cd gateway && cargo test
