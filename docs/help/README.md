@@ -2,7 +2,7 @@
 
 > **Language**: English | [中文](README.zh-CN.md)
 
-This directory contains user-facing, administrator-facing, and operations-facing documentation. Start here if you are new to AgentNexus. Design documents under `docs/develop/` may include historical decisions; when they conflict with help docs, the help docs, README, and current code are authoritative.
+This directory contains user-facing, administrator-facing, and operations-facing documentation. Start here if you are new to AgentNexus. For architecture background, use [Documentation Index](../INDEX.md) and the `docs/arch/` documents; when they conflict, help docs, README, and current code are authoritative.
 
 ## Read by Role
 
@@ -31,5 +31,5 @@ This directory contains user-facing, administrator-facing, and operations-facing
 ## Related
 
 - [User Manual](使用说明书.md)
-- [Development Document Index](../develop/00-文档索引与LLM使用说明.md)
-- [Open Source Release Checklist](../develop/开源发布检查清单.md)
+- [Documentation Index](../INDEX.md)
+- [Release Notes](../release_note/README.md)

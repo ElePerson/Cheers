@@ -25,19 +25,22 @@ English is the default documentation language. Chinese mirrors use the `.zh-CN.m
 - [RustFS Object Storage Guide](docs/help/RustFS对象存储部署说明.md) / [中文](docs/help/RustFS对象存储部署说明.zh-CN.md)
 - [kkFileView Preview Guide](docs/help/kkFileView配置说明.md) / [中文](docs/help/kkFileView配置说明.zh-CN.md)
 
-**Development and design docs**
+**Development and architecture docs**
 
 - [Roadmap](docs/ROADMAP.md) / [中文](docs/ROADMAP.zh-CN.md)
-- [Architecture](docs/develop/总体架构设计.md) / [中文](docs/develop/总体架构设计.zh-CN.md)
-- [Detailed Design](docs/develop/详细设计.md) / [中文](docs/develop/详细设计.zh-CN.md)
-- [Key Technical Notes](docs/develop/关键技术文档.md) / [中文](docs/develop/关键技术文档.zh-CN.md)
-- [Open Source Release Checklist](docs/develop/开源发布检查清单.md) / [中文](docs/develop/开源发布检查清单.zh-CN.md)
+- [Architecture Overview](docs/arch/ARCHITECTURE_OVERVIEW.md)
+- [Mesh Rework Plan](docs/arch/REFACTOR_PLAN.md)
+- [Gateway Protocol](docs/arch/WIRE_PROTOCOL.md)
+- [Bot Permission & Trust](docs/arch/BOT_PERMISSION.md)
+- [Gateway Architecture](docs/arch/GATEWAY_CODE_ARCH.md)
+- [ACP Connection & Resource Protocols](docs/arch/ACP_CONNECTION_MODEL.md) / [docs/arch/AGENT_BRIDGE_RESOURCE.md](docs/arch/AGENT_BRIDGE_RESOURCE.md)
+- [Unified Architecture Index](docs/INDEX.md) / [中文](docs/INDEX.zh-CN.md)
 
 ## Stack
 
-- Backend: Python 3.13+, FastAPI, WebSocket, PostgreSQL, Redis, SQLAlchemy, Alembic
+- Backend: Rust + Axum + SQLx (Gateway) and React Frontend
 - Frontend: React, TypeScript, Tailwind CSS, Vite
-- Agent runtime: built-in Coordinator, HTTP Bot, Agent Bridge provider over control/data WebSockets
+- Agent runtime: external ACP agents via `agentnexus-mcp-server` and ACP connectors
 - Storage: PostgreSQL for business data and memory, S3-compatible object storage for files, optional kkFileView for complex document preview
 - Deployment: Docker Compose
 
