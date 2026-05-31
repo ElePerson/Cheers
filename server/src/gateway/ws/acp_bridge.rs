@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
+    domain::acp_capability,
     gateway::stream::{handle_delta, handle_done, handle_send, handle_session_update},
     infra::crypto::hash_bot_token,
     resource,
@@ -35,6 +36,7 @@ struct BotInfo {
     provider_account_id: String,
     username: String,
     display_name: Option<String>,
+    require_capability: bool,
     /// 可选的 ACP 安全配置快照（目前仅回显，不强制加解密）。
     acp_security: Option<Value>,
 }
@@ -182,6 +184,34 @@ async fn handle_data(mut socket: WebSocket, state: AppState) {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(frame) = serde_json::from_str::<Value>(&text) {
+                            if bot.require_capability {
+                                if let Err(err) =
+                                    acp_capability::authorize_data_frame(
+                                        &state.db,
+                                        &bot.bot_id,
+                                        &bot.provider_account_id,
+                                        &frame,
+                                    )
+                                        .await
+                                {
+                                    tracing::warn!(
+                                        bot_id = %bot.bot_id,
+                                        frame_type = frame.get("type").and_then(Value::as_str).unwrap_or("unknown"),
+                                        err = %err,
+                                        "data frame rejected by capability check"
+                                    );
+                                    let _ = ws_send(
+                                        &mut socket,
+                                        &json!({
+                                            "type": "error",
+                                            "code": "CAPABILITY_DENIED",
+                                            "detail": err.to_string(),
+                                        }),
+                                    )
+                                    .await;
+                                    continue;
+                                }
+                            }
                             handle_data_frame(&frame, &state, &bot, &mut socket).await;
                         }
                     }
@@ -369,8 +399,17 @@ async fn resolve_bot(db: &PgPool, token: &str) -> Option<BotInfo> {
         provider_account_id,
         username: row.try_get("username").unwrap_or_default(),
         display_name: row.try_get("display_name").ok(),
+        require_capability: resolve_bot_require_capability(binding_config.as_ref()),
         acp_security: resolve_bot_acp_security(binding_config),
     })
+}
+
+fn resolve_bot_require_capability(binding_config: Option<&Value>) -> bool {
+    binding_config
+        .and_then(|cfg| cfg.get("acp_security"))
+        .and_then(|acp| acp.get("require_capability"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn resolve_bot_provider_account_id(binding_config: Option<&Value>) -> Option<String> {
@@ -436,12 +475,17 @@ fn resolve_bot_acp_security(binding_config: Option<Value>) -> Option<Value> {
         .get("allow_plaintext_fallback")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let require_capability = acp_security
+        .get("require_capability")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
     Some(json!({
         "enabled": acp_security.get("enabled").and_then(Value::as_bool).unwrap_or(false),
         "mode": mode,
         "algorithm": algorithm,
         "allow_plaintext_fallback": allow_plaintext_fallback,
+        "require_capability": require_capability,
         "phase": "negotiated",
     }))
 }
