@@ -146,4 +146,26 @@ describe("loadConfig", () => {
 
     await expect(loadConfig(configPath)).rejects.toThrow(/delegationId is required/);
   });
+
+  it("requires privateKey when acpCapability is configured", async () => {
+    const configPath = path.join(tmp, "agentnexus-acp.json");
+    await writeFile(configPath, JSON.stringify({
+      accounts: {
+        "opencode-main": {
+          botToken: "agb_test",
+          controlUrl: "ws://example.test/ws/agent-bridge/control",
+          dataUrl: "ws://example.test/ws/agent-bridge/data",
+          acpCapability: {
+            delegationId: "550e8400-e29b-41d4-a716-446655440000",
+          },
+          agent: {
+            transport: "stdio",
+            command: "opencode",
+          },
+        },
+      },
+    }), "utf8");
+
+    await expect(loadConfig(configPath)).rejects.toThrow(/privateKey is required/);
+  });
 });
