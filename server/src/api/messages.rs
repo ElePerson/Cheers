@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use tracing::info;
 
 use crate::{
     app_state::AppState,
@@ -29,10 +30,20 @@ pub async fn send_message(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<SendMessageRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    info!(path = "POST /api/v1/channels/:channel_id/messages", channel_id = %channel_id, "handling send_message");
+
     let user_id: Uuid = claims
         .sub
         .parse()
         .map_err(|_| AppError::Unauthorized("invalid user_id".into()))?;
+
+    info!(
+        user_id = %user_id,
+        msg_type = body.msg_type.as_deref().unwrap_or("text"),
+        has_reply_to = body.reply_to_msg_id.is_some(),
+        content_len = body.content.len(),
+        "send_message request validated"
+    );
 
     if body.content.trim().is_empty() {
         return Err(AppError::BadRequest("content cannot be empty".into()));
@@ -52,6 +63,12 @@ pub async fn send_message(
         },
     )
     .await?;
+
+    info!(
+        message_id = %dto.msg_id,
+        channel_id = %channel_id,
+        "send_message persisted and broadcasted"
+    );
 
     Ok((StatusCode::CREATED, Json(dto)))
 }
@@ -73,6 +90,8 @@ pub async fn list_messages(
     Path(channel_id): Path<Uuid>,
     Query(q): Query<ListMessagesQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    info!(path = "GET /api/v1/channels/:channel_id/messages", channel_id = %channel_id, "handling list_messages");
+
     let user_id: Uuid = claims
         .sub
         .parse()
@@ -80,6 +99,12 @@ pub async fn list_messages(
 
     let limit = q.limit.clamp(1, 200);
     let msgs = messages::list_messages(&state.db, user_id, channel_id, q.before, limit).await?;
+    info!(
+        user_id = %user_id,
+        channel_id = %channel_id,
+        return_count = msgs.len(),
+        "list_messages returned"
+    );
 
     Ok(Json(serde_json::json!({ "messages": msgs, "count": msgs.len() })))
 }

@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use tracing::{debug, info};
 use serde_json::json;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -42,6 +43,8 @@ pub async fn create_message(
     bot_locator: &Arc<dyn BotLocator>,
     params: CreateMessageParams,
 ) -> Result<MessageDto, AppError> {
+    info!(user_id = %params.user_id, channel_id = %params.channel_id, "create_message start");
+
     // ── 1. 验成员资格 ─────────────────────────────────────────────────────
     let is_member = sqlx::query(
         "SELECT EXISTS(
@@ -58,6 +61,7 @@ pub async fn create_message(
     .unwrap_or(false);
 
     if !is_member {
+        info!(user_id = %params.user_id, channel_id = %params.channel_id, "create_message denied: user is not a member");
         return Err(AppError::Forbidden("not a channel member".into()));
     }
 
@@ -74,6 +78,7 @@ pub async fn create_message(
 
     // ── 3. 先落库（写后投递：INSERT 成功才广播）────────────────────────
     let mentions = mentions::parse(db, params.channel_id, &params.content).await;
+    debug!(channel_id = %params.channel_id, mentions = mentions.len(), "mentions parsed");
     let msg_id = Uuid::new_v4();
     let msg_type = params.msg_type.as_deref().unwrap_or("text");
     let now = Utc::now();
@@ -102,6 +107,7 @@ pub async fn create_message(
         .map_err(AppError::Db)?;
 
     tx.commit().await.map_err(AppError::Db)?;
+    info!(message_id = %msg_id, channel_id = %params.channel_id, "message persisted");
 
     let dto = MessageDto {
         msg_id: msg_id.to_string(),
@@ -133,9 +139,11 @@ pub async fn create_message(
         }),
     );
     fanout.broadcast_channel(params.channel_id, wire).await;
+    info!(message_id = %msg_id, channel_id = %params.channel_id, "message fanout broadcast dispatched");
 
     // ── 5. 解析 bot 触发，派发 task ───────────────────────────────────
     let bots = resolve_bot_triggers(db, params.channel_id, &mentions).await;
+    info!(message_id = %msg_id, matched_bots = bots.len(), "resolved bot triggers");
     for bot_id in bots {
         let result = dispatcher::dispatch(
             db,
@@ -156,6 +164,7 @@ pub async fn create_message(
         }
     }
 
+    info!(message_id = %msg_id, "create_message complete");
     Ok(dto)
 }
 
