@@ -1,8 +1,17 @@
 # AgentNexus MCP Server
 
-Local stdio MCP server for ACP agents. It exposes AgentNexus channel resources as
-MCP tools and forwards each call to the ACP connector through a loopback resource
-endpoint.
+Local stdio MCP server for ACP agents, now implemented as a Rust binary. It
+exposes AgentNexus channel resources as MCP tools and forwards each call to the
+ACP connector through a loopback resource endpoint.
+
+## Build
+
+```bash
+cd packages/agentnexus-mcp-server
+cargo build
+```
+
+The binary name is `agentnexus-mcp-server`.
 
 ## Runtime
 
@@ -26,7 +35,6 @@ Read-only tools:
 - `get_context`
 - `list_files`
 - `read_file`
-- `read_memory`
 - `fs_ls`
 - `fs_read`
 
@@ -34,7 +42,6 @@ Grant-gated write tools:
 
 - `post_message`
 - `create_file`
-- `update_memory`
 - `fs_write`
 - `fs_edit`
 - `fs_append`

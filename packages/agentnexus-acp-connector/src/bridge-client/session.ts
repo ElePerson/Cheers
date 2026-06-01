@@ -1,5 +1,5 @@
 /**
- * BotSession: one OpenClaw account = one AgentNexus bot = one pair of
+ * BotSession: one connector account = one AgentNexus bot = one pair of
  * (control, data) WebSockets.
  *
  * Responsibilities:
@@ -944,6 +944,7 @@ export class BotSession {
       this.events.onError?.(err);
       return false;
     }
+    if (!this.acpSecurity?.require_capability) return true;
     if (
       frame.type === "send"
       || frame.type === "delta"

@@ -69,7 +69,9 @@ npm install -g @haowei0520/acp-connector
 npm list -g @haowei0520/acp-connector --depth=0
 ```
 
-Upgrade an existing global install after a new npm release:
+Upgrade an existing global install after a new npm release. Daemon lifecycle
+commands are now owned by the Rust daemon package, so restart the Rust daemon
+binary rather than the TypeScript foreground runner:
 
 ```bash
 npm install -g @haowei0520/acp-connector@latest
@@ -79,7 +81,6 @@ agentnexus-acp-connector restart --name opencode-main
 Install from this repository checkout:
 
 ```bash
-npm install -g ./packages/agentnexus-bridge-client
 npm install -g ./packages/agentnexus-acp-connector
 ```
 
@@ -99,8 +100,11 @@ agentnexus-acp-connector run --config ./agentnexus-acp.json
 agentnexus-acp-connector --config ./agentnexus-acp.json
 ```
 
-Daemon mode keeps the connector running after the terminal exits. It writes a
-PID file plus stdout/stderr logs under `~/.agentnexus/acp-connector/<name>/`.
+Daemon mode keeps the connector running after the terminal exits. The daemon
+supervisor is implemented in Rust under `packages/agentnexus-acp-connector-rs`;
+the TypeScript CLI only runs the foreground connector runtime. The Rust daemon
+writes a PID file plus stdout/stderr logs under
+`~/.agentnexus/acp-connector/<name>/`.
 
 ```bash
 agentnexus-acp-connector start --config ./agentnexus-acp.json --name opencode-main
@@ -113,6 +117,7 @@ agentnexus-acp-connector stop --name opencode-main
 From a source checkout, the same commands can be run through npm:
 
 ```bash
+npm run build
 npm run daemon:start -- --config ./agentnexus-acp.json --name opencode-main
 npm run daemon:status -- --name opencode-main
 npm run daemon:logs -- --name opencode-main
@@ -121,6 +126,8 @@ npm run daemon:stop -- --name opencode-main
 
 Use `AGENTNEXUS_ACP_HOME=/path/to/state` or `--home /path/to/state` to change
 where daemon metadata and logs are stored.
+Set `AGENTNEXUS_ACP_TS_CLI=/absolute/path/to/dist/cli.js` when the Rust daemon
+cannot auto-detect the TypeScript foreground runner.
 
 ## Local operation flow
 
@@ -332,25 +339,13 @@ The real npm release is tag-driven by
 Prerequisite: configure the GitHub repository secret `NPM_TOKEN` with publish
 permission for the public `@haowei0520` npm scope.
 
-The workflow publishes packages in this order:
-
-1. `@haowei0520/bridge-client`
-2. `@haowei0520/acp-connector`
-
-If the shared bridge client has changed in a way consumers need, bump
-`packages/agentnexus-bridge-client/package.json` before tagging the connector.
+The standalone `@haowei0520/bridge-client` package has been retired. The
+TypeScript foreground runner keeps a private compatibility copy under
+`src/bridge-client/`, while the Rust connector crate owns the replacement
+protocol module.
 
 Runtime changes in this connector are not available to npm users until
-`@haowei0520/acp-connector` is published again. For connector-only changes,
-such as attachment hydration behavior, bump and publish only
-`@haowei0520/acp-connector`; do not bump `@haowei0520/bridge-client` unless its
-public API or published package contents changed.
-
-The repository keeps the connector dependency as
-`"@haowei0520/bridge-client": "file:../agentnexus-bridge-client"` for local
-development. During release, the workflow rewrites that dependency in the
-published tarball to the bridge package version, for example `^0.1.0`, so npm
-users can install the connector normally.
+`@haowei0520/acp-connector` is published again.
 
 To release the connector:
 

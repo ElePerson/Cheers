@@ -480,9 +480,9 @@ Backend ↔ connector 的 AgentNexus Bridge Protocol。
 - 将现有 ACP stdio 逻辑收敛为 `AcpRuntimeAdapter`。
 - 增加一个最小 custom adapter 示例，证明服务端无需改动。
 
-### Phase 4：SDK 与测试
+### Phase 4：Rust connector 协议层与测试
 
-- `packages/agentnexus-bridge-client` 成为自定义 connector 的官方 SDK。
+- bridge-client 协议能力收敛到 Rust connector crate；独立 TS SDK 包不再发布。
 - 增加协议 contract tests：
   - task → ACP prompt → delta/done。
   - ACP permission request → permission_resolution。

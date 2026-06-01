@@ -15,6 +15,8 @@ export {
 } from "./reconnect.js";
 export type {
   AgentNexusSessionRef,
+  AcpCapabilityEnvelope,
+  AcpSecurityHello,
   AttachmentInfo,
   CancelInbound,
   ChannelInfo,

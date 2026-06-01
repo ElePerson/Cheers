@@ -54,13 +54,8 @@ npm 包变更还需要运行对应包目录下的 `npm run lint`、`npm test`、
 
 ## npm 包发布说明
 
-`packages/openclaw-channel-agentnexus` 和 `packages/agentnexus-acp-connector` 在源码中使用 monorepo 本地依赖：
-
-```json
-"@haowei0520/bridge-client": "file:../agentnexus-bridge-client"
-```
-
-发布工作流会在发布前把该依赖重写为已发布的 npm 版本。日常开发不要手动把它改成 registry 版本，否则本地联调会变慢且更容易遗漏跨包修改。
+旧 `packages/openclaw-channel-agentnexus` 和独立的
+`packages/agentnexus-bridge-client` 包已经删除，不要再为它们新增发布或 CI 配置。
 
 ## PR 要求
 

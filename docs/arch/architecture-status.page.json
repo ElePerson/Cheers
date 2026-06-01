@@ -177,10 +177,10 @@
           "status": "mostly",
           "badge": "基本完成",
           "title": "MCP 标准桥工具面",
-          "body": "`agentnexus-mcp-server` 已把资源读写映射成 MCP tools，支持 session 默认频道和跨频道参数。",
+          "body": "`agentnexus-mcp-server` 已迁为 Rust binary，并把资源读写映射成 MCP tools，支持 session 默认频道和跨频道参数。",
           "evidence": [
-            { "label": "tools.ts", "href": "../../packages/agentnexus-mcp-server/src/tools.ts" },
-            { "label": "client.ts", "href": "../../packages/agentnexus-mcp-server/src/client.ts" }
+            { "label": "main.rs", "href": "../../packages/agentnexus-mcp-server/src/main.rs" },
+            { "label": "Cargo.toml", "href": "../../packages/agentnexus-mcp-server/Cargo.toml" }
           ]
         },
         {
@@ -273,7 +273,7 @@
         { "title": "server/src/domain/messages.rs", "href": "../../server/src/domain/messages.rs", "description": "写入、路由、分页" },
         { "title": "server/src/resource/mod.rs", "href": "../../server/src/resource/mod.rs", "description": "Resource API dispatcher" },
         { "title": "server/src/domain/chains.rs", "href": "../../server/src/domain/chains.rs", "description": "任务链与取消" },
-        { "title": "agentnexus-mcp-server tools", "href": "../../packages/agentnexus-mcp-server/src/tools.ts", "description": "MCP 工具映射" }
+        { "title": "agentnexus-mcp-server", "href": "../../packages/agentnexus-mcp-server/src/main.rs", "description": "Rust MCP 工具映射" }
       ]
     }
   },

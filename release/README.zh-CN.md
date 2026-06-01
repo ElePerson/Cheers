@@ -2,25 +2,11 @@
 
 > **语言**：中文 | [English](README.md)
 
-Put the AgentNexus OpenClaw plugin tarball here when you want the backend to serve an offline installer:
+该目录保留给 gateway 可直接托管的发布产物。
 
-```text
-release/openclaw-channel-agentnexus.tgz
-```
+旧 OpenClaw channel plugin 包已经停用，仓库中不再保留对应源码包。新部署不要再向
+这里放置 `openclaw-channel-agentnexus.tgz`，请改用 `/acp-bridge` 文档中的
+ACP Connector 接入路径。
 
-The backend exposes it at:
-
-```text
-/release/openclaw-channel-agentnexus.tgz
-```
-
-For Docker Compose deployments, this folder is mounted read-only into the backend container at `/app/release`.
-
-The public npm package is `@haowei0520/openclaw-channel-agentnexus`. For most installations, prefer:
-
-```bash
-npm pack @haowei0520/openclaw-channel-agentnexus@0.2.4 --pack-destination /tmp
-openclaw plugins install /tmp/haowei0520-openclaw-channel-agentnexus-0.2.4.tgz
-```
-
-If you serve the tarball from this `release/` folder, make sure the file is rebuilt for the same plugin version you advertise via `OPENCLAW_PLUGIN_VERSION`.
+Docker Compose 部署中，该目录仍会以只读方式挂载到 gateway 容器的
+`/app/release`。
