@@ -55,7 +55,8 @@ npm install -g @haowei0520/acp-connector
 npm list -g @haowei0520/acp-connector --depth=0
 ```
 
-新版本发布后，升级已有全局安装：
+新版本发布后，升级已有全局安装。daemon 生命周期命令现在由 Rust daemon
+包负责，因此重启时应使用 Rust daemon 二进制，而不是 TypeScript 前台 runner：
 
 ```bash
 npm install -g @haowei0520/acp-connector@latest
@@ -65,7 +66,6 @@ agentnexus-acp-connector restart --name opencode-main
 Install from this repository checkout:
 
 ```bash
-npm install -g ./packages/agentnexus-bridge-client
 npm install -g ./packages/agentnexus-acp-connector
 ```
 
@@ -85,8 +85,10 @@ agentnexus-acp-connector run --config ./agentnexus-acp.json
 agentnexus-acp-connector --config ./agentnexus-acp.json
 ```
 
-Daemon mode keeps the connector running after the terminal exits. It writes a
-PID file plus stdout/stderr logs under `~/.agentnexus/acp-connector/<name>/`.
+Daemon mode keeps the connector running after the terminal exits. daemon
+supervisor 已迁移到 `packages/agentnexus-acp-connector-rs` 的 Rust 实现；
+TypeScript CLI 只负责前台 connector runtime。Rust daemon 会在
+`~/.agentnexus/acp-connector/<name>/` 下写入 PID 文件和 stdout/stderr 日志。
 
 ```bash
 agentnexus-acp-connector start --config ./agentnexus-acp.json --name opencode-main
@@ -99,6 +101,7 @@ agentnexus-acp-connector stop --name opencode-main
 From a source checkout, the same commands can be run through npm:
 
 ```bash
+npm run build
 npm run daemon:start -- --config ./agentnexus-acp.json --name opencode-main
 npm run daemon:status -- --name opencode-main
 npm run daemon:logs -- --name opencode-main
@@ -107,6 +110,8 @@ npm run daemon:stop -- --name opencode-main
 
 Use `AGENTNEXUS_ACP_HOME=/path/to/state` or `--home /path/to/state` to change
 where daemon metadata and logs are stored.
+如果 Rust daemon 无法自动定位 TypeScript 前台 runner，可设置
+`AGENTNEXUS_ACP_TS_CLI=/absolute/path/to/dist/cli.js`。
 
 ## Local operation flow
 
@@ -313,25 +318,12 @@ The real npm release is tag-driven by
 Prerequisite: configure the GitHub repository secret `NPM_TOKEN` with publish
 permission for the public `@haowei0520` npm scope.
 
-The workflow publishes packages in this order:
-
-1. `@haowei0520/bridge-client`
-2. `@haowei0520/acp-connector`
-
-If the shared bridge client has changed in a way consumers need, bump
-`packages/agentnexus-bridge-client/package.json` before tagging the connector.
+独立的 `@haowei0520/bridge-client` 包已经退役。TypeScript foreground runner
+暂时在 `src/bridge-client/` 保留内部兼容副本；替代的协议模块由 Rust connector
+crate 承载。
 
 Runtime changes in this connector are not available to npm users until
-`@haowei0520/acp-connector` is published again. For connector-only changes,
-such as attachment hydration behavior, bump and publish only
-`@haowei0520/acp-connector`; do not bump `@haowei0520/bridge-client` unless its
-public API or published package contents changed.
-
-The repository keeps the connector dependency as
-`"@haowei0520/bridge-client": "file:../agentnexus-bridge-client"` for local
-development. During release, the workflow rewrites that dependency in the
-published tarball to the bridge package version, for example `^0.1.0`, so npm
-users can install the connector normally.
+`@haowei0520/acp-connector` is published again.
 
 To release the connector:
 

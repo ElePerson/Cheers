@@ -69,16 +69,9 @@ Save `data.bot.bot_token`, `data.bridge.control_ws`, and `data.bridge.data_ws`.
 
 ## OpenClaw Provider (Deprecated / Legacy)
 
-> OpenClaw links below are retained for existing installations only. Prefer `/acp-bridge` and migrate to a local ACP-capable agent installed from npm.
-
-Install the public package:
-
-```bash
-npm pack @haowei0520/openclaw-channel-agentnexus@0.2.4 --pack-destination /tmp
-openclaw plugins install /tmp/haowei0520-openclaw-channel-agentnexus-0.2.4.tgz
-```
-
-Then configure OpenClaw with the returned token and WebSocket URLs.
+The OpenClaw channel package is disabled and no longer maintained in this
+repository. Existing deployments should migrate to `/acp-bridge` and a local
+ACP-capable agent; new deployments must not use the old OpenClaw package path.
 
 ## ACP / OpenCode ACP Provider
 

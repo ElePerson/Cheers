@@ -18,7 +18,7 @@ import {
   type ConfigUpdateInbound,
   type InboundMessage,
   type PermissionResolutionInbound,
-} from "@haowei0520/bridge-client";
+} from "./bridge-client/index.js";
 
 import { JsonRpcError, JsonRpcRequestTimeoutError } from "./acp-jsonrpc.js";
 import { AcpStdioAgent } from "./acp-agent.js";
@@ -99,7 +99,6 @@ interface AcpCapabilitySigner {
 interface OutboundAcpDataFrame {
   type: string;
   acp_capability?: AcpCapabilityEnvelope;
-  [key: string]: unknown;
 }
 
 type CanonicalValue = null | boolean | number | string | CanonicalRecord | CanonicalValue[];
@@ -1550,9 +1549,7 @@ export class AcpBridgeAccount {
   private desiredAcpConfigOptions: Record<string, string> = {};
   private desiredAcpConfigOptionsKey = acpConfigOptionsKey({});
   private discoveredOptions: AcpDiscoveredOptions | null = null;
-  private readonly acpCapabilitySigner = this.config.acpCapability
-    ? buildAcpCapabilitySigner(this.config.acpCapability)
-    : null;
+  private readonly acpCapabilitySigner: AcpCapabilitySigner | null;
 
   constructor(
     private readonly accountId: string,
@@ -1560,6 +1557,9 @@ export class AcpBridgeAccount {
     private readonly state: SessionStateStore,
     private readonly logger: Logger,
   ) {
+    this.acpCapabilitySigner = config.acpCapability
+      ? buildAcpCapabilitySigner(config.acpCapability)
+      : null;
     this.agent = new AcpStdioAgent(
       accountId,
       config.agent,

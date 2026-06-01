@@ -36,9 +36,7 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
           cache: "npm"
-          cache-dependency-path: |
-            packages/agentnexus-bridge-client/package-lock.json
-            packages/agentnexus-acp-connector/package-lock.json
+          cache-dependency-path: packages/agentnexus-acp-connector/package-lock.json
 
       - name: Verify npm token
         run: |
@@ -59,7 +57,6 @@ jobs:
           else
             TAG="$GITHUB_REF_NAME"
           fi
-          BRIDGE_VERSION=$(node -p "require('./packages/agentnexus-bridge-client/package.json').version")
           ACP_VERSION=$(node -p "require('./packages/agentnexus-acp-connector/package.json').version")
           EXPECTED="agentnexus-acp-connector-v${ACP_VERSION}"
           if [ "$TAG" != "$EXPECTED" ]; then
@@ -67,42 +64,7 @@ jobs:
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "bridge_version=$BRIDGE_VERSION" >> "$GITHUB_OUTPUT"
           echo "acp_version=$ACP_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Install bridge-client dependencies
-        working-directory: packages/agentnexus-bridge-client
-        run: npm ci
-
-      - name: Verify bridge-client
-        working-directory: packages/agentnexus-bridge-client
-        run: |
-          npm run lint
-          npm test
-          npm run build
-
-      - name: Publish bridge-client to npm
-        working-directory: packages/agentnexus-bridge-client
-        env:
-          BRIDGE_VERSION: ${{ steps.versions.outputs.bridge_version }}
-        run: |
-          set -euo pipefail
-          if npm view "@haowei0520/bridge-client@${BRIDGE_VERSION}" version >/dev/null 2>&1; then
-            echo "@haowei0520/bridge-client@${BRIDGE_VERSION} already exists on npm; skipping publish."
-          else
-            npm publish --access public --ignore-scripts
-          fi
-
-      - name: Pack bridge-client artifact
-        id: bridge_pack
-        working-directory: packages/agentnexus-bridge-client
-        run: |
-          set -euo pipefail
-          TARBALL=$(npm pack --silent --ignore-scripts)
-          STABLE="agentnexus-bridge-client.tgz"
-          cp "$TARBALL" "$STABLE"
-          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
-          echo "stable=$STABLE" >> "$GITHUB_OUTPUT"
 
       - name: Install ACP connector dependencies
         working-directory: packages/agentnexus-acp-connector
@@ -114,22 +76,6 @@ jobs:
           npm run lint
           npm test
           npm run build
-
-      - name: Rewrite ACP dependency for npm publish
-        working-directory: packages/agentnexus-acp-connector
-        env:
-          BRIDGE_VERSION: ${{ steps.versions.outputs.bridge_version }}
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const fs = require("node:fs");
-          const path = "package.json";
-          const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
-          pkg.dependencies = pkg.dependencies || {};
-          pkg.dependencies["@haowei0520/bridge-client"] = `^${process.env.BRIDGE_VERSION}`;
-          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
-          NODE
-          node -p "require('./package.json').dependencies['@haowei0520/bridge-client']"
 
       - name: Pack ACP connector artifact
         id: acp_pack
@@ -164,7 +110,5 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            packages/agentnexus-bridge-client/${{ steps.bridge_pack.outputs.tarball }}
-            packages/agentnexus-bridge-client/${{ steps.bridge_pack.outputs.stable }}
             packages/agentnexus-acp-connector/${{ steps.acp_pack.outputs.tarball }}
             packages/agentnexus-acp-connector/${{ steps.acp_pack.outputs.stable }}

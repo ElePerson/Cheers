@@ -16,7 +16,7 @@
 │  └──────────────────────┬────────────────────────────────────┘  │
 │                         │ stdio（MCP JSON-RPC）                  │
 │  ┌──────────────────────▼────────────────────────────────────┐  │
-│  │  agentnexus-mcp-server（Node.js 子进程）                   │  │
+│  │  agentnexus-mcp-server（Rust stdio 子进程）                │  │
 │  │  · 由 connector 启动，注入 env vars                        │  │
 │  │  · 把 MCP tool call 翻译成 resource 请求                   │  │
 │  │  · 转发给 connector（HTTP loopback）                       │  │

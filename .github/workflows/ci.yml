@@ -38,8 +38,8 @@ jobs:
               - "frontend/**"
               - ".github/workflows/ci.yml"
             plugin:
-              - "packages/agentnexus-bridge-client/**"
-              - "packages/openclaw-channel-agentnexus/**"
+              - "packages/agentnexus-acp-connector/**"
+              - "packages/agentnexus-acp-connector-rs/**"
               - "packages/agentnexus-mcp-server/**"
               - ".github/workflows/ci.yml"
 
@@ -107,16 +107,13 @@ jobs:
         run: npm run build
 
   # ─────────────────────────────────────────────
-  # Plugin: type-check + test + build
+  # Agent packages: TS compatibility packages + Rust connector/MCP binaries
   # ─────────────────────────────────────────────
   plugin-build:
-    name: Plugin Build
+    name: Agent Package Check
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.plugin == 'true' || github.event_name == 'workflow_dispatch'
-    defaults:
-      run:
-        working-directory: packages/openclaw-channel-agentnexus
 
     steps:
       - uses: actions/checkout@v4
@@ -126,26 +123,43 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: |
-            packages/agentnexus-bridge-client/package-lock.json
-            packages/openclaw-channel-agentnexus/package-lock.json
+          cache-dependency-path: packages/agentnexus-acp-connector/package-lock.json
 
-      - name: Install bridge client dependencies
-        working-directory: packages/agentnexus-bridge-client
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            packages/agentnexus-acp-connector-rs -> packages/agentnexus-acp-connector-rs/target
+            packages/agentnexus-mcp-server -> packages/agentnexus-mcp-server/target
+
+      - name: Install ACP connector dependencies
+        working-directory: packages/agentnexus-acp-connector
         run: npm ci
 
-      - name: Build bridge client
-        working-directory: packages/agentnexus-bridge-client
-        run: npm run build
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
+      - name: Lint ACP connector
+        working-directory: packages/agentnexus-acp-connector
         run: npm run lint
 
-      - name: Test
+      - name: Test ACP connector
+        working-directory: packages/agentnexus-acp-connector
         run: npm test
 
-      - name: Build
+      - name: Build ACP connector
+        working-directory: packages/agentnexus-acp-connector
         run: npm run build
+
+      - name: Format Rust agent packages
+        run: |
+          cargo fmt --manifest-path packages/agentnexus-acp-connector-rs/Cargo.toml -- --check
+          cargo fmt --manifest-path packages/agentnexus-mcp-server/Cargo.toml -- --check
+
+      - name: Check Rust connector daemon
+        run: cargo check --manifest-path packages/agentnexus-acp-connector-rs/Cargo.toml
+
+      - name: Check Rust MCP server
+        run: cargo check --manifest-path packages/agentnexus-mcp-server/Cargo.toml

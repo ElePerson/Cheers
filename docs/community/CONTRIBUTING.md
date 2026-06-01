@@ -38,10 +38,9 @@ npm package changes also require running `npm run lint`, `npm test`, and `npm ru
 
 ## npm package release notes
 
-`packages/openclaw-channel-agentnexus` and `packages/agentnexus-acp-connector` use monorepo local dependencies in the source code:```json
-"@haowei0520/bridge-client": "file:../agentnexus-bridge-client"
-```
-The release workflow will rewrite the dependency to the published npm version before publishing. Do not manually change it to the registry version during daily development, otherwise local joint debugging will be slower and cross-package modifications will be more likely to be missed.
+The legacy `packages/openclaw-channel-agentnexus` and standalone
+`packages/agentnexus-bridge-client` packages have been removed. Do not add new
+release or CI wiring for them.
 
 ## PR requirements
 

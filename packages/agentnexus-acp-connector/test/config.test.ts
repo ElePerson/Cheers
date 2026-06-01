@@ -121,7 +121,7 @@ describe("loadConfig", () => {
 
     const config = await loadConfig(configPath);
 
-    expect(config.accounts["opencode-main"].acpCapability?.privateKey).toBe(keyPath);
+    expect(config.accounts["opencode-main"].acpCapability?.privateKey).toBe(`file:${keyPath}`);
     expect(config.accounts["opencode-main"].acpCapability?.delegationId).toBe("550e8400-e29b-41d4-a716-446655440000");
   });
 

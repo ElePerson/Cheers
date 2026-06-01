@@ -1,4 +1,4 @@
-import type { SessionConfig } from "@haowei0520/bridge-client";
+import type { SessionConfig } from "./bridge-client/index.js";
 
 export type PermissionMode = "ask" | "reject" | "allow" | "cancel";
 

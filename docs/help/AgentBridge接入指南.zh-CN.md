@@ -97,67 +97,9 @@ curl -X POST "$AGENTNEXUS_BASE_URL/docs/agent-bridge/register" \
 
 ## 三、连接 OpenClaw（废弃/遗留）
 
-> 以下 OpenClaw 链接仅保留给已有部署维护使用。新接入请使用 `/acp-bridge`，迁移到从 npm 安装的、本地运行的 ACP Agent。
+> OpenClaw channel package 已停用，仓库不再保留 `packages/openclaw-channel-agentnexus` 源码包。已有部署请迁移到 `/acp-bridge` 和本地运行的 ACP Agent；新接入不要再使用 OpenClaw 包路径。
 
-### 3.1 安装 OpenClaw channel plugin（仅遗留维护）
-
-公开 npm 包名是 `@haowei0520/openclaw-channel-agentnexus`。如果看到
-`@haowei2000/openclaw-channel-agentnexus`，只有在你自己的私有 npm registry 中确实发布了这个包时才使用；公开 npm registry 上应使用 `@haowei0520`。
-
-只有维护已有 OpenClaw 部署时，才从 npm 拉取当前发布包并交给 OpenClaw 安装：
-
-```bash
-npm pack @haowei0520/openclaw-channel-agentnexus@0.2.4 --pack-destination /tmp
-openclaw plugins install /tmp/haowei0520-openclaw-channel-agentnexus-0.2.4.tgz
-```
-
-如果当前 AgentNexus 后端已经挂载了 `release/openclaw-channel-agentnexus.tgz`，也可以从后端下载离线包。使用这条路径前，先确认 `release/` 下的 tarball 是最新构建产物：
-
-```bash
-curl -L -o /tmp/openclaw-channel-agentnexus.tgz \
-  "$AGENTNEXUS_BASE_URL/release/openclaw-channel-agentnexus.tgz"
-
-openclaw plugins install /tmp/openclaw-channel-agentnexus.tgz
-```
-
-也可以从 GitHub Release 安装预构建包：
-
-```bash
-gh release download openclaw-channel-agentnexus-v0.2.4 \
-  -R Grant-Huang/AgentNexus \
-  --pattern "*.tgz" \
-  --dir /tmp
-
-openclaw plugins install /tmp/haowei0520-openclaw-channel-agentnexus-0.2.4.tgz
-```
-
-或使用 GitHub latest 下载地址：
-
-```bash
-curl -L -o /tmp/agentnexus-openclaw.tgz \
-  "https://github.com/Grant-Huang/AgentNexus/releases/latest/download/openclaw-channel-agentnexus.tgz"
-
-openclaw plugins install /tmp/agentnexus-openclaw.tgz
-```
-
-开发态可以从仓库源码 link：
-
-```bash
-cd packages/openclaw-channel-agentnexus
-npm install
-npm run build
-openclaw plugins install -l "$(pwd)"
-```
-
-检查插件状态：
-
-```bash
-openclaw plugins list | grep agentnexus
-```
-
-应看到 `@haowei0520/openclaw-channel-agentnexus` 且状态为 loaded。
-
-### 3.2 配置 OpenClaw account
+### 3.1 配置 OpenClaw account（仅已有部署迁移参考）
 
 编辑 `~/.openclaw/openclaw.json`，在顶层 `channels` 下加入：
 
@@ -257,7 +199,7 @@ openclaw channels status --probe
 
 一个 OpenClaw 进程可以挂多个 account。每个 account 对应一个 AgentNexus Agent Bridge Bot。
 
-### 3.3 重启 OpenClaw 并验证
+### 3.2 重启 OpenClaw 并验证
 
 ```bash
 openclaw daemon restart
@@ -311,7 +253,6 @@ npm install -g @haowei0520/acp-connector
 或从当前仓库源码安装：
 
 ```bash
-npm install -g ./packages/agentnexus-bridge-client
 npm install -g ./packages/agentnexus-acp-connector
 ```
 
@@ -558,5 +499,5 @@ AGENT_BRIDGE_TIMEOUT_SECONDS=600
 - Agent Bridge HTTP/WS 路由：`backend/app/api/v1/agent_bridge/routes.py`
 - Agent Bridge 机器可读注册页：`backend/app/agent_bridge_docs_routes.py`
 - Agent Bridge Bot 适配器：`backend/app/features/bot_runtime/adapters/agent_bridge_bot.py`
-- OpenClaw 插件包（废弃/遗留）：`packages/openclaw-channel-agentnexus/`
+- OpenClaw 插件包：已停用并从仓库删除
 - ACP Connector：`packages/agentnexus-acp-connector/`
