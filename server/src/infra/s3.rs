@@ -20,7 +20,7 @@ pub fn build_client(config: &Config) -> Client {
         config.s3_secret_key.clone(),
         None,
         None,
-        "agentnexus-static",
+        "cheers-static",
     );
     let conf = aws_sdk_s3::config::Builder::new()
         .behavior_version(BehaviorVersion::latest())

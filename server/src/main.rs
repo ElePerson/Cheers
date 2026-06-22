@@ -1,4 +1,4 @@
-//! AgentNexus backend entrypoint.
+//! Cheers backend entrypoint.
 //!
 //! Builds runtime dependencies (config, database pool, in-process gateway
 //! registries), initializes tracing, applies migrations, and starts the Axum

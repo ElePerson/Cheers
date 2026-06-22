@@ -1,7 +1,7 @@
 {
   "lang": "zh-CN",
-  "title": "AgentNexus Architecture Status",
-  "brand": "AgentNexus Architecture",
+  "title": "Cheers Architecture Status",
+  "brand": "Cheers Architecture",
   "brandMark": "AN",
   "nav": [
     { "href": "#status", "label": "状态", "status": "done" },
@@ -14,7 +14,7 @@
   "hero": {
     "eyebrow": "Architecture status · 2026-06-22",
     "heading": "去中心化 Agent 网格 · M1 核心闭环真机验证",
-    "lead": "AgentNexus 是一个「外接 agent 优先」的聊天网格：Rust gateway（`server/`）是唯一后端，React 前端（`frontend/`），agent 作为外部进程经 Agent Bridge 接入。本页是对当前代码的实测快照——事实经多 agent 逐条 ground-truth 校正，而非照抄历史文档。M0 夯实地基已并入 develop；M1 核心闭环（message→@bot→流式→持久化 + mention + 文件 + presence）已于 2026-06-22 用真实 Rust connector + claude-code-acp ACP agent 端到端真机验证。",
+    "lead": "Cheers 是一个「外接 agent 优先」的聊天网格：Rust gateway（`server/`）是唯一后端，React 前端（`frontend/`），agent 作为外部进程经 Agent Bridge 接入。本页是对当前代码的实测快照——事实经多 agent 逐条 ground-truth 校正，而非照抄历史文档。M0 夯实地基已并入 develop；M1 核心闭环（message→@bot→流式→持久化 + mention + 文件 + presence）已于 2026-06-22 用真实 Rust connector + claude-code-acp ACP agent 端到端真机验证。",
     "meta": [
       "实测日期 2026-06-22",
       "branch demo/main",
@@ -96,7 +96,7 @@
       "title": "是什么 · 怎么跑",
       "intro": "给第一次看这套架构的人：先讲它是什么、遵循哪些约束，再用一条 @bot 消息的生命周期讲它怎么跑。",
       "what": [
-        "平台是「外接 agent 优先」：没有内置 Python runtime。Rust gateway（`server/`，9 个顶层模块）是唯一后端；React 前端（`frontend/`）；agent 作为外部进程，经 Agent Bridge 的两条 WS（control + data）接入。标准桥是 `agentnexus-mcp-server`。",
+        "平台是「外接 agent 优先」：没有内置 Python runtime。Rust gateway（`server/`，9 个顶层模块）是唯一后端；React 前端（`frontend/`）；agent 作为外部进程，经 Agent Bridge 的两条 WS（control + data）接入。标准桥是 `cheers-mcp-server`。",
         "浏览器走 REST + 一条 browser WS：订阅频道、收消息与流式 delta。bot 经 connector 接入：本地 ACP agent（配置驱动，example 指向 `claude-agent-acp`）说 ACP stdio；MCP 工具调用经 connector 的 loopback HTTP 回到后端的 resource 协议。整条链路当前为单实例进程内（R1-A）。"
       ],
       "principles": [
@@ -143,7 +143,7 @@
           "nodes": [
             { "title": "Connector (Rust daemon)", "body": "BridgeRuntime（supervisor）→ AccountRuntime（每账号）→ { BridgeSession：control+data WS · AcpAdapter：ACP stdio }。11 个源模块。" },
             { "title": "ACP agent（配置驱动）", "body": "`adapter.command` 指定，持久 stdio；example 与 README 用 `/opt/homebrew/bin/claude-agent-acp`。agent 无关，provider 鉴权在 agent 进程内（不在 connector）。" },
-            { "title": "agentnexus-mcp-server", "body": "18 个 MCP tools（channel info / messages / files / `fs.*`）。注入为标准 ACP stdio（`mcpServers` 的 command/args/env），非 HTTP/SSE。" },
+            { "title": "cheers-mcp-server", "body": "18 个 MCP tools（channel info / messages / files / `fs.*`）。注入为标准 ACP stdio（`mcpServers` 的 command/args/env），非 HTTP/SSE。" },
             { "title": "Loopback Resource Server", "body": "connector 本地 HTTP，带 loopback token：MCP tool call → data WS `resource_req` → 后端 resource 派发 → 原路返回。" }
           ]
         }
@@ -245,7 +245,7 @@
             "users · workspaces · channels · channel_memberships",
             "messages · message_mentions · file_records",
             "bot_accounts · friendships",
-            "agentnexus_sessions (+ bindings)",
+            "cheers_sessions (+ bindings)",
             "acp_capability（delegations + reject_logs）",
             "`memory_files`（agent 工作区 `fs.*`，`resource/fs.rs`，14 条 SQL）"
           ]
@@ -286,7 +286,7 @@
       "rows": [
         ["gateway", "核心闭环后端补洞", "admin seed 引导（空库本不可登录）· messages `?since_seq=` 追平 · `POST /bots/:id/token` 签发 Agent Bridge token（SHA-256 入库，原 create_bot 从不签发）", "`06d14d7`"],
         ["frontend", "核心闭环前端", "重连 `since_seq` 自愈 · 消息排序修正（null-seq 占位置底）· 流式渲染 · @mention 选择器 → mention_ids · Settings→Bots 管理 UI", "`06d14d7`"],
-        ["docs", "M1 demo runbook + connector 配置", "`docs/DEMO_M1.md` 全流程 + `examples/agentnexus-daemon.local-demo.toml`", "`06d14d7`"],
+        ["docs", "M1 demo runbook + connector 配置", "`docs/DEMO_M1.md` 全流程 + `examples/cheers-daemon.local-demo.toml`", "`06d14d7`"],
         ["gateway", "文件存储（S3 代理）", "接通已声明未用的 `aws-sdk-s3`：`infra/s3.rs` SigV4 client + 桶引导；`POST /api/v1/files` 网关代理上传；preview/download 改签名 `get_object`（原为未签名 reqwest）", "`8c93b8d`"],
         ["frontend", "文件附件 UI", "composer 📎 上传 → 附 `file_ids`；MessageItem 鉴权 fetch 下载 chip；`<#file>` token 渲染", "`8c93b8d`"],
         ["gateway+frontend", "presence 在线状态", "`InProcessFanout` 加 `conn→user` 映射 + `online_users`；`browser.rs` 在 subscribe/退订/断线广播去重 `presence` 帧；前端频道头显在线数", "`8c93b8d`"],
@@ -302,7 +302,8 @@
         { "status": "done", "badge": "M1 · 后端 ✓", "title": "CRUD 补洞 + 文件 + presence（已完成）", "body": "admin seed · messages `?since_seq=` · `POST /bots/:id/token` 签发 · S3 网关代理上传/下载 + 桶引导 · presence 广播 · dispatch/delta/done 日志 + `trace` 转 UI。" },
         { "status": "done", "badge": "M1 · 验证 ✓", "title": "connector happy-path（已真机验证）", "body": "真实 Rust connector + claude-code-acp 接入：@提及 → 流式 → 重连追平，端到端跑通。两处真机集成坑已记录（MCP schema 不匹配 → 关注入；CLAUDECODE 嵌套守卫 → unset）。见 `docs/DEMO_M1.md`。" },
         { "status": "mostly", "badge": "发布 · 待办", "title": "demo/main → develop → main", "body": "M1 在 `demo/main`（3 commit，未推远端）；待并入 `develop` 再晋级 `main`（push main 触发 `cd.yml` 构建并推 ghcr 镜像，`DEPLOY_ENABLED` 未开、无 live SSH 部署）。" },
-        { "status": "future", "badge": "M2 · 裁剪", "title": "schema-only 功能定范围", "body": "对仅 schema 的 8 张表逐一定 v1 进 / 延后 / 砍：memory（记忆）、document/RAG、lens（history_pages）、todos/templates/keychain/ai_models。权限 UI 随之定。不得把只有 schema 的功能标成「完成」。" }
+        { "status": "future", "badge": "M2 · 裁剪", "title": "schema-only 功能定范围", "body": "对仅 schema 的 8 张表逐一定 v1 进 / 延后 / 砍：memory（记忆）、document/RAG、lens（history_pages）、todos/templates/keychain/ai_models。权限 UI 随之定。不得把只有 schema 的功能标成「完成」。" },
+        { "status": "future", "badge": "M3/M4 · 加固", "title": "E2EE / ACP 端点 Noise 通道（分层可选，非默认）", "body": "现状：`acp_security`（X25519-ECDH + AES-256-GCM，即 Noise 式握手）只落字段 + hello 协商，内容加解密未实装。决策：分层 + 按 bot opt-in + 不设平台全局默认——全局 E2EE 会让服务端读不到内容，废掉 search / RAG / 摘要 / 文件提取等「agent 处理内容」核心能力（且内置 LLM worker 仍需解密 → 对运营方仍非 E2EE）。钩子已留（`acp_security` 配置 + `E2EE_REQUIRED` / `DECRYPT_FAILED` 错误码）。优先级取决于威胁模型：自部署单租户 TLS 足矣；要「运营方也读不到」才升级为旗舰项。推 M3/M4，见 `docs/arch/E2EE_NOTES.md`（威胁模型层级 A/B/C）。" }
       ],
       "note": "M1 验收门全绿：新用户能 建工作区/频道 → 发带 mention+文件的消息 → 接入外接 agent → @它 → 看真实 Claude 流式回复 → 刷新看到完整历史 ✓。server `cargo build` + frontend `tsc` / `vite build` 全绿；文件上传下载往返、presence 去重、agent trace 转 UI 均真机验证。遗留：bot resource 层 `resource/files.rs` 仍 `content:null`（Phase 2）；`Makefile`/`.env.example` 为旧 gateway/Python 期。"
     },
@@ -317,7 +318,7 @@
         { "title": "server/src/gateway/stream.rs", "href": "../../server/src/gateway/stream.rs", "description": "claim_finalize 三态守卫 + seq 盖戳" },
         { "title": "server/tests/flows.rs", "href": "../../server/tests/flows.rs", "description": "R4-2 白盒集成测试（feature 门控）" },
         { "title": "server/src/resource/fs.rs", "href": "../../server/src/resource/fs.rs", "description": "memory_files 文件域 handler（已实现）" },
-        { "title": "packages/…/bridge_runtime.rs", "href": "../../packages/agentnexus-acp-connector-rs/src/bridge_runtime.rs", "description": "BridgeRuntime → AccountRuntime → AcpAdapter" },
+        { "title": "packages/…/bridge_runtime.rs", "href": "../../packages/cheers-acp-connector-rs/src/bridge_runtime.rs", "description": "BridgeRuntime → AccountRuntime → AcpAdapter" },
         { "title": "M1 Demo Runbook", "href": "DEMO_M1.md", "description": "全流程：infra → gateway → frontend → bot/token → connector → @bot 流式" },
         { "title": "Engineering Roadmap (M0/M1 看板)", "href": "ROADMAP.md", "description": "里程碑 / 依赖 / 验收门；M1 已勾选" },
         { "title": "Data Flow & Refactor Plan", "href": "DATA_FLOW_AND_REFACTOR_PLAN.md", "description": "代码现状快照 + R1–R13，v1.5" },

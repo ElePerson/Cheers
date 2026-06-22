@@ -235,7 +235,7 @@ pub async fn create_message(
 }
 
 fn provider_session_key_for_bot_workspace(workspace_id: Uuid, bot_id: Uuid) -> String {
-    format!("agentnexus:workspace:{workspace_id}:bot:{bot_id}")
+    format!("cheers:workspace:{workspace_id}:bot:{bot_id}")
 }
 
 async fn resolve_provider_account_id_for_bot(
