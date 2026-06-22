@@ -1279,23 +1279,23 @@ impl RuntimeContext {
             .as_array()
             .cloned()
             .unwrap_or_default();
-        if self.config.policy.mcp.inject_agentnexus {
+        if self.config.policy.mcp.inject_cheers {
             // Single shared MCP server process across all sessions.
             // CHANNEL_ID is not set via env — the ACP agent must pass
             // channel_id explicitly in every tool call (it knows the
             // channel context from the task trigger).
             // This avoids spawning one process per channel.
             servers.push(json!({
-                "name": "agentnexus",
+                "name": "cheers",
                 "command": resolve_mcp_server_command(),
                 "args": [],
                 // ACP (claude-agent-acp >=0.36) requires env as an array of
                 // {name, value} entries, not a map. See session/new schema.
                 "env": [
-                    {"name": "AGENTNEXUS_RESOURCE_URL", "value": self.loopback.url.clone()},
-                    {"name": "AGENTNEXUS_RESOURCE_TOKEN", "value": self.loopback.token.clone()},
-                    {"name": "AGENTNEXUS_BOT_ID", "value": self.account_id.clone()},
-                    {"name": "AGENTNEXUS_REQUEST_TIMEOUT_MS", "value": self.config.policy.loopback.request_timeout_ms.to_string()}
+                    {"name": "CHEERS_RESOURCE_URL", "value": self.loopback.url.clone()},
+                    {"name": "CHEERS_RESOURCE_TOKEN", "value": self.loopback.token.clone()},
+                    {"name": "CHEERS_BOT_ID", "value": self.account_id.clone()},
+                    {"name": "CHEERS_REQUEST_TIMEOUT_MS", "value": self.config.policy.loopback.request_timeout_ms.to_string()}
                 ]
             }));
         }
@@ -1955,9 +1955,9 @@ fn build_prompt(
     channel_name: Option<&str>,
 ) -> Vec<Value> {
     let mut parts = vec![
-        AGENTNEXUS_ACP_OUTPUT_CONTRACT.to_string(),
+        CHEERS_ACP_OUTPUT_CONTRACT.to_string(),
         format!(
-            "AgentNexus channel context: channel_id={}{}",
+            "Cheers channel context: channel_id={}{}",
             task.channel_id,
             channel_name
                 .map(|n| format!(", channel_name=\"{n}\""))
@@ -1973,7 +1973,7 @@ fn build_prompt(
         parts.push(text);
     }
     if policy.allow_attachments && !task.attachments.is_empty() {
-        let mut lines = vec!["AgentNexus attachments:".to_string()];
+        let mut lines = vec!["Cheers attachments:".to_string()];
         for attachment in &task.attachments {
             lines.push(attachment_summary_line(attachment));
         }
@@ -1985,7 +1985,7 @@ fn build_prompt(
     })]
 }
 
-const AGENTNEXUS_ACP_OUTPUT_CONTRACT: &str = "You are replying inside AgentNexus. Stream useful answer text through the ACP session; generated files should be returned as explicit file/resource updates when the runtime supports them.";
+const CHEERS_ACP_OUTPUT_CONTRACT: &str = "You are replying inside Cheers. Stream useful answer text through the ACP session; generated files should be returned as explicit file/resource updates when the runtime supports them.";
 
 fn extract_trigger_text(value: &Value) -> Option<String> {
     value
@@ -2112,7 +2112,7 @@ fn permission_option_id_for_resolution(params: &Value, resolution: &str) -> Opti
 }
 
 fn resolve_mcp_server_command() -> String {
-    if let Ok(path) = env::var("AGENTNEXUS_MCP_SERVER_BIN") {
+    if let Ok(path) = env::var("CHEERS_MCP_SERVER_BIN") {
         if !path.trim().is_empty() {
             return path;
         }
@@ -2120,19 +2120,19 @@ fn resolve_mcp_server_command() -> String {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     if let Some(packages_dir) = manifest_dir.parent() {
         let candidate = packages_dir
-            .join("agentnexus-mcp-server")
+            .join("cheers-mcp-server")
             .join("target")
             .join("debug")
             .join(if cfg!(windows) {
-                "agentnexus-mcp-server.exe"
+                "cheers-mcp-server.exe"
             } else {
-                "agentnexus-mcp-server"
+                "cheers-mcp-server"
             });
         if candidate.exists() {
             return candidate.display().to_string();
         }
     }
-    "agentnexus-mcp-server".to_string()
+    "cheers-mcp-server".to_string()
 }
 
 struct CapabilitySigner {

@@ -7,7 +7,7 @@ persists, and it survives a refresh.
 
 Three processes: the **gateway** (`server/`, Rust), the **web** frontend
 (`frontend/`, React/Vite), and the **Rust connector**
-(`packages/agentnexus-acp-connector-rs`) wrapping your local ACP agent.
+(`packages/cheers-acp-connector-rs`) wrapping your local ACP agent.
 
 ## 0. Prerequisites
 
@@ -40,12 +40,12 @@ openssl pkey -in server/.dev/jwt_private.pem -pubout -out server/.dev/jwt_public
 Create `server/.env` (loaded by dotenvy; `*.pem` and `.env` are gitignored):
 
 ```ini
-DATABASE_URL=postgresql://agentnexus:agentnexus@127.0.0.1:5433/agentnexus
+DATABASE_URL=postgresql://cheers:cheers@127.0.0.1:5433/cheers
 PORT=8000
 S3_ENDPOINT=http://127.0.0.1:9000
-S3_BUCKET=agentnexus-files
-S3_ACCESS_KEY=agentnexus-local-access-key
-S3_SECRET_KEY=agentnexus-local-secret-key
+S3_BUCKET=cheers-files
+S3_ACCESS_KEY=cheers-local-access-key
+S3_SECRET_KEY=cheers-local-secret-key
 CORS_ALLOWED_ORIGINS=
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin12345
@@ -93,14 +93,14 @@ Go to **Settings → Bots**:
 ## 6. Run the Rust connector with your ACP agent
 
 ```bash
-mkdir -p ~/.agentnexus/workspace
-export AGENTNEXUS_BOT_TOKEN=agb_...            # the token from §5
+mkdir -p ~/.cheers/workspace
+export CHEERS_BOT_TOKEN=agb_...            # the token from §5
 
-cd packages/agentnexus-acp-connector-rs
-# Edit examples/agentnexus-daemon.local-demo.toml: set adapter.command to your
+cd packages/cheers-acp-connector-rs
+# Edit examples/cheers-daemon.local-demo.toml: set adapter.command to your
 # ACP agent binary path. control/data URLs already point at ws://localhost:8000.
 cargo run --bin cce-acp-connector -- start \
-  --config examples/agentnexus-daemon.local-demo.toml --name demo
+  --config examples/cheers-daemon.local-demo.toml --name demo
 
 cargo run --bin cce-acp-connector -- status --name demo
 cargo run --bin cce-acp-connector -- logs   --name demo --lines 120

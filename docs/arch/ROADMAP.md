@@ -72,7 +72,7 @@ Redis 不再是 fan-out 路径的启动硬依赖。
 
 - **后端补齐**：用核心闭环对照现有 ~32 条路由，补齐 channels / memberships / messages-since-seq / files / bots / workspaces 的 CRUD 缺口。大部分已存在 —— 是补洞，不是新建。
 - **前端（本里程碑真正的工作量）**：打通 `useChatRealtime` 重连 → REST 补齐；流式 bot 回复渲染；mention 选择器（`<@bot>`/`<@user>`）；文件上传/附件 + `<#file>` token；presence；**bot 管理 UI**（注册外接 bot、签发 botToken、查看 config/status）。
-- **connector 通路验证**：一条文档化的 happy-path —— 经 `agentnexus-mcp-server` *或* `agentnexus-acp-connector-rs` 接入 Claude/Codex，@提及、流式、断线重连。
+- **connector 通路验证**：一条文档化的 happy-path —— 经 `cheers-mcp-server` *或* `cheers-acp-connector-rs` 接入 Claude/Codex，@提及、流式、断线重连。
 - 可选：R6 delta 热路径优化（M0 测试就位后才安全）—— 非性能瓶颈则延后。
 
 **验收门**：新用户能 建工作区/频道 → 邀请 → 发带 mention+文件的消息 → 接入外接 agent → @它 → 看它流式回复 → 刷新后看到完整历史。这就是可交付切片。
