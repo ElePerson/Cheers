@@ -1289,12 +1289,14 @@ impl RuntimeContext {
                 "name": "agentnexus",
                 "command": resolve_mcp_server_command(),
                 "args": [],
-                "env": {
-                    "AGENTNEXUS_RESOURCE_URL": self.loopback.url.clone(),
-                    "AGENTNEXUS_RESOURCE_TOKEN": self.loopback.token.clone(),
-                    "AGENTNEXUS_BOT_ID": self.account_id.clone(),
-                    "AGENTNEXUS_REQUEST_TIMEOUT_MS": self.config.policy.loopback.request_timeout_ms.to_string()
-                }
+                // ACP (claude-agent-acp >=0.36) requires env as an array of
+                // {name, value} entries, not a map. See session/new schema.
+                "env": [
+                    {"name": "AGENTNEXUS_RESOURCE_URL", "value": self.loopback.url.clone()},
+                    {"name": "AGENTNEXUS_RESOURCE_TOKEN", "value": self.loopback.token.clone()},
+                    {"name": "AGENTNEXUS_BOT_ID", "value": self.account_id.clone()},
+                    {"name": "AGENTNEXUS_REQUEST_TIMEOUT_MS", "value": self.config.policy.loopback.request_timeout_ms.to_string()}
+                ]
             }));
         }
         Value::Array(servers)
