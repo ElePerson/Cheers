@@ -1086,10 +1086,12 @@ impl RuntimeContext {
                     })
                     .await?;
             }
-        } else {
-            let summary = update_summary(&update);
-            self.trace(&run, kind, "running", "ACP session update", Some(&summary))
-                .await?;
+        } else if let Some((title, status)) = describe_session_update(kind, &update) {
+            // Structure the trace from the ACP update's OWN fields. tool_call /
+            // tool_call_update carry `title` ("ls -la …"), `kind` and `status`
+            // per the ACP schema; we pass those through instead of a generic
+            // label. Noise (usage_update, mode/config) is filtered by the helper.
+            self.trace(&run, kind, &status, &title, None).await?;
         }
         Ok(())
     }
@@ -2085,12 +2087,30 @@ fn text_from_content(value: &Value) -> Option<String> {
     None
 }
 
-fn update_summary(value: &Value) -> String {
-    value
-        .get("sessionUpdate")
+/// Structure an ACP `session/update` into a UI-facing `(title, status)` trace,
+/// using the update's OWN fields. Returns `None` for non-progress updates
+/// (`usage_update`, mode/config) so they are not surfaced as agent activity.
+///
+/// Grounded in the real ACP schema (verified against claude-agent-acp output):
+/// `tool_call` / `tool_call_update` carry `{ title, kind, status, toolCallId,
+/// content, rawInput, rawOutput }`. The `title` is the agent's own human label
+/// (e.g. the shell command); status-only updates have none, so we skip them and
+/// let the titled call/update be the informative trace.
+fn describe_session_update(kind: &str, update: &Value) -> Option<(String, String)> {
+    let status = update
+        .get("status")
         .and_then(Value::as_str)
-        .map(ToString::to_string)
-        .unwrap_or_else(|| value.to_string())
+        .unwrap_or("running")
+        .to_string();
+    match kind {
+        "tool_call" | "tool_call_update" => update
+            .get("title")
+            .and_then(Value::as_str)
+            .map(|title| (title.to_string(), status)),
+        "agent_thought_chunk" => Some(("Thinking…".to_string(), "running".to_string())),
+        "plan" => Some(("Planning…".to_string(), "running".to_string())),
+        _ => None,
+    }
 }
 
 fn normalize_config_options_report(update: &Value) -> Value {
