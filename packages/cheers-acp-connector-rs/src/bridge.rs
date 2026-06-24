@@ -268,6 +268,36 @@ mod tests {
             other => panic!("unexpected frame: {other:?}"),
         }
     }
+
+    #[test]
+    fn realize_file_frame_deserializes() {
+        let frame: DataInbound = serde_json::from_value(json!({
+            "type": "realize_file",
+            "file_id": "f-001",
+            "remote_ref": "/home/user/report.pdf",
+            "channel_id": "c-001"
+        }))
+        .expect("realize_file frame should deserialize");
+
+        match frame {
+            DataInbound::RealizeFile { file_id, remote_ref, channel_id } => {
+                assert_eq!(file_id, "f-001");
+                assert_eq!(remote_ref, "/home/user/report.pdf");
+                assert_eq!(channel_id, "c-001");
+            }
+            other => panic!("unexpected frame: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_data_frame_deserializes_as_unknown() {
+        let frame: DataInbound = serde_json::from_value(json!({
+            "type": "future_unknown_type",
+            "some_field": "value"
+        }))
+        .expect("unknown frame should not fail");
+        assert!(matches!(frame, DataInbound::Unknown));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -917,6 +947,14 @@ pub enum DataInbound {
     Error {
         #[serde(flatten)]
         error: BridgeErrorFrame,
+    },
+    /// Gateway → connector: realize a staged file. Connector reads the local path,
+    /// base64-encodes it, and calls channel.files.realize to upload to S3.
+    #[serde(rename = "realize_file")]
+    RealizeFile {
+        file_id: String,
+        remote_ref: String,
+        channel_id: String,
     },
     #[serde(other)]
     Unknown,

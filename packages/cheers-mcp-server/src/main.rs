@@ -338,6 +338,20 @@ fn build_resource_call(
                 params,
             })
         }
+        "inbox_stage" => {
+            let mut params = Map::new();
+            params.insert(
+                "channel_id".to_string(),
+                Value::String(client.resolve_channel(args)?),
+            );
+            copy_required(args, &mut params, "path", "remote_ref")?;
+            copy_required(args, &mut params, "filename", "filename")?;
+            copy_optional(args, &mut params, "content_type", "content_type");
+            Ok(ResourceCall {
+                resource: "channel.files.stage",
+                params,
+            })
+        }
         "desk_list" => {
             let mut params = Map::new();
             params.insert(
@@ -539,6 +553,12 @@ fn tool_definitions() -> Vec<Value> {
             string_prop("data_b64", "Base64 of the raw file bytes."),
             string_prop("content_type", "MIME type."),
         ], vec!["channel_id", "filename", "data_b64"]), false, false),
+        tool("inbox_stage", "Stage a local file for lazy delivery", "Register a LOCAL file path as a staged attachment. The file stays on this machine; when a user clicks the attachment in the channel, the gateway fetches and uploads it on demand. Use this instead of inbox_deliver when the file is large or you want to avoid uploading until needed. Returns a file_id.", object_schema(vec![
+            channel_id_prop(),
+            string_prop("path", "Absolute path to the local file (on this machine)."),
+            string_prop("filename", "Display name shown in the channel."),
+            string_prop("content_type", "MIME type (optional; auto-detected if omitted)."),
+        ], vec!["channel_id", "path", "filename"]), false, false),
         tool("desk_list", "List my workspace (desk) files", "List MY editable workspace files (\"the desk\") under a PATH prefix in this channel — my private working area (notes/boards/plans). NOT chat attachments; for those use inbox_list.", object_schema(vec![
             channel_id_prop(),
             string_prop("path", "Path prefix. Omit or empty string for root."),

@@ -68,6 +68,13 @@ pub enum RuntimeEvent {
     AdapterError {
         message: String,
     },
+    /// Injected into the adapter event channel by run_task immediately after
+    /// load_session() returns. The forwarding task forwards it to runtime_tx
+    /// strictly after all preceding history-replay notifications, so run_loop
+    /// sees the fence only after every history chunk has been discarded.
+    LoadSessionFence {
+        acp_session_id: String,
+    },
 }
 
 #[async_trait]

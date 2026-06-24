@@ -527,6 +527,67 @@ pub async fn confirm_upload(
     })))
 }
 
+/// POST /api/v1/files/:file_id/realize
+/// Triggers on-demand upload of a staged remote file.
+/// The gateway sends a `realize_file` data frame to the connector that owns the file;
+/// the connector reads the local path, base64-encodes it, and calls channel.files.realize.
+/// Returns immediately with `{ "status": "realizing" }`; caller polls get_file_status
+/// until status transitions to "uploaded".
+pub async fn realize_file(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(file_id): Path<String>,
+) -> Result<Json<Value>, AppError> {
+    let file = load_file_record(&state, &file_id).await?;
+    ensure_file_scope(&state, &claims, &file).await?;
+
+    if file.status != "staged" {
+        return Err(AppError::BadRequest(format!(
+            "file status is '{}', expected 'staged'",
+            file.status
+        )));
+    }
+
+    let bot_id: uuid::Uuid = file
+        .uploader_id
+        .as_deref()
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| AppError::BadRequest("staged file has no associated bot".into()))?;
+
+    let remote_ref: String = sqlx::query_scalar(
+        "SELECT remote_ref FROM file_records WHERE file_id = $1",
+    )
+    .bind(&file_id)
+    .fetch_optional(&state.db)
+    .await?
+    .flatten()
+    .ok_or_else(|| AppError::BadRequest("staged file has no remote_ref".into()))?;
+
+    let channel_id = file
+        .channel_id
+        .clone()
+        .ok_or_else(|| AppError::BadRequest("staged file has no channel".into()))?;
+
+    let frame = serde_json::json!({
+        "type": "realize_file",
+        "file_id": file_id,
+        "remote_ref": remote_ref,
+        "channel_id": channel_id,
+    });
+
+    let sent = state.bot_locator.send_data(bot_id, frame).await;
+    if !sent {
+        return Err(AppError::BadRequest(
+            "bot connector is offline; cannot realize file".into(),
+        ));
+    }
+
+    Ok(Json(serde_json::json!({
+        "file_id": file_id,
+        "status": "realizing",
+    })))
+}
+
 pub async fn get_file_status(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,

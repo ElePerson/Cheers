@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import { FileText } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { FileText, Loader2 } from "lucide-react";
 import { apiFetch } from "@/api/client";
+import { realizeFile, pollFileStatus } from "@/api/files";
 import type { FileInfo } from "@/types";
 
 // Shared rendering for CHAT files (file_records / S3 attachments) — distinct from workbench
@@ -71,8 +72,79 @@ function ImagePreview({ file }: { file: FileInfo }) {
   );
 }
 
+// Staged file tile: click → realize → poll → auto-download when ready.
+function StagedFileTile({ file }: { file: FileInfo }) {
+  const [phase, setPhase] = useState<"idle" | "realizing" | "error">("idle");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPoll = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  useEffect(() => () => stopPoll(), []);
+
+  const handleClick = useCallback(async () => {
+    if (phase === "realizing") return;
+    setPhase("realizing");
+    try {
+      await realizeFile(file.file_id);
+    } catch {
+      setPhase("error");
+      return;
+    }
+
+    // Poll until uploaded (2 s interval, 60 s ceiling)
+    let attempts = 0;
+    pollRef.current = setInterval(async () => {
+      attempts++;
+      try {
+        const status = await pollFileStatus(file.file_id);
+        if (status === "uploaded") {
+          stopPoll();
+          setPhase("idle");
+          await downloadFile({ ...file, status: "uploaded" });
+        } else if (status === "expired" || attempts > 30) {
+          stopPoll();
+          setPhase("error");
+        }
+      } catch {
+        stopPoll();
+        setPhase("error");
+      }
+    }, 2000);
+  }, [file, phase]);
+
+  const label =
+    phase === "realizing"
+      ? "加载中…"
+      : phase === "error"
+        ? "加载失败，点击重试"
+        : file.original_filename || "远程文件";
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={phase === "realizing"}
+      title={file.original_filename || file.file_id}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-zinc-600 bg-zinc-800/40 px-2.5 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors max-w-[240px] disabled:cursor-wait"
+    >
+      {phase === "realizing" ? (
+        <Loader2 className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0 animate-spin" />
+      ) : (
+        <FileText className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
+      )}
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
 // One file: an inline image preview, or a download chip for everything else.
 export function FileTile({ file }: { file: FileInfo }) {
+  if (file.status === "staged") return <StagedFileTile file={file} />;
   if ((file.content_type ?? "").startsWith("image/")) return <ImagePreview file={file} />;
   return (
     <button

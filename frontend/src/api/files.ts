@@ -6,6 +6,17 @@ export async function listChannelFiles(channelId: string): Promise<FileInfo[]> {
   return apiJson<FileInfo[]>(`/channels/${channelId}/files`);
 }
 
+/** Trigger lazy realize for a staged file. Returns { status: "realizing" }. */
+export async function realizeFile(fileId: string): Promise<void> {
+  await apiJson(`/files/${fileId}/realize`, { method: "POST" });
+}
+
+/** Poll the file's status. Returns the status string ("staged"|"realizing"|"uploaded"|"expired"). */
+export async function pollFileStatus(fileId: string): Promise<string> {
+  const res = await apiJson<{ status: string }>(`/files/${fileId}/status`);
+  return res.status;
+}
+
 /**
  * Gateway-proxied upload: the file bytes are sent as the request body and the
  * gateway streams them to object storage (SigV4) and records them as uploaded.

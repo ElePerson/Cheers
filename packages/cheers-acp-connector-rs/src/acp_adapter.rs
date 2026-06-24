@@ -71,6 +71,19 @@ impl AcpAdapter {
         self.initialize_response.as_ref()
     }
 
+    /// Injects a LoadSessionFence marker into the adapter event channel.
+    /// Because this channel is the same FIFO through which load_session history-replay
+    /// notifications flow, the fence is guaranteed to arrive in runtime_tx only after
+    /// all preceding notifications have been forwarded.
+    pub async fn inject_fence(&self, acp_session_id: impl Into<String>) {
+        let _ = self
+            .event_tx
+            .send(RuntimeEvent::LoadSessionFence {
+                acp_session_id: acp_session_id.into(),
+            })
+            .await;
+    }
+
     pub fn supports_load_session(&self) -> bool {
         self.initialize_response
             .as_ref()
