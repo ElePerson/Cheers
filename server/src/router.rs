@@ -184,6 +184,10 @@ fn build_authed_routes(state: AppState) -> Router<AppState> {
             get(api::files::download_file),
         )
         .route(
+            "/api/v1/files/:file_id/realize",
+            post(api::files::realize_file),
+        )
+        .route(
             "/api/v1/friends",
             get(api::friends::list_friends)
                 .post(api::friends::add_friend)

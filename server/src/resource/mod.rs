@@ -91,6 +91,8 @@ pub async fn dispatch(db: &PgPool, principal: Principal, frame: &Value) -> Value
         // ── 写操作（频道成员 role 可写）────────────────────────────────
         "channel.messages.create" => messages::handle_create(db, &principal, &params).await,
         "channel.files.create" => files::handle_create(db, &principal, &params).await,
+        "channel.files.stage" => files::handle_stage(db, &principal, &params).await,
+        "channel.files.realize" => files::handle_realize(db, &principal, &params).await,
 
         // ── mesh step 6：新增写操作（fs.*）───────────────────────────────
         "fs.write" => fs::handle_write(db, &principal, &params).await,

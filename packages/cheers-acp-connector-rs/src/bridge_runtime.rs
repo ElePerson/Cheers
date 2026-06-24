@@ -160,6 +160,7 @@ impl AccountRuntime {
             loopback,
             io,
             shared,
+            runtime_tx: runtime_tx.clone(),
         });
         tracing::info!(account = %context.account_id, "Rust BridgeRuntime started");
         if let Some(config) = initial_connector_config {
@@ -184,6 +185,9 @@ struct RuntimeContext {
     loopback: LoopbackHandle,
     io: BridgeIoHandle,
     shared: Arc<Mutex<SharedRuntimeState>>,
+    /// Sender into the main event loop — used to enqueue fence events (EnableStreaming)
+    /// that must be ordered after history-replay notifications already in the queue.
+    runtime_tx: mpsc::Sender<RuntimeInput>,
 }
 
 impl RuntimeContext {
@@ -211,10 +215,25 @@ impl RuntimeContext {
                     });
                 }
                 RuntimeInput::SocketClosed(stream) => {
+                    // Fail all pending loopback requests immediately so their tasks don't
+                    // block until the timeout when the data WS is gone.
+                    let _ = self.runtime_tx.send(RuntimeInput::AbortPendingResources).await;
                     return Err(anyhow!("Agent Bridge {stream} stream closed"));
                 }
                 RuntimeInput::SocketError { stream, error } => {
+                    let _ = self.runtime_tx.send(RuntimeInput::AbortPendingResources).await;
                     return Err(anyhow!("Agent Bridge {stream} stream error: {error}"));
+                }
+                RuntimeInput::AbortPendingResources => {
+                    let mut shared = self.shared.lock().await;
+                    for tx in shared.pending_resources.drain().map(|(_, tx)| tx) {
+                        let _ = tx.send(LoopbackResponse {
+                            ok: false,
+                            data: None,
+                            error: Some("data stream closed before resource response".to_string()),
+                            code: Some("DATA_STREAM_CLOSED".to_string()),
+                        });
+                    }
                 }
             }
         }
@@ -359,6 +378,21 @@ impl RuntimeContext {
                     }
                 }
             }
+            DataInbound::RealizeFile {
+                file_id,
+                remote_ref,
+                channel_id,
+            } => {
+                let runtime = self.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = runtime
+                        .handle_realize_file(file_id, remote_ref, channel_id)
+                        .await
+                    {
+                        tracing::warn!("realize_file failed: {err}");
+                    }
+                });
+            }
             DataInbound::Pong
             | DataInbound::ResumeAck { .. }
             | DataInbound::TerminalAck { .. }
@@ -366,6 +400,81 @@ impl RuntimeContext {
             | DataInbound::Unknown
             | DataInbound::Hello { .. }
             | DataInbound::Error { .. } => {}
+        }
+        Ok(())
+    }
+
+    async fn handle_realize_file(
+        &self,
+        file_id: String,
+        remote_ref: String,
+        channel_id: String,
+    ) -> anyhow::Result<()> {
+        let bytes = tokio::fs::read(&remote_ref).await.with_context(|| {
+            format!("realize_file: cannot read local file '{remote_ref}'")
+        })?;
+
+        let filename = std::path::Path::new(&remote_ref)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file")
+            .to_string();
+
+        let content_type = mime_guess::from_path(&filename)
+            .first_raw()
+            .unwrap_or("application/octet-stream")
+            .to_string();
+
+        let data_b64 = BASE64.encode(&bytes);
+
+        let req_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.shared
+            .lock()
+            .await
+            .pending_resources
+            .insert(req_id.clone(), tx);
+
+        self.io
+            .send_data(DataOutbound::ResourceReq {
+                v: BRIDGE_PROTOCOL_VERSION,
+                req_id: req_id.clone(),
+                resource: "channel.files.realize".to_string(),
+                params: Some(serde_json::json!({
+                    "file_id": file_id,
+                    "channel_id": channel_id,
+                    "data_b64": data_b64,
+                    "content_type": content_type,
+                    "filename": filename,
+                })),
+                encrypted: None,
+                encrypted_payload: None,
+                acp_capability: None,
+            })
+            .await?;
+
+        let response = tokio::time::timeout(
+            std::time::Duration::from_millis(self.config.policy.loopback.request_timeout_ms),
+            rx,
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_else(|| LoopbackResponse {
+            ok: false,
+            data: None,
+            error: Some("realize resource response timed out".to_string()),
+            code: Some("RESOURCE_TIMEOUT".to_string()),
+        });
+
+        if response.ok {
+            tracing::info!(%file_id, "realize_file: uploaded to S3");
+        } else {
+            tracing::warn!(
+                %file_id,
+                error = response.error.as_deref().unwrap_or(""),
+                "realize_file: gateway returned error"
+            );
         }
         Ok(())
     }
@@ -395,6 +504,18 @@ impl RuntimeContext {
             }
             RuntimeEvent::AdapterError { message } => {
                 tracing::warn!(account = %self.account_id, "ACP adapter error: {message}");
+            }
+            RuntimeEvent::LoadSessionFence { acp_session_id } => {
+                if let Some(run) = self
+                    .shared
+                    .lock()
+                    .await
+                    .by_acp_session
+                    .get(&acp_session_id)
+                    .cloned()
+                {
+                    run.lock().await.streaming_started = true;
+                }
             }
         }
         Ok(())
@@ -480,6 +601,7 @@ impl RuntimeContext {
             delta_seq: 0,
             trace_seq: 0,
             text: String::new(),
+            streaming_started: false,
         }));
         {
             let mut shared = self.shared.lock().await;
@@ -530,6 +652,15 @@ impl RuntimeContext {
             shared.by_provider_key.remove(&task.provider_session_key);
             return Ok(());
         }
+        // Inject the fence through the adapter event channel (the same FIFO that
+        // history-replay agent_message_chunk notifications flow through).  The forwarding
+        // task will forward it to runtime_tx strictly after all preceding history events,
+        // so run_loop sets streaming_started=true only once the history is fully drained.
+        self.adapter
+            .lock()
+            .await
+            .inject_fence(acp_session_id.clone())
+            .await;
         let prompt_result = {
             let mut adapter = self.adapter.lock().await;
             adapter
@@ -1074,6 +1205,11 @@ impl RuntimeContext {
         if kind == "agent_message_chunk" {
             if let Some(text) = text_from_content(update.get("content").unwrap_or(&Value::Null)) {
                 let mut guard = run.lock().await;
+                // Discard history-replay chunks emitted by codex-acp's streamThreadHistory
+                // during load_session, before our prompt has started streaming.
+                if !guard.streaming_started {
+                    return Ok(());
+                }
                 guard.delta_seq += 1;
                 guard.text.push_str(&text);
                 self.io
@@ -1408,6 +1544,9 @@ struct ActiveRun {
     delta_seq: u64,
     trace_seq: u64,
     text: String,
+    /// False until adapter.prompt() is called; guards against codex-acp replaying
+    /// prior-session history as agent_message_chunk notifications during load_session.
+    streaming_started: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1430,6 +1569,8 @@ enum RuntimeInput {
     Loopback(LoopbackRequest),
     SocketClosed(&'static str),
     SocketError { stream: &'static str, error: String },
+    /// Broadcast to all pending loopback requests when the data WS closes mid-flight.
+    AbortPendingResources,
 }
 
 #[derive(Clone)]

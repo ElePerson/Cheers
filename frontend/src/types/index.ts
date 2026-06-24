@@ -51,6 +51,8 @@ export interface FileInfo {
   size_bytes?: number;
   preview_url?: string | null;
   download_url?: string | null;
+  /** "staged" = lazy (remote, not yet on S3); "uploaded" = available; "expired" = gone. */
+  status?: string;
 }
 
 export interface MessageMention {
