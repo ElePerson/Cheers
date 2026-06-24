@@ -136,15 +136,16 @@ R1-B + R7（多实例）· OpenTelemetry · 权限审计日志。即 Phase 3 —
   - [x] 前端实时 / 流式 / mention / 文件 / presence（全部 ✅）
   - [x] bot 管理 UI（Settings → Bots：注册 / 签发 token / 加入频道）
   - [x] connector happy-path 文档化验证（Rust connector + claude-code-acp 真机流式回复；见 [../DEMO_M1.md](../DEMO_M1.md)）
-- [ ] **M2** 功能裁剪（范围已拍板 2026-06-23；统一工作台，**无独立 memory 概念**）
-  - [x] **Slice 0 — 回归锁**：`resource::dispatch` + `fs.*` 的 verb 级回归测试（develop 上**零覆盖**；锁住行为再动 dispatch）—— `server/tests/flows.rs` 3 项绿
-  - [ ] `ResourceRegistry` 重构 **YAGNI 延后**：v1 插件不新增后端 verb，保留 `match` 的编译期穷尽检查；待真有外部插件加新 verb 再做
-  - [ ] 后端：`user→dispatch` 桥（浏览器 WS 今天**无资源请求通道**，`dispatch` 只被 `Principal::bot` 调过）+ 该入口的鉴权契约（限制 member 的 `rm`/`mv`）
-  - [ ] 安全 blocker：`fs.*` 写入硬大小上限 + 配额；内容 inert 渲染防存储型 XSS
-  - [ ] File 插件：文件树 + 编辑器，读写 `context_files`（`fs.*` 已实现，补 UI + 集成测试）
-  - [ ] Context 插件（取代「Agent 记忆」）：策展共享文件 + 面板 + 初始化脚手架；**无 push 正文**，存在性经系统提示告知（**不**用已删的 `memory_entries`）
-  - [ ] DM 会话域：净新建（DM 频道创建/成员/`CAPABILITY_SCOPE_*`，复用 channel 模型）。~~topic 已砍（2026-06-24）~~
-  - [ ] Grant/trust_level：已在 BOT_PERMISSION.md 标注废弃（R13）—— **不实现**
-  - [ ] 延后/砍：RAG · Lens/公告 · todos/templates/keychain/ai_models
-- [ ] **M3** 加固 & 文档对齐
+- [x] **M2** 功能裁剪 ✅ **收口（2026-06-24，已并入 develop `439c679a`）**——会话模型单级化（一切皆 channel），无独立 memory 概念
+  - [x] **Slice 0 — 回归锁**：`resource::dispatch` + `fs.*` 的 verb 级回归测试 —— `server/tests/flows.rs` 绿
+  - [x] ~~`ResourceRegistry` 重构~~ **YAGNI 延后**：v1 插件不新增后端 verb，保留 `match` 穷尽检查
+  - [x] 后端：`user→dispatch` 桥（浏览器 WS `ResourceReq` 通道）+ 鉴权契约（member 的 `rm`/`mv` 收紧）
+  - [x] 安全 blocker：`fs.*` 大小上限 + 每频道配额；inert 渲染防存储型 XSS
+  - [x] File 插件：文件树 + 编辑器 + 渲染器选择，读写 `context_files`（+ 集成测试）
+  - [x] Context 策展：pin（提示词注入）+ 全局/临时模板 + tab(views) —— 文件即 Context，无 push 正文
+  - [x] **渲染器插件体系**（M2 中途扩展）：render/save 协议、接受判断、特异性、host API；两类插件拆分
+  - [x] DM 会话域：DM = `type='dm'` channel + find-or-create + personal workspace + 前端 UI（迁移 0013–0016）。topic 已砍
+  - [x] Grant/trust_level：**不实现**（channel-role 唯一事实源）
+  - [x] 延后/砍：RAG · Lens/公告 · todos/templates/keychain/ai_models（有意裁掉）
+- [ ] **M3** 加固 & 文档对齐 ← **进行中（分支 `feat/m3-hardening`，2026-06-24 起）**
 - [ ] **M4** 扩容（HA 触发）
