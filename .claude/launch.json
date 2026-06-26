@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd frontend && npm run dev"],
+      "port": 5173
+    },
+    {
+      "name": "gateway",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["server/.dev/run-dev.sh"],
+      "port": 8000
+    }
+  ]
+}
