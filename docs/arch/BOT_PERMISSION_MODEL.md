@@ -104,7 +104,10 @@ approvers/rules) · approver (resolve `ask`) · user (invoke). Maps onto existin
    host connector rebuilt on these changes — a live tool-use should now surface a card.
 2. **Authorization rules** ✅ done — `bot_permission_rules` table + most-specific resolution; per-kind **approvers `operation_kind`** column (`*`=any); gateway evaluation wired into `request_permission` (`allow`→auto-approve, `deny`→auto-reject, `ask`→approvers card); owner API for rules (`GET/PUT/DELETE /bots/:id/permissions[/rules]`) and kind-aware approvers (`POST/DELETE /bots/:id/approvers`).
 3. **Owner page** ✅ done — `BotPermissionsDialog`: scope selector (bot-wide / per-channel) + the per-operation matrix (decision dropdown + per-kind approver chips). Opened from the bot card's **权限** button (owner/admin only).
-4. **Verify** — API + UI verified end-to-end on kind (rules CRUD, 400 on bad decision, kind-scoped approver grant/list/revoke, matrix renders). Live-agent auto-resolution awaits Phase 1's bypass-flag fix.
+4. **Verify** ✅ — proven end-to-end on the live stack (kind gateway + host connector @ 0.36.1, posture=default):
+   - A live `Write` tool-use → `session/request_permission` fired → gateway created a pending card (`tool.kind=edit`) → resolved `allow` → the agent proceeded and **wrote the file**, card marked `resolved`. (Same action that previously deleted files with no card.)
+   - Bot-wide rule `edit=deny` → next write **auto-rejected** (`auto=true, chosen_kind=reject_once`, gateway "auto-resolved by Axis-B rule"), no human prompt, file never created.
+   - Owner API: rules CRUD + `400` on a bad decision; kind-scoped approver grant/list/revoke; posture GET/PUT + `400` on a non-allowed mode (bypassPermissions); matrix + posture UI render.
 
 ## Invariants
 
