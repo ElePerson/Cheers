@@ -12,6 +12,9 @@ import { SendHorizontal, Bot, User, Paperclip, X, FileText } from "lucide-react"
 import { cn } from "@/lib/cn";
 import { uploadFile } from "@/api/files";
 import type { FileInfo } from "@/types";
+import { CommandPalette, type CommandCandidate } from "./CommandPalette";
+
+export type { CommandCandidate } from "./CommandPalette";
 
 export interface MentionCandidate {
   id: string;
@@ -25,6 +28,8 @@ interface Props {
   channelName?: string;
   disabled?: boolean;
   mentionables?: MentionCandidate[];
+  /** Slash-commands advertised by the channel's bots (⑦ command palette). */
+  commands?: CommandCandidate[];
   /** Optional controls rendered just above the input row (e.g. a session switcher). */
   toolbar?: ReactNode;
   /** Fires with the bots currently @mentioned in the draft (token still present),
@@ -37,8 +42,11 @@ interface Props {
   ) => Promise<void>;
 }
 
+// The composer runs one picker at a time, opened by either "@" (mention) or "/"
+// (command). `kind` says which list to filter and how a selection is inserted.
 interface PickerState {
-  /** index into `text` of the active "@" trigger */
+  kind: "mention" | "command";
+  /** index into `text` of the active trigger char ("@" or "/") */
   at: number;
   query: string;
   index: number;
@@ -49,6 +57,7 @@ export function MessageComposer({
   channelName,
   disabled,
   mentionables = [],
+  commands = [],
   toolbar,
   onMentionsChange,
   onSend,
@@ -103,31 +112,55 @@ export function MessageComposer({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, []);
 
-  // Recompute the active "@query" token from the text up to the caret.
-  // Active only when "@" starts a word and the token has no whitespace.
+  // Recompute the active picker token from the text up to the caret. The picker
+  // opens on whichever trigger ("@" mention or "/" command) most recently starts
+  // a word before the caret; it stays open only while the token has no whitespace.
   const refreshPicker = useCallback((value: string, caret: number) => {
     const upto = value.slice(0, caret);
-    const at = upto.lastIndexOf("@");
-    if (at === -1) return setPicker(null);
-    const token = upto.slice(at + 1);
-    const startsWord = at === 0 || /\s/.test(value[at - 1]);
+    const atPos = upto.lastIndexOf("@");
+    const slashPos = upto.lastIndexOf("/");
+    // The later trigger wins (it's the one the caret is actually inside).
+    const pos = Math.max(atPos, slashPos);
+    if (pos === -1) return setPicker(null);
+    const kind = pos === atPos ? "mention" : "command";
+    const token = upto.slice(pos + 1);
+    const startsWord = pos === 0 || /\s/.test(value[pos - 1]);
     if (!startsWord || /\s/.test(token)) return setPicker(null);
-    setPicker({ at, query: token, index: 0 });
+    setPicker({ kind, at: pos, query: token, index: 0 });
   }, []);
 
-  const filtered = picker
-    ? mentionables
-        .filter((c) => {
-          const q = picker.query.toLowerCase();
-          return (
-            c.label.toLowerCase().includes(q) ||
-            (c.sublabel?.toLowerCase().includes(q) ?? false)
-          );
-        })
-        // bots first — they are the demo's primary @target
-        .sort((a, b) => (a.type === b.type ? 0 : a.type === "bot" ? -1 : 1))
-        .slice(0, 8)
-    : [];
+  const filteredMentions =
+    picker?.kind === "mention"
+      ? mentionables
+          .filter((c) => {
+            const q = picker.query.toLowerCase();
+            return (
+              c.label.toLowerCase().includes(q) ||
+              (c.sublabel?.toLowerCase().includes(q) ?? false)
+            );
+          })
+          // bots first — they are the demo's primary @target
+          .sort((a, b) => (a.type === b.type ? 0 : a.type === "bot" ? -1 : 1))
+          .slice(0, 8)
+      : [];
+
+  const filteredCommands =
+    picker?.kind === "command"
+      ? commands
+          .filter((c) => {
+            const q = picker.query.toLowerCase();
+            return (
+              c.name.toLowerCase().includes(q) ||
+              (c.description?.toLowerCase().includes(q) ?? false)
+            );
+          })
+          .slice(0, 8)
+      : [];
+
+  // The active list length drives keyboard navigation regardless of which picker
+  // is open.
+  const activeCount =
+    picker?.kind === "command" ? filteredCommands.length : filteredMentions.length;
 
   function selectCandidate(c: MentionCandidate) {
     if (!picker) return;
@@ -141,9 +174,26 @@ export function MessageComposer({
     );
     setPicker(null);
     requestAnimationFrame(() => {
-      const pos = picker.at + c.label.length + 2; // "@label "
+      const newPos = picker.at + c.label.length + 2; // "@label "
       el?.focus();
-      el?.setSelectionRange(pos, pos);
+      el?.setSelectionRange(newPos, newPos);
+      adjustHeight();
+    });
+  }
+
+  // Insert "/name " at the active "/" trigger. Commands are not routed like
+  // mentions — they live inline in the message text for the bot to interpret.
+  function selectCommand(c: CommandCandidate) {
+    if (!picker) return;
+    const el = textareaRef.current;
+    const caret = el?.selectionStart ?? text.length;
+    const next = text.slice(0, picker.at) + `/${c.name} ` + text.slice(caret);
+    setText(next);
+    setPicker(null);
+    requestAnimationFrame(() => {
+      const newPos = picker.at + c.name.length + 2; // "/name "
+      el?.focus();
+      el?.setSelectionRange(newPos, newPos);
       adjustHeight();
     });
   }
@@ -179,23 +229,24 @@ export function MessageComposer({
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (picker && filtered.length) {
+    if (picker && activeCount) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setPicker({ ...picker, index: (picker.index + 1) % filtered.length });
+        setPicker({ ...picker, index: (picker.index + 1) % activeCount });
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
         setPicker({
           ...picker,
-          index: (picker.index - 1 + filtered.length) % filtered.length,
+          index: (picker.index - 1 + activeCount) % activeCount,
         });
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        selectCandidate(filtered[picker.index]);
+        if (picker.kind === "command") selectCommand(filteredCommands[picker.index]);
+        else selectCandidate(filteredMentions[picker.index]);
         return;
       }
       if (e.key === "Escape") {
@@ -225,9 +276,9 @@ export function MessageComposer({
 
   return (
     <div className="px-4 pb-4 pt-2 relative">
-      {picker && filtered.length > 0 && (
+      {picker?.kind === "mention" && filteredMentions.length > 0 && (
         <div className="absolute bottom-full left-4 right-4 mb-2 max-h-60 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl z-10">
-          {filtered.map((c, i) => (
+          {filteredMentions.map((c, i) => (
             <button
               key={c.id}
               onMouseDown={(e) => {
@@ -258,6 +309,14 @@ export function MessageComposer({
             </button>
           ))}
         </div>
+      )}
+
+      {picker?.kind === "command" && filteredCommands.length > 0 && (
+        <CommandPalette
+          commands={filteredCommands}
+          activeIndex={picker.index}
+          onSelect={selectCommand}
+        />
       )}
 
       {(attachments.length > 0 || uploading) && (
@@ -355,7 +414,8 @@ export function MessageComposer({
       <p className="text-[11px] text-zinc-600 mt-1.5 px-1">
         <kbd className="font-mono">Enter</kbd> to send ·{" "}
         <kbd className="font-mono">Shift+Enter</kbd> for new line ·{" "}
-        <kbd className="font-mono">@</kbd> to mention
+        <kbd className="font-mono">@</kbd> to mention ·{" "}
+        <kbd className="font-mono">/</kbd> for commands
       </p>
     </div>
   );

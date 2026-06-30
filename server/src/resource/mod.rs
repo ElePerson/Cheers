@@ -1,10 +1,13 @@
 pub mod activity;
 pub mod channel_info;
+pub mod commands;
 pub mod context;
 pub mod files;
 pub mod fs;
 pub mod members;
 pub mod messages;
+pub mod plan;
+pub mod usage;
 
 use serde_json::{json, Value};
 use sqlx::{PgPool, Row};
@@ -87,6 +90,11 @@ pub async fn dispatch(db: &PgPool, principal: Principal, frame: &Value) -> Value
         "channel.messages.by-seq" => messages::handle_by_seq(db, &principal, &params).await,
         "fs.ls" => fs::handle_ls(db, &principal, &params).await,
         "fs.read" => fs::handle_read(db, &principal, &params).await,
+
+        // ── Phase A：promoted session/update artifacts（计划/成本/命令读侧）──
+        "channel.plan.read" => plan::handle_read(db, &principal, &params).await,
+        "channel.usage.read" => usage::handle_read(db, &principal, &params).await,
+        "channel.commands.read" => commands::handle_read(db, &principal, &params).await,
 
         // ── 写操作（频道成员 role 可写）────────────────────────────────
         "channel.messages.create" => messages::handle_create(db, &principal, &params).await,
