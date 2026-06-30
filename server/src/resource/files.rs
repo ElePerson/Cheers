@@ -10,8 +10,9 @@ use super::{
     authorize_channel_read, authorize_channel_write, not_found, Principal, ResourceResult,
 };
 
-/// Largest chat-file content returned inline to the agent (matches the workspace cap).
-/// Bigger files are truncated — the agent should download via `download_url` instead.
+/// Largest chat-file content returned inline as decoded text (matches the workspace cap).
+/// Bigger text is truncated; re-open with `as_base64:true` for the exact bytes (up to
+/// `MAX_DELIVER_BYTES`). `download_url` is a human-UI endpoint the agent cannot authenticate.
 const TEXT_CAP: usize = 256 * 1024;
 
 /// Largest file an agent may deliver inline (base64) via `inbox_deliver`. Bigger files should go
@@ -117,8 +118,10 @@ fn is_text(content_type: Option<&str>, filename: Option<&str>) -> bool {
 }
 
 /// channel.files.read (Inbox `inbox_open`): read one chat file's content by file_id,
-/// scoped to the channel. Text files return `content`; binaries (image/pdf/...) return a
-/// `kind:"binary"` marker + summary + download_url — never raw bytes decoded as text.
+/// scoped to the channel. Text files return `content`; binaries (image/pdf/zip/...) return a
+/// `kind:"binary"` marker + summary, and — when called with `as_base64:true` — the raw bytes
+/// base64-encoded (capped at `MAX_DELIVER_BYTES`). The bridge is how an external agent gets a
+/// binary's content: it has no gateway HTTP session, so it cannot authenticate `download_url`.
 pub async fn handle_read(db: &PgPool, principal: &Principal, params: &Value) -> ResourceResult {
     let channel_id: Uuid = params
         .get("channel_id")
@@ -184,17 +187,47 @@ pub async fn handle_read(db: &PgPool, principal: &Principal, params: &Value) -> 
     // Returning kind:"binary" here would tell the agent to give up and download a text file.
     let Some((client, default_bucket)) = S3.get() else {
         return with(json!({ "content": null, "kind": "unavailable", "truncated": false,
-            "note": "object storage temporarily unavailable; retry or use download_url" }));
+            "note": "object storage temporarily unavailable; retry shortly" }));
     };
 
-    if !is_text(content_type.as_deref(), filename.as_deref()) {
+    // Whether the caller wants the raw bytes (base64) instead of decoded text. This is the only
+    // way an external agent can pull a binary attachment's content: it talks to the gateway over
+    // the MCP/WebSocket bridge, not an HTTP session, so it cannot authenticate the REST
+    // download_url. Symmetric with inbox_deliver, which already carries <=8MB the other way.
+    let as_base64 = params
+        .get("as_base64")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let binary = !is_text(content_type.as_deref(), filename.as_deref());
+
+    // Binary file, and the agent hasn't asked for bytes yet: hand back a marker that says how to
+    // actually fetch the content through THIS tool. Never tell it to "use download_url" — that is
+    // an authenticated human/UI endpoint, and pointing an agent at it just sends it chasing a 401.
+    if binary && !as_base64 {
         return with(json!({ "content": null, "kind": "binary", "truncated": false, "summary": summary,
-            "note": "binary file (image/pdf/docx/...); not readable as text — use download_url" }));
+            "note": "binary file (image/pdf/zip/docx/...). Re-open with as_base64:true to get the raw bytes as base64 (<=8MB) through this tool, then decode locally. download_url is for the human UI only — you cannot authenticate it." }));
     }
 
     let bucket = storage_bucket.unwrap_or_else(|| default_bucket.clone());
     match crate::infra::s3::get_object(client, &bucket, &object_key).await {
         Ok(bytes) => {
+            if as_base64 {
+                // Return the exact bytes as base64 (no utf-8 lossy / truncation). Capped at the
+                // same 8MB ceiling as inbox_deliver so a huge file can't blow the bridge frame.
+                if bytes.len() > MAX_DELIVER_BYTES {
+                    return with(json!({ "content": null, "kind": "binary", "truncated": true,
+                        "size_bytes": bytes.len(), "summary": summary,
+                        "note": format!(
+                            "file is {} bytes, over the {}MB inline cap — too large to return as base64 through the agent bridge",
+                            bytes.len(),
+                            MAX_DELIVER_BYTES / (1024 * 1024)
+                        ) }));
+                }
+                let returned_bytes = bytes.len();
+                let data_b64 = STANDARD.encode(&bytes);
+                return with(json!({ "content": null, "kind": "binary", "encoding": "base64",
+                    "data_b64": data_b64, "returned_bytes": returned_bytes, "truncated": false }));
+            }
             // Cut at TEXT_CAP, then back off to a UTF-8 char boundary so the last multibyte
             // character isn't split into a U+FFFD replacement char.
             let mut end = bytes.len().min(TEXT_CAP);
