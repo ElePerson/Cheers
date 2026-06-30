@@ -1,5 +1,5 @@
 use chrono::Utc;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -68,6 +68,9 @@ fn fallback_task_id(scope_type: &str, scope_id: &str, provided: Option<&str>) ->
 #[derive(Debug)]
 pub struct SessionHandle {
     pub session_id: Uuid,
+    /// The connector resume key for this session (scope-derived for the primary,
+    /// `cheers:session:{id}` for an "other" session).
+    pub provider_session_key: String,
 }
 
 /// 依据 provider 维度创建/复用 session，并绑定当前 scope。
@@ -142,7 +145,142 @@ pub async fn acquire_scope_session(
 
     Ok(SessionHandle {
         session_id: session_uuid,
+        provider_session_key: provider_session_key.to_string(),
     })
+}
+
+/// Create an additional ("other") session bound to a channel, keyed by its own
+/// `session_id` (`cheers:session:{id}`) so it's addressed independently of the
+/// channel's primary. Topic-free: extras are distinguished by session_id + the
+/// non-primary binding role, never by a label.
+pub async fn create_channel_session(
+    db: &PgPool,
+    bot_id: Uuid,
+    provider_account_id: &str,
+    channel_id: &str,
+    role: &str,
+) -> Result<SessionHandle, AppError> {
+    let provider_account_id = provider_account_id.trim();
+    if provider_account_id.is_empty() {
+        return Err(AppError::BadRequest("provider_account_id can not be empty".into()));
+    }
+    let channel_id = channel_id.trim();
+    if channel_id.is_empty() {
+        return Err(AppError::BadRequest("channel_id can not be empty".into()));
+    }
+    let session_uuid = Uuid::new_v4();
+    let provider_session_key = format!("cheers:session:{session_uuid}");
+    let now = Utc::now();
+    sqlx::query(
+        "INSERT INTO cheers_sessions (
+            session_id, bot_id, provider, provider_account_id, provider_agent_id,
+            provider_session_key, provider_session_id, current_scope_type, current_scope_id,
+            status, metadata, last_used_at, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, '{}'::jsonb, $10, $10, $10)",
+    )
+    .bind(session_uuid.to_string())
+    .bind(bot_id.to_string())
+    .bind(PROVIDER)
+    .bind(provider_account_id)
+    .bind(PROVIDER_AGENT_ID)
+    .bind(&provider_session_key)
+    .bind(SESSION_SCOPE_CHANNEL)
+    .bind(channel_id)
+    .bind(SESSION_STATUS_IDLE)
+    .bind(now)
+    .execute(db)
+    .await
+    .map_err(AppError::Db)?;
+
+    upsert_session_binding(
+        db,
+        &session_uuid,
+        bot_id,
+        provider_account_id,
+        SESSION_SCOPE_CHANNEL,
+        channel_id,
+        None,
+        role,
+    )
+    .await?;
+
+    Ok(SessionHandle {
+        session_id: session_uuid,
+        provider_session_key,
+    })
+}
+
+/// A channel's sessions for a bot (primary first), for the session switcher.
+pub async fn list_channel_sessions(
+    db: &PgPool,
+    bot_id: Uuid,
+    channel_id: &str,
+) -> Result<Vec<Value>, AppError> {
+    let rows = sqlx::query(
+        // No detached_at filter: bindings are detached on every finalize, but an
+        // idle session stays addressable. Exclude only truly-closed sessions.
+        "SELECT s.session_id, b.role, s.status, s.provider_session_key, s.last_used_at
+         FROM cheers_session_bindings b
+         JOIN cheers_sessions s ON s.session_id = b.session_id
+         WHERE b.bot_id = $1 AND b.scope_type = $2 AND b.scope_id = $3
+           AND s.status NOT IN ('terminated', 'revoked', 'expired')
+         ORDER BY (b.role = 'primary') DESC, s.last_used_at DESC",
+    )
+    .bind(bot_id.to_string())
+    .bind(SESSION_SCOPE_CHANNEL)
+    .bind(channel_id)
+    .fetch_all(db)
+    .await
+    .map_err(AppError::Db)?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let role: String = r.try_get("role").unwrap_or_default();
+            json!({
+                "session_id": r.try_get::<String, _>("session_id").unwrap_or_default(),
+                "role": role.clone(),
+                "is_primary": role == "primary",
+                "status": r.try_get::<String, _>("status").unwrap_or_default(),
+                "last_used_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("last_used_at")
+                    .map(|t| t.to_rfc3339()).unwrap_or_default(),
+            })
+        })
+        .collect())
+}
+
+/// Resolve a session targeted by a message, verifying it is bound to the given
+/// channel (so a message can't target a session from another channel). Returns
+/// `(bot_id, provider_session_key)` to dispatch with.
+pub async fn resolve_channel_session(
+    db: &PgPool,
+    channel_id: &str,
+    session_id: Uuid,
+) -> Result<(Uuid, String), AppError> {
+    let row = sqlx::query(
+        "SELECT s.bot_id, s.provider_session_key
+         FROM cheers_session_bindings b
+         JOIN cheers_sessions s ON s.session_id = b.session_id
+         WHERE b.scope_type = $1 AND b.scope_id = $2
+           AND b.session_id = $3
+           AND s.status NOT IN ('terminated', 'revoked', 'expired')
+         LIMIT 1",
+    )
+    .bind(SESSION_SCOPE_CHANNEL)
+    .bind(channel_id)
+    .bind(session_id.to_string())
+    .fetch_optional(db)
+    .await
+    .map_err(AppError::Db)?
+    .ok_or(AppError::NotFound)?;
+    let bot_id = row
+        .try_get::<String, _>("bot_id")
+        .ok()
+        .and_then(|v| Uuid::parse_str(&v).ok())
+        .ok_or(AppError::NotFound)?;
+    let key = row
+        .try_get::<String, _>("provider_session_key")
+        .map_err(|_| AppError::NotFound)?;
+    Ok((bot_id, key))
 }
 
 async fn upsert_session_binding(
@@ -163,7 +301,8 @@ async fn upsert_session_binding(
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()
         )
-        ON CONFLICT ON CONSTRAINT uq_cheers_session_binding_scope
+        ON CONFLICT (bot_id, provider, provider_agent_id, provider_account_id, scope_type, scope_id)
+        WHERE role = 'primary'
         DO UPDATE SET
             session_id = EXCLUDED.session_id,
             role = EXCLUDED.role,

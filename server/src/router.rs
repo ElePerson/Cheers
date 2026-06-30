@@ -191,6 +191,11 @@ fn build_authed_routes(state: AppState) -> Router<AppState> {
             "/api/v1/channels/:channel_id/messages/:msg_id/cancel",
             post(api::messages::cancel_message),
         )
+        // ── Per-channel sessions: primary + other (docs/arch/SESSION_MODEL.md) ─
+        .route(
+            "/api/v1/channels/:channel_id/bots/:bot_id/sessions",
+            get(api::session_control::list_sessions).post(api::session_control::create_session),
+        )
         // ── ACP per-operation approval (docs/arch/ACP_APPROVAL_FLOW.md) ──────
         .route(
             "/api/v1/channels/:channel_id/permissions/:request_id/resolve",
