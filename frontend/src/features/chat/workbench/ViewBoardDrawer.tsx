@@ -10,6 +10,7 @@ import { getViewBoards, type ViewBoardContext } from "./viewBoard";
 // Built-in boards register themselves on import (side effect).
 import "./panels/PlanBoardPanel";
 import "./panels/CostPanel";
+import "./panels/SessionsPanel";
 
 interface Props {
   open: boolean;
