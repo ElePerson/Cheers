@@ -27,6 +27,10 @@ pub struct SendMessageRequest {
     pub file_ids: Vec<String>,
     #[serde(default)]
     pub mention_ids: Vec<Uuid>,
+    /// Optional: route the prompt to a specific "other" session in this channel
+    /// (else the channel's primary session).
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
 }
 
 pub async fn send_message(
@@ -79,6 +83,7 @@ pub async fn send_message(
             reply_to_msg_id: body.reply_to_msg_id,
             file_ids: body.file_ids,
             mention_ids: body.mention_ids,
+            session_id: body.session_id,
         },
     )
     .await?;

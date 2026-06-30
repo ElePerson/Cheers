@@ -10,6 +10,7 @@ pub mod friends;
 pub mod mcp;
 pub mod messages;
 pub mod middleware;
+pub mod session_control;
 pub mod users;
 pub mod workbench;
 pub mod workspace;

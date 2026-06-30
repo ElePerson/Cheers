@@ -41,6 +41,9 @@ pub struct CreateMessageParams {
     pub reply_to_msg_id: Option<Uuid>,
     pub file_ids: Vec<String>,
     pub mention_ids: Vec<Uuid>,
+    /// Target a specific "other" session (else the channel's primary). Must be a
+    /// session bound to this channel; it determines which bot is prompted.
+    pub session_id: Option<Uuid>,
 }
 
 pub async fn create_message(
@@ -180,7 +183,21 @@ pub async fn create_message(
     info!(message_id = %msg_id, channel_id = %params.channel_id, "message fanout broadcast dispatched");
 
     // ── 5. 解析 bot 触发，派发 task ───────────────────────────────────
-    let bots = resolve_bot_triggers(db, params.channel_id, &mentions).await;
+    // A `session_id` targets a specific "other" session in this channel; it
+    // overrides mention-based routing and determines which bot is prompted.
+    let targeted_session = match params.session_id {
+        Some(sid) => {
+            let (bot, key) = sessions::resolve_channel_session(db, &params.channel_id.to_string(), sid)
+                .await
+                .map_err(|_| AppError::BadRequest("session not found in this channel".into()))?;
+            Some((bot, sid, key))
+        }
+        None => None,
+    };
+    let bots = match &targeted_session {
+        Some((bot, _, _)) => vec![*bot],
+        None => resolve_bot_triggers(db, params.channel_id, &mentions).await,
+    };
     info!(message_id = %msg_id, matched_bots = bots.len(), "resolved bot triggers");
     // Sender's channel role (for the INITIATE matrix); default 'member'.
     let sender_role: String = sqlx::query(
@@ -221,34 +238,42 @@ pub async fn create_message(
             continue;
         }
 
-        // Session is scoped per CHANNEL (not per workspace): each channel gets its
-        // own live ACP session for the bot, so a per-channel mode/config change can
-        // be isolated. The key is scope-derived (stable across turns) because the
-        // binding is detached on finalize — resume dedups on this key.
-        let provider_session_key = provider_session_key_for_bot_channel(params.channel_id, bot_id);
-        let provider_account_id = resolve_provider_account_id_for_bot(db, bot_id)
-            .await
-            .unwrap_or_else(|_| bot_id.to_string());
-        let session = sessions::acquire_scope_session(
-            db,
-            bot_id,
-            &provider_account_id,
-            &provider_session_key,
-            sessions::SESSION_SCOPE_CHANNEL,
-            &params.channel_id.to_string(),
-            None,
-            "primary",
-        )
-        .await;
-
-        if let Err(e) = &session {
-            warn!(
-                bot_id = %bot_id,
-                channel_id = %params.channel_id,
-                err = %e,
-                "session acquire failed, fallback to unbound task dispatch"
-            );
-        }
+        // Resolve the session to prompt. A targeted "other" session reuses its
+        // own key (cheers:session:{id}); otherwise the channel PRIMARY session is
+        // acquired (scope-derived stable key, resumed across turns).
+        let (provider_session_key, resolved_session_id) = match &targeted_session {
+            Some((_, sid, key)) => {
+                let _ = sessions::touch_session(db, *sid).await;
+                (key.clone(), Some(*sid))
+            }
+            None => {
+                let provider_session_key =
+                    provider_session_key_for_bot_channel(params.channel_id, bot_id);
+                let provider_account_id = resolve_provider_account_id_for_bot(db, bot_id)
+                    .await
+                    .unwrap_or_else(|_| bot_id.to_string());
+                let session = sessions::acquire_scope_session(
+                    db,
+                    bot_id,
+                    &provider_account_id,
+                    &provider_session_key,
+                    sessions::SESSION_SCOPE_CHANNEL,
+                    &params.channel_id.to_string(),
+                    None,
+                    "primary",
+                )
+                .await;
+                if let Err(e) = &session {
+                    warn!(
+                        bot_id = %bot_id,
+                        channel_id = %params.channel_id,
+                        err = %e,
+                        "session acquire failed, fallback to unbound task dispatch"
+                    );
+                }
+                (provider_session_key, session.ok().map(|s| s.session_id))
+            }
+        };
 
         let result = dispatcher::dispatch(
             db,
@@ -262,7 +287,7 @@ pub async fn create_message(
                 channel_id: params.channel_id,
                 depth: 0,
                 provider_session_key,
-                session_id: session.ok().map(|session| session.session_id),
+                session_id: resolved_session_id,
             },
         )
         .await;
@@ -280,7 +305,7 @@ fn provider_session_key_for_bot_channel(channel_id: Uuid, bot_id: Uuid) -> Strin
     format!("cheers:channel:{channel_id}:bot:{bot_id}")
 }
 
-async fn resolve_provider_account_id_for_bot(
+pub async fn resolve_provider_account_id_for_bot(
     db: &PgPool,
     bot_id: Uuid,
 ) -> Result<String, AppError> {
