@@ -691,6 +691,29 @@ async fn handle_acp_event_frame(frame: &Value, state: &AppState, bot: &BotInfo) 
     {
         tracing::warn!(bot_id = %bot.bot_id, %name, error = %err, "acp_event log write failed");
     }
+
+    // ── Phase A: promote the three artifact updates (plan / usage / available
+    // commands) into typed, queryable storage. The parse layer is shared
+    // (domain::acp_session_updates); each store is per-feature and best-effort —
+    // it swallows its own errors so the live turn is never disrupted. ──
+    if let Some(parsed) = crate::domain::acp_session_updates::parse(name, &payload) {
+        use crate::domain::acp_session_updates::ParsedUpdate;
+        let channel_id = frame.get("channel_id").and_then(Value::as_str);
+        let session_id = frame.get("session_id").and_then(Value::as_str);
+        let bot_id = bot.bot_id.to_string();
+        match parsed {
+            ParsedUpdate::AvailableCommands(ac) => {
+                crate::domain::commands_store::record(&state.db, channel_id, &bot_id, session_id, &ac)
+                    .await
+            }
+            ParsedUpdate::Plan(p) => {
+                crate::domain::plan_store::record(&state.db, channel_id, &bot_id, session_id, &p).await
+            }
+            ParsedUpdate::Usage(u) => {
+                crate::domain::usage_store::record(&state.db, channel_id, &bot_id, session_id, &u).await
+            }
+        }
+    }
 }
 
 /// 记录 agent 进度（trace）并 fan-out 一个 `bot_trace` 帧给频道内浏览器。

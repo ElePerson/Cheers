@@ -165,6 +165,7 @@ async fn flow2_create_message_assigns_contiguous_seq_and_since_seq_backfills(db:
                 reply_to_msg_id: None,
                 file_ids: vec![],
                 mention_ids: vec![],
+                session_id: None, // 默认 = 频道 primary session（本测试不针对 other session）
             },
         )
         .await
@@ -920,4 +921,123 @@ async fn m3_inbox_deliver_validates_and_requires_storage(db: PgPool) {
         "channel_id": ch, "filename": "r.txt", "data_b64": "aGVsbG8=" // "hello"
     })).await;
     assert_eq!(nostore.unwrap_err().0, "E_STORAGE_UNAVAILABLE");
+}
+
+// ── Phase A：promoted session/update artifacts（plan / usage / commands）─────────
+//
+// 验证 domain::{plan_store,usage_store,commands_store}::record（写）→ resource verb
+// handle_read（读）整链在真实 Postgres 上的行为（M2 门：每个功能一条集成测试）。
+// 重点钉死 usage 的 SUM::bigint：Postgres SUM(bigint) 返回 NUMERIC，若不 cast 回
+// bigint，sqlx 无 i64 Decode → 静默解码失败被吞成 null（token 总计永远显示 —）。
+use server::domain::acp_session_updates::{
+    AvailableCommand, AvailableCommands, Plan, PlanEntry, Usage,
+};
+use server::domain::{commands_store, plan_store, usage_store};
+
+#[sqlx::test]
+async fn phasea_usage_read_sums_tokens_as_i64(db: PgPool) {
+    let ws = seed_workspace(&db).await;
+    let ch = seed_channel(&db, ws).await;
+    let bot = seed_bot(&db).await;
+    add_member(&db, ch, bot, "bot").await;
+    let cid = ch.to_string();
+    let bid = bot.to_string();
+
+    usage_store::record(&db, Some(&cid), &bid, Some("s1"), &Usage {
+        input_tokens: Some(100), output_tokens: Some(40), total_tokens: Some(140),
+        context_window: Some(200_000), cost_usd: Some(0.5),
+    }).await;
+    usage_store::record(&db, Some(&cid), &bid, Some("s1"), &Usage {
+        input_tokens: Some(200), output_tokens: Some(60), total_tokens: Some(260),
+        context_window: Some(190_000), cost_usd: Some(1.0),
+    }).await;
+
+    let r = dispatch(&db, Principal::bot(bot),
+        &req("channel.usage.read", serde_json::json!({ "channel_id": cid }))).await;
+    assert_eq!(r["ok"], true, "usage.read 应成功: {r}");
+    let bots = r["data"]["bots"].as_array().unwrap();
+    assert_eq!(bots.len(), 1, "一个 bot 一行");
+    let b = &bots[0];
+    assert_eq!(b["bot_id"].as_str(), Some(bid.as_str()));
+    // 关键回归：SUM 必须解码为 i64（非 null）。修复前（无 ::bigint）这里全是 null。
+    assert_eq!(b["input_tokens"].as_i64(), Some(300), "input SUM 必须是 i64 300: {b}");
+    assert_eq!(b["output_tokens"].as_i64(), Some(100));
+    assert_eq!(b["total_tokens"].as_i64(), Some(400));
+    assert_eq!(b["cost_usd"].as_f64(), Some(1.5));
+    let cw = b["context_window"].as_i64().expect("context_window 非空");
+    assert!(cw == 200_000 || cw == 190_000, "context_window = 最新一行: {cw}");
+}
+
+#[sqlx::test]
+async fn phasea_usage_read_requires_membership(db: PgPool) {
+    let ws = seed_workspace(&db).await;
+    let ch = seed_channel(&db, ws).await;
+    let outsider = seed_bot(&db).await; // 不加入频道
+    let r = dispatch(&db, Principal::bot(outsider),
+        &req("channel.usage.read", serde_json::json!({ "channel_id": ch.to_string() }))).await;
+    assert_eq!(r["ok"], false, "非成员应被拒: {r}");
+    assert_eq!(r["code"].as_str(), Some("NOT_MEMBER"));
+}
+
+#[sqlx::test]
+async fn phasea_plan_read_returns_progress_and_upserts(db: PgPool) {
+    let ws = seed_workspace(&db).await;
+    let ch = seed_channel(&db, ws).await;
+    let bot = seed_bot(&db).await;
+    add_member(&db, ch, bot, "bot").await;
+    let cid = ch.to_string();
+    let bid = bot.to_string();
+
+    plan_store::record(&db, Some(&cid), &bid, Some("sess-1"), &Plan {
+        entries: vec![
+            PlanEntry { content: "read".into(), priority: None, status: Some("completed".into()) },
+            PlanEntry { content: "write".into(), priority: Some("high".into()), status: Some("pending".into()) },
+        ],
+    }).await;
+    // 再次 record 同 (channel,bot,session) → latest-wins，仍一行、进度更新。
+    plan_store::record(&db, Some(&cid), &bid, Some("sess-1"), &Plan {
+        entries: vec![
+            PlanEntry { content: "read".into(), priority: None, status: Some("completed".into()) },
+            PlanEntry { content: "write".into(), priority: None, status: Some("completed".into()) },
+            PlanEntry { content: "test".into(), priority: None, status: Some("pending".into()) },
+        ],
+    }).await;
+
+    let r = dispatch(&db, Principal::bot(bot),
+        &req("channel.plan.read", serde_json::json!({ "channel_id": cid }))).await;
+    assert_eq!(r["ok"], true, "plan.read 应成功: {r}");
+    let plans = r["data"]["plans"].as_array().unwrap();
+    assert_eq!(plans.len(), 1, "upsert 应只有一行");
+    let p = &plans[0];
+    assert_eq!(p["session_id"].as_str(), Some("sess-1"));
+    assert_eq!(p["total"].as_i64(), Some(3));
+    assert_eq!(p["completed"].as_i64(), Some(2));
+    assert_eq!(p["entries"].as_array().unwrap().len(), 3);
+}
+
+#[sqlx::test]
+async fn phasea_commands_read_projects_name_and_description(db: PgPool) {
+    let ws = seed_workspace(&db).await;
+    let ch = seed_channel(&db, ws).await;
+    let bot = seed_bot(&db).await;
+    add_member(&db, ch, bot, "bot").await;
+    let cid = ch.to_string();
+
+    commands_store::record(&db, Some(&cid), &bot.to_string(), None, &AvailableCommands {
+        commands: vec![
+            AvailableCommand { name: "review".into(), description: Some("Review the diff".into()), input: None },
+            AvailableCommand { name: "test".into(), description: None, input: None },
+        ],
+    }).await;
+
+    let r = dispatch(&db, Principal::bot(bot),
+        &req("channel.commands.read", serde_json::json!({ "channel_id": cid }))).await;
+    assert_eq!(r["ok"], true, "commands.read 应成功: {r}");
+    let bots = r["data"]["bots"].as_array().unwrap();
+    assert_eq!(bots.len(), 1);
+    let cmds = bots[0]["commands"].as_array().unwrap();
+    assert_eq!(cmds.len(), 2);
+    assert_eq!(cmds[0]["name"].as_str(), Some("review"));
+    assert_eq!(cmds[0]["description"].as_str(), Some("Review the diff"));
+    assert_eq!(cmds[1]["name"].as_str(), Some("test"));
 }

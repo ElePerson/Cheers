@@ -10,6 +10,8 @@ import { listPlugins, type PluginMeta } from "./sandbox/api";
 import researchExample from "./examples/research.json";
 import "./lens/builtins";
 import "./panels/FilePanel";
+import "./panels/PlanBoardPanel";
+import "./panels/CostPanel";
 import "./environments";
 
 interface Props {

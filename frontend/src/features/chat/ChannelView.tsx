@@ -4,7 +4,11 @@ import { listMessages, sendMessage } from "@/api/messages";
 import { listChannelMembers, markChannelRead } from "@/api/channels";
 import { useChatStore } from "@/stores/chatStore";
 import { MessageList } from "./MessageList";
-import { MessageComposer, type MentionCandidate } from "./MessageComposer";
+import {
+  MessageComposer,
+  type MentionCandidate,
+  type CommandCandidate,
+} from "./MessageComposer";
 import { SessionSwitcher } from "./SessionSwitcher";
 import { ComposerBotSettings } from "./ComposerBotSettings";
 import { useChatRealtime } from "./hooks/useChatRealtime";
@@ -61,6 +65,9 @@ export function ChannelView({ channel }: Props) {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [mentionables, setMentionables] = useState<MentionCandidate[]>([]);
+  // Slash-commands advertised by the channel's bots (⑦ command palette). Flat
+  // list across all bots; refreshed on channel open and on reconnect catch-up.
+  const [commands, setCommands] = useState<CommandCandidate[]>([]);
   const [onlineCount, setOnlineCount] = useState(0);
   // Composer session target: "" = Auto (mention routing → primary); else a session_id.
   const [selectedSessionId, setSelectedSessionId] = useState("");
@@ -82,7 +89,15 @@ export function ChannelView({ channel }: Props) {
   useEffect(() => {
     setSelectedSessionId("");
     setMentionedBots([]);
+    setCommands([]);
   }, [channel?.channel_id]);
+
+  // Per-bot display label, so a command can show which bot advertised it.
+  const botLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of mentionables) if (m.type === "bot") map.set(m.id, m.label);
+    return map;
+  }, [mentionables]);
 
   // Highest delivered channel_seq, used as the reconnect/refresh catch-up cursor.
   const lastSeqRef = useRef(0);
@@ -223,15 +238,63 @@ export function ChannelView({ channel }: Props) {
     );
   }, []);
 
+  // Refresh the slash-command palette from `channel.commands.read`. Bot-produced
+  // command names/descriptions are untrusted — they only ever render as inert
+  // text in the picker. Best-effort: a failure just leaves the palette empty.
+  const sendResourceReqRef = useRef<
+    ((resource: string, params: Record<string, unknown>) => Promise<unknown>) | null
+  >(null);
+  const loadCommands = useCallback(async () => {
+    if (!channel) return;
+    const send = sendResourceReqRef.current;
+    if (!send) return;
+    try {
+      const res = (await send("channel.commands.read", {
+        channel_id: channel.channel_id,
+      })) as {
+        bots?: {
+          bot_id: string;
+          commands?: { name: string; description?: string | null }[];
+        }[];
+      };
+      const flat: CommandCandidate[] = (res.bots ?? []).flatMap((b) =>
+        (b.commands ?? []).map((c) => ({
+          name: c.name,
+          description: c.description ?? undefined,
+          botId: b.bot_id,
+          botLabel: botLabels.get(b.bot_id) || b.bot_id.slice(0, 8),
+        }))
+      );
+      setCommands(flat);
+    } catch {
+      /* best-effort; the composer just won't offer "/" commands */
+    }
+  }, [channel, botLabels]);
+
+  // Realtime "ready" → self-heal the message stream AND refresh the palette
+  // (a bot may have advertised new commands while we were away).
+  const handleReady = useCallback(() => {
+    void catchUp();
+    void loadCommands();
+  }, [catchUp, loadCommands]);
+
   const { sendResourceReq } = useChatRealtime(channel?.channel_id ?? null, {
     onMessage: handleMessage,
     onStreamDelta: handleStreamDelta,
     onStreamDone: handleStreamDone,
     onMessageDeleted: handleDeleted,
-    onReady: catchUp,
+    onReady: handleReady,
     onPresence: (_ids, count) => setOnlineCount(count),
     onBotTrace: handleBotTrace,
   });
+  // Keep a stable ref so loadCommands can reach the latest resource client
+  // without re-subscribing the realtime hook.
+  sendResourceReqRef.current = sendResourceReq;
+
+  // Re-flatten the palette when bot labels resolve after the initial fetch.
+  useEffect(() => {
+    void loadCommands();
+  }, [loadCommands]);
   const [wbOpen, setWbOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -413,6 +476,7 @@ export function ChannelView({ channel }: Props) {
         channelId={channel.channel_id}
         channelName={channel.name}
         mentionables={mentionables}
+        commands={commands}
         toolbar={
           <>
             <SessionSwitcher
