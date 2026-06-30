@@ -37,7 +37,8 @@ export function BotEventAccessSection({
   const [access, setAccess] = useState<EventAccess | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // add-override draft
-  const [ovUser, setOvUser] = useState("");
+  // override subject = "user:<id>" or "group:<ref>"
+  const [ovSubject, setOvSubject] = useState("");
   const [ovEvent, setOvEvent] = useState("");
   const [ovCap, setOvCap] = useState<Capability>("initiate");
   const [ovDecision, setOvDecision] = useState<"allow" | "deny">("allow");
@@ -97,13 +98,18 @@ export function BotEventAccessSection({
           })
     );
 
-  const userRules = (access?.rules ?? []).filter(
-    (r) => r.channel_id === scope && r.subject_kind === "user"
+  // Per-subject overrides = explicit user OR group rules at the current scope.
+  const subjectRules = (access?.rules ?? []).filter(
+    (r) => r.channel_id === scope && (r.subject_kind === "user" || r.subject_kind === "group")
   );
   const memberName = (uid: string) => {
     const m = members.find((x) => x.member_id === uid);
     return m?.display_name || m?.username || `${uid.slice(0, 8)}…`;
   };
+  const groupLabel = (ref: string) =>
+    access?.groups.find((g) => g.ref === ref)?.label || ref;
+  const subjectLabel = (kind: string, id: string) =>
+    kind === "group" ? groupLabel(id) : memberName(id);
 
   const allEvents = access
     ? Array.from(
@@ -188,118 +194,138 @@ export function BotEventAccessSection({
         </div>
       ))}
 
-      {/* Per-user overrides */}
+      {/* Per-subject overrides (specific user OR a dynamic group) */}
       <div>
         <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
-          Per-user overrides
+          Per-subject overrides — user or group
         </div>
-        {!scope ? (
-          <p className="text-[11px] text-zinc-600">Pick a channel to add per-user overrides.</p>
-        ) : (
-          <div className="space-y-1.5">
-            {userRules.length === 0 && (
-              <p className="text-[11px] text-zinc-600">No per-user overrides in this channel.</p>
-            )}
-            {userRules.map((r) => (
-              <div
-                key={`${r.subject_id}:${r.event_class}:${r.capability}`}
-                className="flex items-center gap-2 text-[11px] text-zinc-300"
+        <div className="space-y-1.5">
+          {subjectRules.length === 0 && (
+            <p className="text-[11px] text-zinc-600">
+              No overrides {scope ? "in this channel" : "(bot-wide)"} yet.
+            </p>
+          )}
+          {subjectRules.map((r) => (
+            <div
+              key={`${r.subject_kind}:${r.subject_id}:${r.event_class}:${r.capability}`}
+              className="flex items-center gap-2 text-[11px] text-zinc-300"
+            >
+              <span
+                className={`rounded px-1 py-0.5 text-[10px] border ${
+                  r.subject_kind === "group"
+                    ? "bg-violet-950/50 border-violet-900 text-violet-200"
+                    : "bg-indigo-950/60 border-indigo-900 text-indigo-200"
+                }`}
               >
-                <span className="text-zinc-200">{memberName(r.subject_id)}</span>
-                <code className="text-zinc-500">{r.capability}</code>
-                <code className="text-zinc-500">{r.event_class}</code>
-                <span className={r.decision === "allow" ? "text-emerald-300" : "text-red-300"}>
-                  {r.decision}
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    run(`rm:${r.subject_id}:${r.event_class}:${r.capability}`, () =>
-                      deleteEventRule(botId, {
-                        channel_id: scope || undefined,
-                        subject_kind: "user" as SubjectKind,
-                        subject_id: r.subject_id,
-                        event_class: r.event_class,
-                        capability: r.capability,
-                      })
-                    )
-                  }
-                  className="text-zinc-600 hover:text-red-300"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-            {/* add override */}
-            <div className="flex flex-wrap items-center gap-1.5 pt-1">
-              <select
-                value={ovUser}
-                onChange={(e) => setOvUser(e.target.value)}
-                className="rounded-md bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300"
-              >
-                <option value="">user…</option>
-                {members.map((m) => (
-                  <option key={m.member_id} value={m.member_id}>
-                    {m.display_name || m.username}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={ovCap}
-                onChange={(e) => {
-                  setOvCap(e.target.value as Capability);
-                  setOvEvent("");
-                }}
-                className="rounded-md bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300"
-              >
-                <option value="initiate">initiate</option>
-                <option value="see">see</option>
-                <option value="respond">respond</option>
-              </select>
-              <select
-                value={ovEvent}
-                onChange={(e) => setOvEvent(e.target.value)}
-                className="rounded-md bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300"
-              >
-                <option value="">event…</option>
-                {capEvents(ovCap).map((ec) => (
-                  <option key={ec} value={ec}>
-                    {ec}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={ovDecision}
-                onChange={(e) => setOvDecision(e.target.value as "allow" | "deny")}
-                className="rounded-md bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300"
-              >
-                <option value="allow">allow</option>
-                <option value="deny">deny</option>
-              </select>
+                {r.subject_kind}
+              </span>
+              <span className="text-zinc-200">{subjectLabel(r.subject_kind, r.subject_id)}</span>
+              <code className="text-zinc-500">{r.capability}</code>
+              <code className="text-zinc-500">{r.event_class}</code>
+              <span className={r.decision === "allow" ? "text-emerald-300" : "text-red-300"}>
+                {r.decision}
+              </span>
               <button
                 type="button"
-                disabled={!ovUser || !ovEvent || busy === "addov"}
                 onClick={() =>
-                  run("addov", async () => {
-                    await upsertEventRule(botId, {
+                  run(`rm:${r.subject_id}:${r.event_class}:${r.capability}`, () =>
+                    deleteEventRule(botId, {
                       channel_id: scope || undefined,
-                      subject_kind: "user",
-                      subject_id: ovUser,
-                      event_class: ovEvent,
-                      capability: ovCap,
-                      decision: ovDecision,
-                    });
-                    setOvUser("");
-                    setOvEvent("");
-                  })
+                      subject_kind: r.subject_kind,
+                      subject_id: r.subject_id,
+                      event_class: r.event_class,
+                      capability: r.capability,
+                    })
+                  )
                 }
-                className="rounded-md border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                className="text-zinc-600 hover:text-red-300"
               >
-                + add
+                <X className="w-3 h-3" />
               </button>
             </div>
+          ))}
+          {/* add override: subject (group always; users need a channel scope) */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <select
+              value={ovSubject}
+              onChange={(e) => setOvSubject(e.target.value)}
+              className="rounded-md bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300"
+            >
+              <option value="">subject…</option>
+              <optgroup label="Groups">
+                {access.groups.map((g) => (
+                  <option key={g.ref} value={`group:${g.ref}`}>
+                    {g.label}
+                  </option>
+                ))}
+              </optgroup>
+              {scope && (
+                <optgroup label="Users (channel members)">
+                  {members.map((m) => (
+                    <option key={m.member_id} value={`user:${m.member_id}`}>
+                      {m.display_name || m.username}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <select
+              value={ovCap}
+              onChange={(e) => {
+                setOvCap(e.target.value as Capability);
+                setOvEvent("");
+              }}
+              className="rounded-md bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300"
+            >
+              <option value="initiate">initiate</option>
+              <option value="see">see</option>
+              <option value="respond">respond</option>
+            </select>
+            <select
+              value={ovEvent}
+              onChange={(e) => setOvEvent(e.target.value)}
+              className="rounded-md bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300"
+            >
+              <option value="">event…</option>
+              {capEvents(ovCap).map((ec) => (
+                <option key={ec} value={ec}>
+                  {ec}
+                </option>
+              ))}
+            </select>
+            <select
+              value={ovDecision}
+              onChange={(e) => setOvDecision(e.target.value as "allow" | "deny")}
+              className="rounded-md bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300"
+            >
+              <option value="allow">allow</option>
+              <option value="deny">deny</option>
+            </select>
+            <button
+              type="button"
+              disabled={!ovSubject || !ovEvent || busy === "addov"}
+              onClick={() =>
+                run("addov", async () => {
+                  const [kind, ...rest] = ovSubject.split(":");
+                  const id = rest.join(":");
+                  await upsertEventRule(botId, {
+                    channel_id: scope || undefined,
+                    subject_kind: kind as SubjectKind,
+                    subject_id: id,
+                    event_class: ovEvent,
+                    capability: ovCap,
+                    decision: ovDecision,
+                  });
+                  setOvSubject("");
+                  setOvEvent("");
+                })
+              }
+              className="rounded-md border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+            >
+              + add
+            </button>
           </div>
-        )}
+        </div>
       </div>
       {allEvents.length === 0 && (
         <p className="text-[11px] text-zinc-600">No event vocabulary returned.</p>

@@ -225,7 +225,13 @@ export async function revokeBotApprover(
 // authorization, subject = channel role (with per-user overrides).
 
 export type Capability = "initiate" | "see" | "respond";
-export type SubjectKind = "role" | "user";
+export type SubjectKind = "role" | "user" | "group";
+
+/** A selectable dynamic-group subject (friends / channel:<id> / workspace:<id>). */
+export interface GroupRef {
+  ref: string;
+  label: string;
+}
 
 export interface EventRule {
   channel_id: string; // "" = bot-wide
@@ -243,6 +249,8 @@ export interface EventAccess {
   initiate_events: string[];
   see_events: string[];
   respond_events: string[];
+  /** Selectable group subjects (friends / channel / workspace) for overrides. */
+  groups: GroupRef[];
 }
 
 /** Owner/admin: read the event-access rules + the event vocabulary. */
