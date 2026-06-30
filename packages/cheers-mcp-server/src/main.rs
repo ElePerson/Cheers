@@ -137,6 +137,7 @@ fn initialize_result() -> Value {
         "instructions": "You have two separate places for files in each channel, and they are DIFFERENT:\n\
             • DESK (desk_* tools) = YOUR private, editable workspace — notes, boards, plans, prompts — addressed by PATH (e.g. \"progress.md\"). You read and write these freely.\n\
             • INBOX (inbox_* tools) = files PEOPLE uploaded in the chat (PDF, CSV, images), addressed by FILE_ID (a uuid). They are READ-ONLY and you can never edit them. To hand a finished file back to people as a new attachment, use inbox_deliver (not desk_write — desk files are your private workspace).\n\
+            NEVER fetch the gateway HTTP API yourself. Attachments may carry a download_url / preview_url (e.g. /api/v1/files/.../download) — those are links for the HUMAN web UI only. You have NO gateway HTTP session, so curl/wget/HTTP requests to them return 401. The ONLY way to read an attachment's content is inbox_open (add as_base64:true for binaries like pdf/zip/images, then decode the base64 locally — e.g. write it to a file and unzip). Do not go looking for a gateway URL or token in the environment.\n\
             Rule of thumb: if you're thinking in a PATH it's the desk; if you're holding a FILE_ID it's the inbox. Never desk_write a file_id, and never inbox_open a path. To work on an uploaded file, inbox_open it, then desk_write its content into your workspace."
     })
 }
@@ -303,6 +304,7 @@ fn build_resource_call(
                 Value::String(client.resolve_channel(args)?),
             );
             copy_required(args, &mut params, "file_id", "file_id")?;
+            copy_optional(args, &mut params, "as_base64", "as_base64");
             Ok(ResourceCall {
                 resource: "channel.files.read",
                 params,
@@ -537,9 +539,10 @@ fn tool_definitions() -> Vec<Value> {
         ], vec!["channel_id"]), true, false),
         tool("get_context", "Get channel context", "Condensed channel context bundle (topic, pinned info, summary).", object_schema(vec![channel_id_prop()], vec!["channel_id"]), true, false),
         tool("inbox_list", "List chat attachments (inbox)", "List files people UPLOADED to this channel's chat (pdf/csv/images/docx). Each has a FILE_ID (uuid); open one with inbox_open. Read-only; these are NOT your workspace files — save your own work with desk_* instead.", object_schema(vec![channel_id_prop()], vec!["channel_id"]), true, false),
-        tool("inbox_open", "Open a chat attachment by file_id", "Open a channel attachment by its FILE_ID (from inbox_list). Text files (csv/txt/md/json) return content; binaries (image/pdf/docx) return kind:\"binary\" + a download_url, never raw bytes. Attachments are read-only — to edit, copy the content into your workspace with desk_write.", object_schema(vec![
+        tool("inbox_open", "Open a chat attachment by file_id", "Open a channel attachment by its FILE_ID (from inbox_list). Text files (csv/txt/md/json) return content directly. Binaries (image/pdf/zip/docx) first return kind:\"binary\"; re-open with as_base64:true to get the raw bytes as base64 (<=8MB) through THIS tool, then decode them locally (e.g. write to a file and unzip). Do NOT try to fetch download_url yourself — it is an authenticated human-UI endpoint and you have no gateway session for it (you would just get 401). Attachments are read-only — to edit, copy the content into your workspace with desk_write.", object_schema(vec![
             channel_id_prop(),
             string_prop("file_id", "File id from inbox_list."),
+            bool_prop("as_base64", "Return the raw file bytes as base64 instead of decoded text. Required for binaries (pdf/zip/images). Capped at 8MB."),
         ], vec!["channel_id", "file_id"]), true, false),
         tool("post_message", "Post a message", "Send a message to a channel. Use this for proactive / cross-channel posts; the reply to the triggering message goes through the normal agent reply flow, not this tool.", object_schema(vec![
             channel_id_prop(),
