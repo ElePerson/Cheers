@@ -7,6 +7,7 @@ pub mod fs;
 pub mod members;
 pub mod messages;
 pub mod plan;
+pub mod sessions;
 pub mod usage;
 
 use serde_json::{json, Value};
@@ -95,6 +96,7 @@ pub async fn dispatch(db: &PgPool, principal: Principal, frame: &Value) -> Value
         "channel.plan.read" => plan::handle_read(db, &principal, &params).await,
         "channel.usage.read" => usage::handle_read(db, &principal, &params).await,
         "channel.commands.read" => commands::handle_read(db, &principal, &params).await,
+        "channel.sessions.read" => sessions::handle_read(db, &principal, &params).await,
 
         // ── 写操作（频道成员 role 可写）────────────────────────────────
         "channel.messages.create" => messages::handle_create(db, &principal, &params).await,

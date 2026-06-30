@@ -1070,3 +1070,36 @@ async fn phasea_commands_read_projects_name_and_description(db: PgPool) {
     assert_eq!(cmds[0]["description"].as_str(), Some("Review the diff"));
     assert_eq!(cmds[1]["name"].as_str(), Some("test"));
 }
+
+#[sqlx::test]
+async fn phasea_sessions_read_lists_channel_sessions(db: PgPool) {
+    let ws = seed_workspace(&db).await;
+    let ch = seed_channel(&db, ws).await;
+    let bot = seed_bot(&db).await;
+    add_member(&db, ch, bot, "bot").await;
+    let cid = ch.to_string();
+
+    // Create an "other" session bound to the channel (status = idle).
+    let handle = server::domain::sessions::create_channel_session(&db, bot, "acct1", &cid, "other")
+        .await
+        .expect("create channel session");
+
+    let r = dispatch(&db, Principal::bot(bot),
+        &req("channel.sessions.read", serde_json::json!({ "channel_id": cid }))).await;
+    assert_eq!(r["ok"], true, "sessions.read 应成功: {r}");
+    let sessions = r["data"]["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1, "应列出该频道的一个会话");
+    let s = &sessions[0];
+    assert_eq!(s["session_id"].as_str(), Some(handle.session_id.to_string().as_str()));
+    assert_eq!(s["bot_id"].as_str(), Some(bot.to_string().as_str()));
+    assert_eq!(s["role"].as_str(), Some("other"));
+    assert_eq!(s["is_primary"].as_bool(), Some(false));
+    assert_eq!(s["status"].as_str(), Some("idle"));
+
+    // Non-members can't read it.
+    let outsider = seed_bot(&db).await;
+    let denied = dispatch(&db, Principal::bot(outsider),
+        &req("channel.sessions.read", serde_json::json!({ "channel_id": cid }))).await;
+    assert_eq!(denied["ok"], false);
+    assert_eq!(denied["code"].as_str(), Some("NOT_MEMBER"));
+}
