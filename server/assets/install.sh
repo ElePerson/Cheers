@@ -109,6 +109,31 @@ if [ -z "$BIN" ]; then
     fi
   fi
 fi
+
+# ── 4b. install the cheers MCP server next to the connector ───────────────────
+# The connector injects this stdio MCP server into every agent session and
+# resolves it from the directory of its own executable, so it must live next to
+# the connector binary. Best-effort: the bot works without it, but agents lose
+# their cheers platform tools (send message / fetch resources).
+if [ -n "$BIN" ] && [ -n "${os:-}" ] && [ -n "${arch:-}" ]; then
+  MCP_DEST="$(dirname "$BIN")/cheers-mcp-server"
+  if [ ! -x "$MCP_DEST" ]; then
+    MCP_ASSET="cheers-mcp-server-$os-$arch"
+    if [ "$VER" = "latest" ]; then
+      MCP_URL="https://github.com/$REPO/releases/latest/download/$MCP_ASSET"
+    else
+      MCP_URL="https://github.com/$REPO/releases/download/connector-v$VER/$MCP_ASSET"
+    fi
+    info "downloading cheers MCP server ($os/$arch) from $REPO …"
+    if curl -fsSL "$MCP_URL" -o "$MCP_DEST" && [ -s "$MCP_DEST" ]; then
+      chmod +x "$MCP_DEST"
+      info "installed MCP server → $MCP_DEST"
+    else
+      rm -f "$MCP_DEST"
+      info "WARNING: no prebuilt cheers-mcp-server for $os/$arch — agent sessions will lack cheers MCP tools (set CHEERS_MCP_SERVER_BIN to a locally built binary to fix)"
+    fi
+  fi
+fi
 if [ -z "$BIN" ]; then
   cat >&2 <<EOF
 

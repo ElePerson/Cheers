@@ -537,9 +537,25 @@ pub(super) fn canonical_path(p: &std::path::Path) -> std::path::PathBuf {
 }
 
 pub(super) fn resolve_mcp_server_command() -> String {
+    let bin_name = if cfg!(windows) {
+        "cheers-mcp-server.exe"
+    } else {
+        "cheers-mcp-server"
+    };
     if let Ok(path) = env::var("CHEERS_MCP_SERVER_BIN") {
         if !path.trim().is_empty() {
             return path;
+        }
+    }
+    // Installed deployments: install.sh drops cheers-mcp-server into the same
+    // directory as this connector binary (~/.cheers/bin). Prefer that over the
+    // dev-tree fallback so an installed pair never depends on a source checkout.
+    if let Ok(exe) = env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let sibling = dir.join(bin_name);
+            if sibling.exists() {
+                return sibling.display().to_string();
+            }
         }
     }
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
