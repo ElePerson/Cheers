@@ -31,7 +31,7 @@ Cheers 处于早期公开预览阶段。安全修复优先面向：
 
 生产部署前至少确认：
 
-- 设置强随机 `JWT_SECRET_KEY`。
+- 为 `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` 生成专用 RS256 密钥对；不要复用开发密钥，也不要提交私钥。
 - 替换 `POSTGRES_PASSWORD`、`RUSTFS_ACCESS_KEY`、`RUSTFS_SECRET_KEY`、`ADMIN_PASSWORD`。
 - 如启用 Agent Bridge，设置强随机 `AGENT_BRIDGE_TOKEN` 并限制外部访问面。
 - 配置可信 `PUBLIC_BASE_URL`、`KKFILEVIEW_BASE_URL` 和 `KKFILEVIEW_TRUST_HOST`。

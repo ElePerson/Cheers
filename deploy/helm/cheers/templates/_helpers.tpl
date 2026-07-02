@@ -40,6 +40,24 @@ app.kubernetes.io/component: {{ .component }}
 {{- define "cheers.rustfs.fullname" -}}{{ include "cheers.fullname" . }}-rustfs{{- end -}}
 {{- define "cheers.redis.fullname" -}}{{ include "cheers.fullname" . }}-redis{{- end -}}
 {{- define "cheers.gotenberg.fullname" -}}{{ include "cheers.fullname" . }}-gotenberg{{- end -}}
+{{- define "cheers.bot.fullname" -}}{{ include "cheers.fullname" . }}-bot{{- end -}}
+
+{{/* Bot agent-type derived defaults. All accept the root context (.). */}}
+{{- define "cheers.bot.imageRepository" -}}
+{{- if .Values.bot.image.repository -}}{{ .Values.bot.image.repository -}}
+{{- else if eq .Values.bot.agentType "codex" -}}cheers/codex-bot
+{{- else -}}cheers/opencode-bot{{- end -}}
+{{- end -}}
+{{- define "cheers.bot.tokenKey" -}}
+{{- if .Values.bot.token.key -}}{{ .Values.bot.token.key -}}
+{{- else if eq .Values.bot.agentType "codex" -}}CHEERS_BOT_TOKEN
+{{- else -}}OPENCODE_BOT_TOKEN{{- end -}}
+{{- end -}}
+{{- define "cheers.bot.apiKeyKey" -}}
+{{- if .Values.bot.openaiApiKey.key -}}{{ .Values.bot.openaiApiKey.key -}}
+{{- else if eq .Values.bot.agentType "codex" -}}OPENAI_API_KEY
+{{- else -}}OPENCODE_OPENAI_API_KEY{{- end -}}
+{{- end -}}
 
 {{/* The Secret name in use (existing override or chart-managed). */}}
 {{- define "cheers.secretName" -}}

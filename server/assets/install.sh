@@ -15,7 +15,7 @@
 #   CHEERS_API_BASE      gateway API base; default injected at serve time
 #   CHEERS_CONNECTOR_BIN path to cce-acp-connector (else found on PATH, else a
 #                        prebuilt release binary is downloaded for this platform)
-#   CHEERS_CONNECTOR_REPO     GitHub owner/repo for releases (default Grant-Huang/Cheers)
+#   CHEERS_CONNECTOR_REPO     GitHub owner/repo for releases (default haowei2000/Cheers)
 #   CHEERS_CONNECTOR_VERSION  connector version, e.g. 0.1.22 (default: latest)
 #   CHEERS_INSTALL_DAEMON=0  skip the launchd/systemd unit (just write + start)
 set -euo pipefail
@@ -84,7 +84,7 @@ if [ -z "$BIN" ]; then
 fi
 # Not on PATH → fetch a prebuilt release binary for this OS/arch.
 if [ -z "$BIN" ]; then
-  REPO="${CHEERS_CONNECTOR_REPO:-Grant-Huang/Cheers}"
+  REPO="${CHEERS_CONNECTOR_REPO:-haowei2000/Cheers}"
   VER="${CHEERS_CONNECTOR_VERSION:-latest}"
   os="$(uname -s)"; arch="$(uname -m)"
   case "$os" in Darwin) os=darwin ;; Linux) os=linux ;; *) os="" ;; esac
@@ -114,7 +114,7 @@ if [ -z "$BIN" ]; then
 
   Config and token are in place, but no connector binary was found and none could
   be downloaded for this platform. Build it once:
-      git clone https://github.com/Grant-Huang/Cheers && cd Cheers/packages/cheers-acp-connector-rs
+      git clone https://github.com/haowei2000/Cheers && cd Cheers/packages/cheers-acp-connector-rs
       cargo build --release    # → target/release/cce-acp-connector
   then re-run with CHEERS_CONNECTOR_BIN=/path/to/cce-acp-connector, or start by hand:
       cce-acp-connector start --config "$CONFIG_FILE" --name "$ACCOUNT_ID"

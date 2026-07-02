@@ -1,7 +1,12 @@
-FROM docker.m.daocloud.io/library/node:20-alpine AS builder
+# Override for regional mirrors, e.g.
+#   --build-arg BASE_REGISTRY=docker.m.daocloud.io
+#   --build-arg NPM_REGISTRY=https://registry.npmmirror.com
+ARG BASE_REGISTRY=docker.io
+FROM ${BASE_REGISTRY}/library/node:20-alpine AS builder
+ARG NPM_REGISTRY=https://registry.npmjs.org
 WORKDIR /app
 COPY package*.json ./
-RUN npm config set registry https://registry.npmmirror.com && \
+RUN npm config set registry "${NPM_REGISTRY}" && \
     npm ci --legacy-peer-deps
 ARG VITE_API_PROXY_TARGET
 ARG VITE_WS_PROXY_TARGET
@@ -16,7 +21,7 @@ ENV VITE_ENABLE_MERMAID=${VITE_ENABLE_MERMAID}
 COPY . .
 RUN npm run build
 
-FROM docker.m.daocloud.io/library/nginx:alpine
+FROM ${BASE_REGISTRY}/library/nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
