@@ -52,14 +52,15 @@ pub async fn channel_online_bots(
     .await
     .unwrap_or_default();
 
-    member_ids
-        .into_iter()
-        .filter(|id| {
-            Uuid::parse_str(id)
-                .map(|uuid| bot_locator.is_online(uuid))
-                .unwrap_or(false)
-        })
-        .collect()
+    let mut online = Vec::new();
+    for id in member_ids {
+        if let Ok(uuid) = Uuid::parse_str(&id) {
+            if bot_locator.is_online(uuid).await {
+                online.push(id);
+            }
+        }
+    }
+    online
 }
 
 /// bot 桥接上线/下线时：向它所属的每个频道广播一次 presence。

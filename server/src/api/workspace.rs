@@ -294,7 +294,7 @@ async fn workspace_call(
     content_b64: Option<String>,
     roots: &[String],
 ) -> Result<Value, AppError> {
-    if !state.bot_locator.is_online(bot_id) {
+    if !state.bot_locator.is_online(bot_id).await {
         return Err(AppError::BadRequest("bot connector is offline".into()));
     }
     let req_id = Uuid::new_v4().to_string();
@@ -368,20 +368,19 @@ pub async fn list_workspace_bots(
     .await
     .map_err(AppError::Db)?;
 
-    let bots: Vec<Value> = rows
-        .into_iter()
-        .map(|(bot_id, username, display_name)| {
-            let online = Uuid::parse_str(&bot_id)
-                .map(|id| state.bot_locator.is_online(id))
-                .unwrap_or(false);
-            json!({
-                "bot_id": bot_id,
-                "username": username,
-                "display_name": display_name,
-                "online": online,
-            })
-        })
-        .collect();
+    let mut bots: Vec<Value> = Vec::with_capacity(rows.len());
+    for (bot_id, username, display_name) in rows {
+        let online = match Uuid::parse_str(&bot_id) {
+            Ok(id) => state.bot_locator.is_online(id).await,
+            Err(_) => false,
+        };
+        bots.push(json!({
+            "bot_id": bot_id,
+            "username": username,
+            "display_name": display_name,
+            "online": online,
+        }));
+    }
     Ok(Json(json!({ "bots": bots })))
 }
 

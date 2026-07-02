@@ -18,6 +18,7 @@ import { addChannelMember } from "@/api/channels";
 import { BotPostureSection } from "./BotPostureSection";
 import { BotPermissionGrantsSection } from "./BotPermissionGrantsSection";
 import { BotActivitySection } from "./BotActivitySection";
+import { BotConnectionHistorySection } from "./BotConnectionHistorySection";
 import type { BotItem, Channel } from "@/types";
 
 export function CopyButton({ value, label }: { value: string; label?: string }) {
@@ -132,7 +133,12 @@ export function BotDetailPanel({
             <BotPermissionGrantsSection botId={bot.bot_id} />
           </div>
         )}
-        {tab === "events" && <BotActivitySection botId={bot.bot_id} />}
+        {tab === "events" && (
+          <div className="space-y-4">
+            <BotConnectionHistorySection botId={bot.bot_id} />
+            <BotActivitySection botId={bot.bot_id} />
+          </div>
+        )}
       </div>
     </div>
   );

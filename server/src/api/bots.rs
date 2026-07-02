@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Extension, Json,
 };
 use serde::Deserialize;
@@ -148,7 +148,8 @@ pub async fn list_bots(
     .bind(&claims.sub)
     .fetch_all(&state.db)
     .await?;
-    Ok(Json(rows.into_iter().map(|r| {
+    let mut bots = Vec::with_capacity(rows.len());
+    for r in rows {
         let created_by = r.try_get::<Option<String>, _>("created_by").ok().flatten();
         let is_owner = created_by.as_deref() == Some(claims.sub.as_str());
         let binding_config = if admin || is_owner {
@@ -162,10 +163,11 @@ pub async fn list_bots(
         // bots dispatch through the WS bridge (see gateway::dispatcher), so the
         // registry is authoritative for every binding type.
         let bot_id = r.try_get::<String, _>("bot_id").unwrap_or_default();
-        let is_online = Uuid::parse_str(&bot_id)
-            .map(|id| state.bot_locator.is_online(id))
-            .unwrap_or(false);
-        json!({
+        let is_online = match Uuid::parse_str(&bot_id) {
+            Ok(id) => state.bot_locator.is_online(id).await,
+            Err(_) => false,
+        };
+        bots.push(json!({
             "bot_id": bot_id,
             "username": r.try_get::<String, _>("username").unwrap_or_default(),
             "display_name": r.try_get::<String, _>("display_name").ok(),
@@ -181,8 +183,9 @@ pub async fn list_bots(
             "template_id": r.try_get::<String, _>("template_id").ok(),
             "intro": r.try_get::<String, _>("intro").ok(),
             "binding_config": binding_config,
-        })
-    }).collect()))
+        }));
+    }
+    Ok(Json(bots))
 }
 
 pub async fn create_bot(
@@ -319,10 +322,10 @@ pub async fn get_bot_status(
     // bridge_connected is the LIVE truth from the connection registry (a control
     // + data WS are bound right now), distinct from the persisted `status` flag.
     // A bot can be status="online" (eligible to connect) yet have no live bridge.
-    let bridge_connected = Uuid::parse_str(&bot_id)
-        .ok()
-        .map(|id| state.bot_locator.is_online(id))
-        .unwrap_or(false);
+    let bridge_connected = match Uuid::parse_str(&bot_id) {
+        Ok(id) => state.bot_locator.is_online(id).await,
+        Err(_) => false,
+    };
 
     // Live enrollment-code count is owner/admin-only: it reveals pending onboarding
     // secrets' existence, which a channel-mate (visible-but-not-owner) shouldn't see.
@@ -345,6 +348,22 @@ pub async fn get_bot_status(
         None
     };
 
+    // Recent control-bridge history: when the connector last attached/detached.
+    // Complements the live flag with a minimal timeline anchor (full history via
+    // GET /bots/:bot_id/connection-events).
+    let (last_connected_at, last_disconnected_at) = sqlx::query_as::<
+        _,
+        (Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>),
+    >(
+        "SELECT MAX(created_at) FILTER (WHERE event = 'connected'),
+                MAX(created_at) FILTER (WHERE event = 'disconnected')
+         FROM bot_connection_events
+         WHERE bot_id = $1 AND stream = 'control'",
+    )
+    .bind(&bot_id)
+    .fetch_one(&state.db)
+    .await?;
+
     Ok(Json(json!({
         "bot_id": row.try_get::<String, _>("bot_id").unwrap_or(bot_id),
         "is_disabled": is_disabled,
@@ -355,8 +374,56 @@ pub async fn get_bot_status(
         "connection_status": if bridge_connected { "online" } else { "offline" },
         "is_online": bridge_connected,
         "bridge_connected": bridge_connected,
+        "last_connected_at": last_connected_at.map(|t| t.to_rfc3339()),
+        "last_disconnected_at": last_disconnected_at.map(|t| t.to_rfc3339()),
         "live_enrollment_codes": live_codes,
     })))
+}
+
+#[derive(Deserialize)]
+pub struct ConnectionEventsQuery {
+    pub limit: Option<i64>,
+}
+
+/// GET /api/v1/bots/{bot_id}/connection-events — recent bridge connect/disconnect
+/// history (newest first). Presence frames only carry the current state; this is
+/// the persisted timeline behind it, including WHY a connector went away
+/// (closed / superseded / idle_timeout / protocol_error / write_failed / unbound).
+pub async fn list_connection_events(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(bot_id): Path<String>,
+    Query(params): Query<ConnectionEventsQuery>,
+) -> Result<Json<Value>, AppError> {
+    ensure_bot_visible(&state, &claims, &bot_id).await?;
+    let limit = params.limit.unwrap_or(50).clamp(1, 200);
+    let rows = sqlx::query(
+        "SELECT stream, event, reason, connection_id, created_at
+         FROM bot_connection_events
+         WHERE bot_id = $1
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2",
+    )
+    .bind(&bot_id)
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await?;
+    let events: Vec<Value> = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "stream": r.try_get::<String, _>("stream").unwrap_or_default(),
+                "event": r.try_get::<String, _>("event").unwrap_or_default(),
+                "reason": r.try_get::<Option<String>, _>("reason").ok().flatten(),
+                "connection_id": r.try_get::<Option<String>, _>("connection_id").ok().flatten(),
+                "created_at": r
+                    .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                    .map(|t| t.to_rfc3339())
+                    .unwrap_or_default(),
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "bot_id": bot_id, "events": events })))
 }
 
 /// POST /api/v1/bots/{bot_id}/disable — admin/owner kill-switch. Sets is_disabled

@@ -173,9 +173,10 @@ async fn search_bots(
         if !invitable {
             continue;
         }
-        let is_online = Uuid::parse_str(&bot_id)
-            .map(|id| bot_locator.is_online(id))
-            .unwrap_or(false);
+        let is_online = match Uuid::parse_str(&bot_id) {
+            Ok(id) => bot_locator.is_online(id).await,
+            Err(_) => false,
+        };
         items.push(InvitableItem {
             member_id: bot_id,
             member_type: "bot",

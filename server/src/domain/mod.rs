@@ -5,6 +5,7 @@ pub mod acp_session_updates;
 pub mod approval;
 pub mod auth;
 pub mod bot_event_policy;
+pub mod bot_events;
 pub mod chains;
 pub mod channel_seq;
 pub mod commands_store;

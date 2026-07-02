@@ -112,6 +112,11 @@ async fn main() -> anyhow::Result<()> {
     // otherwise accumulate without bound. Hourly, keeping rows 1 day for audit.
     gateway::enrollment_reaper::spawn(state.db.clone(), 3600, 86_400);
 
+    // Prune bot bridge connection history (bot_connection_events) — kept 30 days
+    // for uptime inspection, then reaped hourly so a flapping connector can't
+    // grow the table without bound.
+    gateway::connection_event_reaper::spawn(state.db.clone(), 3600, 30 * 86_400);
+
     // Office→PDF preview conversion (Gotenberg). Only runs when GOTENBERG_URL is
     // configured; otherwise office files simply have no preview rendition.
     if let Some(gotenberg_url) = config.gotenberg_url.clone() {

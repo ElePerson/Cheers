@@ -458,37 +458,36 @@ pub async fn list_channel_members(
                 .collect()
         })
         .unwrap_or_default();
-    Ok(Json(
-        rows.into_iter()
-            .map(|r| {
-                let member_id = r.try_get::<String, _>("member_id").unwrap_or_default();
-                let member_type = r.try_get::<String, _>("member_type").unwrap_or_default();
-                let is_online = match member_type.as_str() {
-                    "user" => online_users.contains(&member_id),
-                    "bot" => Uuid::parse_str(&member_id)
-                        .map(|id| state.bot_locator.is_online(id))
-                        .unwrap_or(false),
-                    _ => false,
-                };
-                json!({
-                    "member_id": member_id,
-                    "member_type": member_type,
-                    "role": r.try_get::<String, _>("role").unwrap_or_else(|_| "member".into()),
-                    "username": r.try_get::<String, _>("username").ok(),
-                    "display_name": r.try_get::<String, _>("display_name").ok(),
-                    "avatar_url": r.try_get::<Option<String>, _>("avatar_url").ok().flatten(),
-                    "is_online": is_online,
-                    // Bots only: whether the connector says the agent accepts audio
-                    // prompts (policy AND promptCapabilities.audio). NULL = unknown
-                    // (never connected / pre-capability connector) — treat as false.
-                    "can_receive_audio": r
-                        .try_get::<Option<bool>, _>("can_receive_audio")
-                        .ok()
-                        .flatten(),
-                })
-            })
-            .collect(),
-    ))
+    let mut members = Vec::with_capacity(rows.len());
+    for r in rows {
+        let member_id = r.try_get::<String, _>("member_id").unwrap_or_default();
+        let member_type = r.try_get::<String, _>("member_type").unwrap_or_default();
+        let is_online = match member_type.as_str() {
+            "user" => online_users.contains(&member_id),
+            "bot" => match Uuid::parse_str(&member_id) {
+                Ok(id) => state.bot_locator.is_online(id).await,
+                Err(_) => false,
+            },
+            _ => false,
+        };
+        members.push(json!({
+            "member_id": member_id,
+            "member_type": member_type,
+            "role": r.try_get::<String, _>("role").unwrap_or_else(|_| "member".into()),
+            "username": r.try_get::<String, _>("username").ok(),
+            "display_name": r.try_get::<String, _>("display_name").ok(),
+            "avatar_url": r.try_get::<Option<String>, _>("avatar_url").ok().flatten(),
+            "is_online": is_online,
+            // Bots only: whether the connector says the agent accepts audio
+            // prompts (policy AND promptCapabilities.audio). NULL = unknown
+            // (never connected / pre-capability connector) — treat as false.
+            "can_receive_audio": r
+                .try_get::<Option<bool>, _>("can_receive_audio")
+                .ok()
+                .flatten(),
+        }));
+    }
+    Ok(Json(members))
 }
 
 #[derive(Deserialize)]

@@ -60,6 +60,9 @@ export interface BotStatus {
   connection_status?: string;
   /** Live truth from the connection registry: a connector is bound right now. */
   bridge_connected?: boolean;
+  /** Control bridge timeline anchors from bot_connection_events (RFC 3339). */
+  last_connected_at?: string | null;
+  last_disconnected_at?: string | null;
   /** Owner/admin-only count of un-redeemed enrollment codes; null otherwise. */
   live_enrollment_codes?: number | null;
 }
@@ -331,4 +334,27 @@ export async function deleteEventRule(
   await apiJson(`/bots/${botId}/event-access?${params.toString()}`, {
     method: "DELETE",
   });
+}
+
+// ── Bridge connection history ─────────────────────────────────────────────────
+
+export interface BotConnectionEvent {
+  stream: "control" | "data";
+  event: "connected" | "disconnected";
+  /** Disconnects only: closed | superseded | idle_timeout | protocol_error | write_failed | unbound. */
+  reason?: string | null;
+  connection_id?: string | null;
+  created_at: string;
+}
+
+/** Recent bridge connect/disconnect history, newest first (persisted timeline
+ * behind the live presence dot — includes WHY a connector went away). */
+export async function listBotConnectionEvents(
+  botId: string,
+  limit = 50
+): Promise<BotConnectionEvent[]> {
+  const res = await apiJson<{ events: BotConnectionEvent[] }>(
+    `/bots/${botId}/connection-events?limit=${limit}`
+  );
+  return res.events;
 }

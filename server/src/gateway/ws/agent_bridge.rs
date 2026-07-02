@@ -40,8 +40,18 @@ const CLOSE_SUPERSEDED: u16 = 4402;
 /// with a protocol-error code after this many CONSECUTIVE malformed frames so it
 /// can't spin the read loop / hammer logs. A good frame resets the counter.
 const CLOSE_PROTOCOL_ERROR: u16 = 4400;
+/// Heartbeat idle close (WIRE_PROTOCOL §10.1): a connector whose process died
+/// without a clean TCP FIN would otherwise stay "online" until the OS notices.
+const CLOSE_IDLE_TIMEOUT: u16 = 4409;
 const MAX_MALFORMED_FRAMES: u32 = 20;
 const BRIDGE_PROTOCOL_VERSION: u32 = 1;
+
+/// Gateway-side liveness: probe with a WS ping every PROBE_INTERVAL (the peer's
+/// WS stack auto-pongs, so this needs no connector cooperation), reap after
+/// IDLE_TIMEOUT with no inbound traffic (= 3 missed probes; the connector's own
+/// 25s app-level heartbeat also resets the timer).
+const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+const PROBE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// bot 连接的元信息（从 DB 查出来后到处用）。
 #[derive(Debug, Clone)]
@@ -144,16 +154,29 @@ async fn handle_control(mut socket: WebSocket, state: AppState, header_token: Op
     }
 
     tracing::info!(bot_id = %bot.bot_id, "control connected");
+    crate::domain::bot_events::record_bg(
+        &state.db,
+        bot.bot_id,
+        "control",
+        crate::domain::bot_events::EVENT_CONNECTED,
+        None,
+        connection_id,
+    );
 
     // bot 在线状态可能刚翻转（is_online = control + data 均在线）→ 向其频道广播 presence。
     crate::gateway::presence::broadcast_bot_presence(&state, bot.bot_id).await;
 
     // ── 4. 双向读写循环 ───────────────────────────────────────────────────
     let mut malformed: u32 = 0;
-    let superseded = loop {
+    let idle = tokio::time::sleep(IDLE_TIMEOUT);
+    tokio::pin!(idle);
+    let mut probe = tokio::time::interval(PROBE_INTERVAL);
+    probe.tick().await; // first tick fires immediately — skip it.
+    let reason = loop {
         tokio::select! {
-            // 收 bot 发来的控制帧
+            // 收 bot 发来的控制帧（任何入站流量都重置 idle 计时器）
             msg = socket.recv() => {
+                idle.as_mut().reset(tokio::time::Instant::now() + IDLE_TIMEOUT);
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<Value>(&text) {
@@ -166,13 +189,13 @@ async fn handle_control(mut socket: WebSocket, state: AppState, header_token: Op
                                 tracing::warn!(bot_id = %bot.bot_id, malformed, error = %e, "malformed control frame (ignored)");
                                 if malformed >= MAX_MALFORMED_FRAMES {
                                     close(&mut socket, CLOSE_PROTOCOL_ERROR, "too many malformed frames").await;
-                                    break false;
+                                    break "protocol_error";
                                 }
                             }
                         }
                     }
                     Some(Ok(Message::Ping(d))) => { let _ = socket.send(Message::Pong(d)).await; }
-                    Some(Ok(Message::Close(_))) | None => break false,
+                    Some(Ok(Message::Close(_))) | None => break "closed",
                     _ => {}
                 }
             }
@@ -181,9 +204,9 @@ async fn handle_control(mut socket: WebSocket, state: AppState, header_token: Op
             task = task_rx.recv() => {
                 match task {
                     Some(t) => {
-                        if ws_send(&mut socket, &t).await.is_err() { break false; }
+                        if ws_send(&mut socket, &t).await.is_err() { break "write_failed"; }
                     }
-                    None => break false,
+                    None => break "unbound",
                 }
             }
 
@@ -191,14 +214,32 @@ async fn handle_control(mut socket: WebSocket, state: AppState, header_token: Op
             result = &mut supersede_rx => {
                 if result.is_ok() {
                     close(&mut socket, CLOSE_SUPERSEDED, "superseded by new connection").await;
-                    break true;
+                    break "superseded";
                 }
-                break false;
+                break "closed";
+            }
+
+            // 心跳兜底：连 IDLE_TIMEOUT 没有任何入站帧（含 WS pong）→ 回收连接。
+            _ = &mut idle => {
+                close(&mut socket, CLOSE_IDLE_TIMEOUT, "heartbeat idle timeout").await;
+                break "idle_timeout";
+            }
+            _ = probe.tick() => {
+                if socket.send(Message::Ping(Vec::new())).await.is_err() { break "closed"; }
             }
         }
     };
 
-    tracing::info!(bot_id = %bot.bot_id, superseded, "control disconnected");
+    let superseded = reason == "superseded";
+    tracing::info!(bot_id = %bot.bot_id, reason, "control disconnected");
+    crate::domain::bot_events::record_bg(
+        &state.db,
+        bot.bot_id,
+        "control",
+        crate::domain::bot_events::EVENT_DISCONNECTED,
+        Some(reason),
+        connection_id,
+    );
 
     // 被 supersede 时新连接已写入 session，不能 unbind（会删掉新 session）
     if !superseded {
@@ -412,15 +453,28 @@ async fn handle_data(mut socket: WebSocket, state: AppState, header_token: Optio
     }
 
     tracing::info!(bot_id = %bot.bot_id, "data connected");
+    crate::domain::bot_events::record_bg(
+        &state.db,
+        bot.bot_id,
+        "data",
+        crate::domain::bot_events::EVENT_CONNECTED,
+        None,
+        connection_id,
+    );
 
     // data WS 接上后 is_online 可能翻转为在线 → 向其频道广播 presence。
     crate::gateway::presence::broadcast_bot_presence(&state, bot.bot_id).await;
 
     // ── 4. 双向读写循环 ───────────────────────────────────────────────────
     let mut malformed: u32 = 0;
-    loop {
+    let idle = tokio::time::sleep(IDLE_TIMEOUT);
+    tokio::pin!(idle);
+    let mut probe = tokio::time::interval(PROBE_INTERVAL);
+    probe.tick().await; // first tick fires immediately — skip it.
+    let reason = loop {
         tokio::select! {
             msg = socket.recv() => {
+                idle.as_mut().reset(tokio::time::Instant::now() + IDLE_TIMEOUT);
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(frame) = serde_json::from_str::<Value>(&text) {
@@ -507,12 +561,12 @@ async fn handle_data(mut socket: WebSocket, state: AppState, header_token: Optio
                             tracing::warn!(bot_id = %bot.bot_id, malformed, "malformed data frame (ignored)");
                             if malformed >= MAX_MALFORMED_FRAMES {
                                 close(&mut socket, CLOSE_PROTOCOL_ERROR, "too many malformed frames").await;
-                                break;
+                                break "protocol_error";
                             }
                         }
                     }
                     Some(Ok(Message::Ping(d))) => { let _ = socket.send(Message::Pong(d)).await; }
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Close(_))) | None => break "closed",
                     _ => {}
                 }
             }
@@ -521,15 +575,32 @@ async fn handle_data(mut socket: WebSocket, state: AppState, header_token: Optio
             outbound = res_rx.recv() => {
                 match outbound {
                     Some(frame) => {
-                        if ws_send(&mut socket, &frame).await.is_err() { break; }
+                        if ws_send(&mut socket, &frame).await.is_err() { break "write_failed"; }
                     }
-                    None => break,
+                    None => break "unbound",
                 }
             }
-        }
-    }
 
-    tracing::info!(bot_id = %bot.bot_id, "data disconnected");
+            // 心跳兜底：连 IDLE_TIMEOUT 没有任何入站帧（含 WS pong）→ 回收连接。
+            _ = &mut idle => {
+                close(&mut socket, CLOSE_IDLE_TIMEOUT, "heartbeat idle timeout").await;
+                break "idle_timeout";
+            }
+            _ = probe.tick() => {
+                if socket.send(Message::Ping(Vec::new())).await.is_err() { break "closed"; }
+            }
+        }
+    };
+
+    tracing::info!(bot_id = %bot.bot_id, reason, "data disconnected");
+    crate::domain::bot_events::record_bg(
+        &state.db,
+        bot.bot_id,
+        "data",
+        crate::domain::bot_events::EVENT_DISCONNECTED,
+        Some(reason),
+        connection_id,
+    );
     // conn 守护：重连后旧 data socket 的迟到 cleanup 不会打掉新绑定（也就不会
     // 把实际在线的 bot 广播成离线）。
     state.bot_registry.unbind_data(bot.bot_id, connection_id);
