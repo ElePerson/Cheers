@@ -31,7 +31,7 @@ Please do not verify vulnerabilities on unauthorized systems and do not export, 
 
 Before production deployment, confirm at least:
 
-- Set strong random `JWT_SECRET_KEY`.
+- Generate a dedicated RS256 keypair for `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY`; never reuse dev keys or commit the private key.
 - Replace `POSTGRES_PASSWORD`, `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`, `ADMIN_PASSWORD`.
 - If Agent Bridge is enabled, set strong random `AGENT_BRIDGE_TOKEN` and restrict external access.
 - Configure trusted `PUBLIC_BASE_URL`, `KKFILEVIEW_BASE_URL` and `KKFILEVIEW_TRUST_HOST`.

@@ -25,6 +25,17 @@ frontend:
     type: NodePort
     nodePort: 30080 # http://localhost:30080 on Docker Desktop k8s
 
+bot:
+  image:
+    tag: dev
+    pullPolicy: IfNotPresent
+  # Default agent is OpenCode (OpenAI-compatible; works with a DeepSeek key).
+  # Enable with:
+  #   --set bot.enabled=true --set bot.token.existingSecret=cheers-opencode-bot \
+  #   --set bot.openaiApiKey.existingSecret=cheers-opencode-bot
+  # For Codex instead: add --set bot.agentType=codex
+  enabled: false
+
 postgres:
   persistence:
     size: 2Gi

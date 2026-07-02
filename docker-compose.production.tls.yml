@@ -1,7 +1,7 @@
 services:
-  backend:
+  gateway:
     ports:
-      - "${BACKEND_HOST_BIND:-127.0.0.1}:${BACKEND_HOST_PORT:-8000}:8000"
+      - "${BACKEND_HOST_BIND:-127.0.0.1}:${GATEWAY_HOST_PORT:-8000}:8000"
     environment:
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-https://cheers.example.com}
       - STORAGE_S3_PUBLIC_ENDPOINT=${STORAGE_S3_PUBLIC_ENDPOINT:-https://cheers.example.com}
@@ -39,7 +39,7 @@ services:
       - TLS_CERT_FILE=${TLS_CERT_FILE:-/etc/caddy/certs/fullchain.pem}
       - TLS_KEY_FILE=${TLS_KEY_FILE:-/etc/caddy/certs/privkey.pem}
     depends_on:
-      - backend
+      - gateway
       - frontend
       - kkfileview
       - rustfs

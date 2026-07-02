@@ -2,12 +2,12 @@
 
 > **Language**: English | [中文](README.zh-CN.md)
 
-[![CI](https://github.com/Grant-Huang/Cheers/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Grant-Huang/Cheers/actions/workflows/ci.yml)
+[![CI](https://github.com/haowei2000/Cheers/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/haowei2000/Cheers/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Cheers is a Slack-style collaboration hub for humans and AI agents. It combines real-time channel chat, Agent Bridge providers, HTTP LLM bots, file-aware conversations, and a four-layer channel memory model.
+Cheers is a Slack-style collaboration hub for humans and AI agents. It combines real-time channel chat, external ACP agents you can `@`-mention as channel members, file-aware conversations, and persisted channel history and context.
 
-> Project status: early public preview. Core chat, Bot routing, Agent Bridge connectivity, file preview, and channel memory flows are usable. Deployment hardening, permission boundaries, and the wider Agent ecosystem integration are still evolving.
+> Project status: early public preview. Core chat, bot routing, Agent Bridge connectivity, and file preview are usable. Deployment hardening, permission boundaries, and the wider agent ecosystem integration are still evolving.
 
 ## Documentation
 
@@ -19,7 +19,8 @@ English is the default documentation language. Chinese mirrors use the `.zh-CN.m
 - [User Manual](docs/help/使用说明书.md) / [中文](docs/help/使用说明书.zh-CN.md)
 - [User Guide](docs/help/普通用户使用说明.md) / [中文](docs/help/普通用户使用说明.zh-CN.md)
 - [Admin Guide](docs/help/系统管理说明书.md) / [中文](docs/help/系统管理说明书.zh-CN.md)
-- [Installation Guide](docs/help/安装部署说明.md) / [中文](docs/help/安装部署说明.zh-CN.md)
+- [Docker Compose Deployment Guide](docs/help/docker-compose-deploy.md) / [中文](docs/help/docker-compose-deploy.zh-CN.md)
+- [Installation Guide (legacy)](docs/help/安装部署说明.md) / [中文](docs/help/安装部署说明.zh-CN.md)
 - [Troubleshooting Q&A](docs/help/技术排查Q&A.md) / [中文](docs/help/技术排查Q&A.zh-CN.md)
 - [Agent Bridge Integration Guide](docs/help/AgentBridge接入指南.md) / [中文](docs/help/AgentBridge接入指南.zh-CN.md) — ACP local agents are the recommended path; OpenClaw links are legacy/deprecated.
 - [RustFS Object Storage Guide](docs/help/RustFS对象存储部署说明.md) / [中文](docs/help/RustFS对象存储部署说明.zh-CN.md)
@@ -38,11 +39,11 @@ English is the default documentation language. Chinese mirrors use the `.zh-CN.m
 
 ## Stack
 
-- Backend: Rust + Axum + SQLx (Gateway) and React Frontend
+- Backend: Rust gateway (Axum + SQLx) — the only backend service
 - Frontend: React, TypeScript, Tailwind CSS, Vite
-- Agent runtime: external ACP agents via `cheers-mcp-server` and ACP connectors
-- Storage: PostgreSQL for business data and memory, S3-compatible object storage for files, optional kkFileView for complex document preview
-- Deployment: Docker Compose
+- Agents: external ACP agents (OpenCode, Claude, Codex) via `cheers-mcp-server` and ACP connectors
+- Storage: PostgreSQL for business data and channel history, S3-compatible object storage for files, optional kkFileView for complex document preview
+- Deployment: Docker Compose (single host) or Kubernetes via the Helm chart in `deploy/helm/cheers`
 
 ## Quick Start
 
@@ -50,8 +51,9 @@ English is the default documentation language. Chinese mirrors use the `.zh-CN.m
 cp docker-compose.yml.template docker-compose.yml
 cp .env.example .env
 
-# Before first startup, change at least ADMIN_PASSWORD, JWT_SECRET_KEY,
-# POSTGRES_PASSWORD, RUSTFS_ACCESS_KEY, and RUSTFS_SECRET_KEY.
+# Before first startup, change at least ADMIN_PASSWORD, POSTGRES_PASSWORD,
+# STORAGE_S3_ACCESS_KEY, and STORAGE_S3_SECRET_KEY, and generate the RS256 JWT
+# keypair (JWT_PRIVATE_KEY / JWT_PUBLIC_KEY — see the openssl commands in .env.example).
 docker compose up -d
 ```
 
@@ -61,7 +63,7 @@ Default local endpoints:
 - API: http://localhost:8000
 - Health check: http://localhost:8000/health
 
-If document preview is enabled, make sure `PUBLIC_BASE_URL` is reachable from the kkFileView container. Never use `.env.example` secrets in production.
+If document preview is enabled, make sure the gateway is reachable from the kkFileView container at `KKFILEVIEW_BASE_URL` / `KKFILEVIEW_TRUST_HOST`. Never use `.env.example` secrets in production.
 
 ## Local Development
 
@@ -93,13 +95,17 @@ the gateway is being re-established.
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+Read [CONTRIBUTING.md](docs/community/CONTRIBUTING.md) before opening a pull request.
 
 - Work branches must target `develop`.
 - `main` only accepts merges from `develop`.
 - Run `cd server && cargo build && cargo test` and the frontend build before submitting.
-- Report security issues privately according to [SECURITY.md](SECURITY.md).
+- Report security issues privately according to [SECURITY.md](docs/governance/SECURITY.md).
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+Cheers began as an extraction of the Rust-gateway architecture branch of
+AgentNexus (MIT). The original copyright notice is preserved in
+[LICENSE](LICENSE).

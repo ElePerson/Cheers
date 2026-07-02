@@ -16,7 +16,6 @@ services:
       # JWT RS256：必填，由 .env 提供（缺失则 gateway 启动 panic）
       - JWT_PRIVATE_KEY=${JWT_PRIVATE_KEY:-}
       - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY:-}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
       # S3 / RustFS
       - S3_ENDPOINT=${STORAGE_S3_ENDPOINT:-http://rustfs:9000}
       - S3_BUCKET=${STORAGE_S3_BUCKET:-cheers-files}
@@ -41,8 +40,17 @@ services:
       retries: 12
       start_period: 20s
 
+  # Optional agent bot. It needs an Agent Bridge token that can only be minted
+  # from a running gateway, so it is NOT started by `docker compose up -d`. Bring
+  # up the core stack first, mint a token (see the Docker Compose deploy guide),
+  # put it in OPENCODE_BOT_TOKEN, then start this with:
+  #   docker compose --profile bot up -d opencode-bot
   opencode-bot:
-    image: ${OPENCODE_BOT_IMAGE:-registry.example.invalid:5000/ai/cheers-opencode:latest}
+    profiles: ["bot"]
+    build:
+      context: .
+      dockerfile: docker/opencode-bot/Dockerfile
+    image: ${OPENCODE_BOT_IMAGE:-cheers/opencode-bot:latest}
     restart: unless-stopped
     env_file:
       - .env

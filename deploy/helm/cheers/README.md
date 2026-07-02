@@ -32,6 +32,11 @@ deploy/helm/cheers/
 
 ## Local dev (Docker Desktop k8s / kind / minikube)
 
+> The chart's default image names (`cheers/gateway`, `cheers/frontend`,
+> `cheers/codex-bot`) are **locally built** — there is no public registry that
+> serves them. Build + load them as below, or set `imageRegistry` /
+> `*.image.repository` to a registry you control.
+
 ```bash
 # 1) build the app images and load them into the cluster
 docker build -t cheers/gateway:dev server
@@ -60,11 +65,13 @@ open http://localhost:30080
 ## Production
 
 ```bash
-# Provide real secrets first (do NOT use the dev defaults):
+# Provide real secrets first (do NOT use the dev defaults). The gateway needs
+# the RS256 keypair (generate as in step 2 of the local-dev section above):
 kubectl -n cheers create secret generic cheers-secrets \
   --from-literal=POSTGRES_PASSWORD=... \
   --from-literal=S3_ACCESS_KEY=...     --from-literal=S3_SECRET_KEY=... \
-  --from-literal=ADMIN_PASSWORD=...    --from-literal=JWT_SECRET_KEY=...
+  --from-literal=ADMIN_PASSWORD=... \
+  --from-file=JWT_PRIVATE_KEY=priv.pem --from-file=JWT_PUBLIC_KEY=pub.pem
 
 helm upgrade --install cheers deploy/helm/cheers \
   -n cheers --create-namespace -f deploy/helm/cheers/values-prod.yaml \

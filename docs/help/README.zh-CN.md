@@ -8,7 +8,8 @@
 
 | 读者 | 推荐文档 | 解决的问题 |
 |------|----------|------------|
-| 想快速跑起来 | [安装部署说明](安装部署说明.md) | Docker Compose、本地开发、数据库迁移、首次初始化 |
+| 想快速跑起来（Compose） | [Docker Compose 部署指南](docker-compose-deploy.zh-CN.md) | 单机 Compose 栈：JWT 密钥、`.env`、核心栈、OpenCode Bot、TLS、运维 |
+| 想快速跑起来（旧版） | [安装部署说明](安装部署说明.md) | 早期综合安装说明（早于 Rust gateway，修订中） |
 | 普通用户 | [普通用户使用说明](普通用户使用说明.md) | 进入项目、发消息、@ Bot、上传文件、常见问题 |
 | 系统管理员 | [系统管理说明书](系统管理说明书.md) | 创建工作空间/项目、添加成员、创建 Bot、接入 Agent Bridge |
 | 提示词配置人员 | [提示词模板操作文档](prompt-template-operations.zh-CN.md) | 提示词模板变量、生效优先级、Bot 绑定、覆盖与排障 |

@@ -8,7 +8,8 @@ This directory contains user-facing, administrator-facing, and operations-facing
 
 | Reader | Start Here | Covers |
 |---|---|---|
-| First-time deployer | [Installation Guide](安装部署说明.md) | Docker Compose, local development, migrations, seed data |
+| First-time deployer (Compose) | [Docker Compose Deployment Guide](docker-compose-deploy.md) | Single-host Compose stack: JWT keys, `.env`, core stack, OpenCode bot, TLS, ops |
+| First-time deployer (legacy) | [Installation Guide](安装部署说明.md) | Older combined install notes (predates the Rust gateway; being revised) |
 | Daily user | [User Guide](普通用户使用说明.md) | Entering channels, sending messages, mentioning Bots, uploading files |
 | Frontend operator | [Frontend Operation Manual](<Cheers 前端操作手册.md>) | Main UI entry points, controls, and common operations |
 | UI reviewer | [Interface Interaction Guide](<Cheers 界面交互指南.md>) | Layout, interaction rules, and usage recommendations |
@@ -27,7 +28,7 @@ This directory contains user-facing, administrator-facing, and operations-facing
 - Main database and Context Store: PostgreSQL
 - Redis, RustFS, and kkFileView are started by Docker Compose
 - For public deployment, use `docker-compose.production.tls.yml` (Caddy + HTTPS + strict `CORS_ALLOWED_ORIGINS`) with `APP_DOMAIN` and `TLS_*` configured in `.env`.
-- Built-in assistant username: `Coordinator`
+- No built-in assistant: Cheers is external-agent-first — connect an ACP agent (OpenCode, Claude, Codex) and `@`-mention it in a channel.
 - Chinese versions are available next to each document as `*.zh-CN.md`
 
 ## Related

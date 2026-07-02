@@ -11,10 +11,10 @@ RUN cargo build --release --manifest-path packages/cheers-acp-connector-rs/Cargo
 FROM ${BASE_REGISTRY}/library/node:20-bookworm-slim
 
 ARG NPM_REGISTRY=https://registry.npmjs.org
-ARG OPENCODE_VERSION=1.15.6
+ARG CODEX_ACP_PACKAGE=@agentclientprotocol/codex-acp
 
 ENV NODE_ENV=production
-ENV OPENCODE_HOME=/app/state/opencode
+ENV HOME=/app/state/home
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
@@ -23,12 +23,12 @@ RUN apt-get update \
 COPY --from=agent-builder /build/packages/cheers-acp-connector-rs/target/release/cce-acp-connector /usr/local/bin/cce-acp-connector
 COPY --from=agent-builder /build/packages/cheers-mcp-server/target/release/cheers-mcp-server /usr/local/bin/cheers-mcp-server
 RUN npm config set registry "${NPM_REGISTRY}" \
-    && npm install -g "opencode-ai@${OPENCODE_VERSION}" \
+    && npm install -g "${CODEX_ACP_PACKAGE}" \
     && npm cache clean --force
 
-COPY docker/opencode-bot/entrypoint.sh /usr/local/bin/cheers-opencode-bot
-RUN chmod +x /usr/local/bin/cheers-opencode-bot \
-    && mkdir -p /app/config /app/state /app/state/opencode /workspace
+COPY docker/codex-bot/entrypoint.sh /usr/local/bin/cheers-codex-bot
+RUN chmod +x /usr/local/bin/cheers-codex-bot \
+    && mkdir -p /app/config /app/state/home /app/state/logs /workspace
 
 WORKDIR /workspace
-ENTRYPOINT ["cheers-opencode-bot"]
+ENTRYPOINT ["cheers-codex-bot"]

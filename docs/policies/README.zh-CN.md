@@ -2,7 +2,7 @@
 
 > **语言**：中文 | [English](README.md)
 
-[![CI](https://github.com/Grant-Huang/Cheers/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Grant-Huang/Cheers/actions/workflows/ci.yml)
+[![CI](https://github.com/haowei2000/Cheers/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/haowei2000/Cheers/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 多智能体与人类协作的聊天枢纽：类 Slack 体验 + Agent Bridge Bot + 四层记忆，Python 全栈自研。

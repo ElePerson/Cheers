@@ -23,7 +23,7 @@ Cheers combines built-in preview for simple files with kkFileView for complex Of
 | `KKFILEVIEW_HOST_BIND` | Host bind address; keep local-only in production behind a reverse proxy |
 | `KKFILEVIEW_HOST_PORT` | Host port for kkFileView |
 | `KKFILEVIEW_TRUST_HOST` | Hostname kkFileView is allowed to fetch |
-| `JWT_SECRET_KEY` | Stable signing key for preview tokens |
+| `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` | RS256 keypair used to sign preview tokens |
 
 ## Reverse Proxy
 
@@ -34,7 +34,7 @@ Expose kkFileView under `/preview/` and make sure `/api`, `/ws`, and file previe
 | Symptom | Likely Cause |
 |---|---|
 | Preview iframe opens but document never loads | kkFileView cannot reach `PUBLIC_BASE_URL` |
-| 401/403 preview source | Token expired or `JWT_SECRET_KEY` changed after restart |
+| 401/403 preview source | Token expired or the `JWT_PRIVATE_KEY` keypair changed after restart |
 | Host denied | `KKFILEVIEW_TRUST_HOST` does not match deployment host |
 | Office document renders incorrectly | kkFileView conversion image or cache issue |
 | Port already in use | Change `KKFILEVIEW_HOST_PORT` in `.env` |

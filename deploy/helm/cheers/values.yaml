@@ -47,6 +47,72 @@ frontend:
     type: ClusterIP
     nodePort: "" # only when type=NodePort
 
+# ── Bot connector workload. Disabled by default because it requires a bot token
+#    secret. When enabled, it runs a separate ACP connector pod. Pick the agent
+#    with `agentType`: "opencode" (default; OpenAI-compatible, works with DeepSeek)
+#    or "codex" (`codex-acp`). Each agent reads a different env-var contract, so
+#    the pod template and the token/apiKey secret keys switch with agentType. ────
+bot:
+  enabled: false
+  # "opencode" or "codex". Selects the image default, the entrypoint env-var
+  # contract, and the default token/apiKey secret keys below.
+  agentType: opencode
+  image:
+    # Leave empty to default from agentType: cheers/opencode-bot or cheers/codex-bot.
+    repository: ""
+    tag: "" # defaults to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  username: opencode
+  workspaceDir: /workspace
+  stateDir: /app/state
+  promptTimeoutMs: 900000
+  requestTimeoutMs: 120000
+  permissionTimeoutMs: 900000
+  # Defaults to the in-cluster gateway service. Override only for unusual routing.
+  wsBase: ""
+  # ── OpenCode agent (agentType=opencode). OpenAI-compatible; the apiKey below is
+  #    REQUIRED. Defaults target DeepSeek. ──────────────────────────────────────
+  opencode:
+    command: opencode
+    provider: deepseek
+    model: "" # empty → "<provider>/deepseek-chat"; else "<provider>/<model>" or "prov/model"
+    baseUrl: https://api.deepseek.com
+    nativePermissionMode: ask # ask | allow | deny | reject
+  # ── Codex agent (agentType=codex). ──────────────────────────────────────────
+  codex:
+    command: codex-acp
+    args: [] # e.g. ["--some-flag"]
+    allowedConfigOptions:
+      - model
+      - reasoning_effort
+      - approval_policy
+      - sandbox
+    extraEnvAllow: []
+  token:
+    # Prefer an existing Secret in production:
+    #   kubectl create secret generic cheers-opencode-bot \
+    #     --from-literal=OPENCODE_BOT_TOKEN=agb_...
+    existingSecret: ""
+    # Env var the connector reads its Agent Bridge token from. Leave empty to
+    # default from agentType (OPENCODE_BOT_TOKEN / CHEERS_BOT_TOKEN).
+    key: ""
+    # Dev-only convenience when secrets.create=true. Do not commit real tokens.
+    value: ""
+  openaiApiKey:
+    # OpenCode: REQUIRED (the model API key, e.g. a DeepSeek key). Codex: optional
+    # (Codex can use subscription auth from a HOME on the state volume instead).
+    existingSecret: ""
+    # Leave empty to default from agentType
+    # (OPENCODE_OPENAI_API_KEY / OPENAI_API_KEY).
+    key: ""
+    value: ""
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: ""
+  resources: {}
+
 # ── Postgres (bundled; for prod consider a managed DB + postgres.enabled=false) ─
 postgres:
   enabled: true
