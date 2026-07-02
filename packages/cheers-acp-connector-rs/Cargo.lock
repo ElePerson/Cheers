@@ -309,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "cce-acp-connector"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-schema",
@@ -323,6 +323,7 @@ dependencies = [
  "libc",
  "mime_guess",
  "rand",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
@@ -1365,6 +1366,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
 dependencies = [
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki",
  "subtle",
