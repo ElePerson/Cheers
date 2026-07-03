@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { listWorkspaces, getPersonalWorkspace } from "@/api/workspaces";
 import { listChannels, listDms } from "@/api/channels";
@@ -66,11 +66,22 @@ export default function ChatLayout() {
   // pop so the stack stays clean; fall back to replace when this is the first entry
   // (e.g. the page was reloaded while the conversation was open).
   const closeChatScreen = useCallback(() => {
-    refreshChannels(); // pick up read/unread changes made while chatting
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
     if (idx > 0) navigate(-1);
     else navigate(location.pathname, { replace: true });
-  }, [refreshChannels, navigate, location.pathname]);
+  }, [navigate, location.pathname]);
+
+  // Mobile: refetch the channel list whenever the conversation screen is popped, to
+  // pick up read/unread changes made while chatting. Watching the chatPushed
+  // transition covers both back paths — the header back button *and* the
+  // browser/hardware back gesture, which pops the history entry without going
+  // through closeChatScreen.
+  const prevChatPushed = useRef(chatPushed);
+  useEffect(() => {
+    const wasPushed = prevChatPushed.current;
+    prevChatPushed.current = chatPushed;
+    if (isMobile && wasPushed && !chatPushed) refreshChannels();
+  }, [isMobile, chatPushed, refreshChannels]);
 
   const selectedWorkspace = workspaces.find(
     (w) => w.workspace_id === selectedWorkspaceId

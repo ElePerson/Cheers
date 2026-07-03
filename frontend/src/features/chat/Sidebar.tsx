@@ -188,11 +188,14 @@ export function Sidebar({ workspace, onOpenNav, onChannelSelected }: Props) {
           </div>
         )}
       </div>
-      {dmOpen && <NewDmDialog onClose={() => setDmOpen(false)} />}
+      {dmOpen && (
+        <NewDmDialog onClose={() => setDmOpen(false)} onPicked={onChannelSelected} />
+      )}
       {channelOpen && selectedWorkspaceId && (
         <NewChannelDialog
           workspaceId={selectedWorkspaceId}
           onClose={() => setChannelOpen(false)}
+          onPicked={onChannelSelected}
         />
       )}
       {wsSettingsOpen && workspace && (

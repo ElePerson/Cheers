@@ -2,22 +2,24 @@ import { useSyncExternalStore } from "react";
 
 /**
  * Single source of truth for the app's mobile breakpoint. Kept in lockstep with
- * Tailwind's `md` screen (768px): every `max-md:` utility in the codebase and every
- * JS-side `useIsMobile()` check flips at exactly the same width, so layout structure
- * (JSX branches) and styling (classes) can never disagree. Desktop (>= 768px, and in
- * particular >= 1024px) renders exactly as before — all mobile behavior is additive
- * below this breakpoint.
+ * Tailwind's `md` screen (768px) by subscribing to the *same* `(min-width: 768px)`
+ * query Tailwind's `md:`/`max-md:` utilities compile to and negating it — a
+ * `(max-width: 767px)` mirror would disagree at fractional viewport widths in
+ * (767px, 768px) (reachable via browser zoom or non-integer DPR), where neither
+ * query matches. This way layout structure (JSX branches) and styling (classes)
+ * flip at exactly the same width. Desktop (>= 768px, and in particular >= 1024px)
+ * renders exactly as before — all mobile behavior is additive below this breakpoint.
  */
-export const MOBILE_MEDIA_QUERY = "(max-width: 767px)";
+export const DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
 function subscribe(onChange: () => void): () => void {
-  const mql = window.matchMedia(MOBILE_MEDIA_QUERY);
+  const mql = window.matchMedia(DESKTOP_MEDIA_QUERY);
   mql.addEventListener("change", onChange);
   return () => mql.removeEventListener("change", onChange);
 }
 
 function getSnapshot(): boolean {
-  return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
+  return !window.matchMedia(DESKTOP_MEDIA_QUERY).matches;
 }
 
 // SSR/snapshot fallback: this app is a pure SPA, but keep the server snapshot
