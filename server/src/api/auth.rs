@@ -225,6 +225,11 @@ pub async fn change_password(
     .bind(&new_hash)
     .execute(&state.db)
     .await?;
+    // Tear down live WS sessions authenticated with the now-stale version; the
+    // caller's own client reconnects with the fresh token returned below.
+    if let Ok(uid) = claims.sub.parse::<Uuid>() {
+        state.fanout.kick_user(uid);
+    }
 
     // Mint a fresh token at the new version so the current caller stays signed in.
     let new_version = row.try_get::<i32, _>("token_version").unwrap_or(0) as i64 + 1;
@@ -249,6 +254,10 @@ pub async fn logout(
         .bind(&claims.sub)
         .execute(&state.db)
         .await?;
+    // Revocation must reach live sockets too, not just future HTTP requests.
+    if let Ok(uid) = claims.sub.parse::<Uuid>() {
+        state.fanout.kick_user(uid);
+    }
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -358,6 +367,11 @@ pub async fn reset_password(
     .bind(&hash)
     .execute(&state.db)
     .await?;
+    // Revocation must reach live sockets too (a reset usually means the old
+    // credential is considered compromised).
+    if let Ok(uid) = user_id.parse::<Uuid>() {
+        state.fanout.kick_user(uid);
+    }
     // Burn this + any other live reset codes for the email.
     sqlx::query(
         "UPDATE email_codes SET used = TRUE

@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use tokio::sync::{mpsc, Mutex};
 use uuid::Uuid;
 
-use super::fanout::WireFrame;
+use super::fanout::{CloseReason, WireFrame};
 
 // ── 连接注册接口（让 ConnectionManager 不直接依赖 InProcessFanout）────────────
 
@@ -17,7 +17,7 @@ pub trait LocalRegistry: Send + Sync {
         user_id: Uuid,
         conn_id: Uuid,
         tx: mpsc::Sender<WireFrame>,
-        close_tx: mpsc::Sender<()>,
+        close_tx: mpsc::Sender<CloseReason>,
     );
     fn subscribe_channel(&self, channel_id: Uuid, conn_id: Uuid, tx: mpsc::Sender<WireFrame>);
     fn unsubscribe_channel(&self, channel_id: Uuid, conn_id: Uuid);
@@ -34,7 +34,7 @@ impl LocalRegistry for InProcessFanout {
         user_id: Uuid,
         conn_id: Uuid,
         tx: mpsc::Sender<WireFrame>,
-        close_tx: mpsc::Sender<()>,
+        close_tx: mpsc::Sender<CloseReason>,
     ) {
         InProcessFanout::register_user(self, user_id, conn_id, tx, close_tx);
     }
@@ -123,7 +123,7 @@ impl ConnectionManager {
         user_id: Uuid,
         conn_id: Uuid,
         tx: mpsc::Sender<WireFrame>,
-        close_tx: mpsc::Sender<()>,
+        close_tx: mpsc::Sender<CloseReason>,
     ) {
         self.registry.register_user(user_id, conn_id, tx, close_tx);
     }

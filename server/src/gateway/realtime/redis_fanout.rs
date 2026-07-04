@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::{
-    fanout::{Fanout, InProcessFanout, WireFrame},
+    fanout::{CloseReason, Fanout, InProcessFanout, WireFrame},
     manager::LocalRegistry,
 };
 
@@ -71,7 +71,7 @@ impl RedisFanout {
         user_id: Uuid,
         conn_id: Uuid,
         tx: mpsc::Sender<WireFrame>,
-        close_tx: mpsc::Sender<()>,
+        close_tx: mpsc::Sender<CloseReason>,
     ) {
         self.local.register_user(user_id, conn_id, tx, close_tx);
     }
@@ -92,7 +92,7 @@ impl LocalRegistry for RedisFanout {
         user_id: Uuid,
         conn_id: Uuid,
         tx: mpsc::Sender<WireFrame>,
-        close_tx: mpsc::Sender<()>,
+        close_tx: mpsc::Sender<CloseReason>,
     ) {
         self.local.register_user(user_id, conn_id, tx, close_tx);
     }
