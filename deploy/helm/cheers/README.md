@@ -47,7 +47,9 @@ kind load docker-image cheers/gateway:dev cheers/frontend:dev --name <cluster>
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/jwt_priv.pem
 openssl rsa -in /tmp/jwt_priv.pem -pubout -out /tmp/jwt_pub.pem
 
-# 3) install (postgres/rustfs pull from a mirror if docker.io is slow for you)
+# 3) install (postgres/rustfs pull from a mirror if docker.io is slow for you).
+#    values-dev.yaml pins the local-dev admin password (admin12345); the base
+#    chart has NO password default and refuses to render without one.
 helm upgrade --install cheers deploy/helm/cheers -n cheers --create-namespace \
   -f deploy/helm/cheers/values-dev.yaml \
   --set-file secrets.jwtPrivateKey=/tmp/jwt_priv.pem \
@@ -85,7 +87,13 @@ storage classes. For real workloads consider a managed Postgres
 
 ## Validate without a cluster
 
+The chart refuses to render placeholder secrets (`secrets.adminPassword`,
+`secrets.jwtPrivateKey/jwtPublicKey` are `required` when `secrets.create=true`),
+so pass dummies when validating:
+
 ```bash
-helm lint deploy/helm/cheers -f deploy/helm/cheers/values-dev.yaml
-helm template cheers deploy/helm/cheers -f deploy/helm/cheers/values-dev.yaml
+helm lint deploy/helm/cheers -f deploy/helm/cheers/values-dev.yaml \
+  --set secrets.jwtPrivateKey=dummy --set secrets.jwtPublicKey=dummy
+helm template cheers deploy/helm/cheers -f deploy/helm/cheers/values-dev.yaml \
+  --set secrets.jwtPrivateKey=dummy --set secrets.jwtPublicKey=dummy
 ```
