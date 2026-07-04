@@ -155,6 +155,14 @@ impl Fanout for RedisFanout {
         let subject = user_subject(user_id);
         publish(&self.publisher.clone(), &subject, &frame).await;
     }
+
+    fn kick_user(&self, user_id: Uuid) {
+        // Local-instance kick: closes this instance's connections for the user.
+        // Cross-instance revocation needs a pub/sub control message (R1-B/M4 HA
+        // work) — until then, a multi-instance rollout leaves the user's
+        // sockets on OTHER instances open until they disconnect or re-auth.
+        self.local.kick_user(user_id);
+    }
 }
 
 // ── 后台订阅任务 ──────────────────────────────────────────────────────────────

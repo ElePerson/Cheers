@@ -49,12 +49,12 @@ pub trait Fanout: Send + Sync {
     async fn broadcast_user(&self, user_id: Uuid, frame: WireFrame);
 
     /// Close every live browser WS connection belonging to `user_id` (session
-    /// revocation: logout / password change / suspend / delete). Default no-op;
-    /// the in-process impl overrides. NOTE: the Redis (multi-instance) fanout
-    /// does not override yet — it only revokes connections on THIS instance via
-    /// its local registry, so a multi-instance rollout must propagate the kick
-    /// over pub/sub (tracked with the R1-B/M4 HA work; Redis path is not wired
-    /// in main.rs today).
+    /// revocation: logout / password change / suspend / delete). Default no-op
+    /// so a kick-unaware transport degrades to "revoked at next re-auth" rather
+    /// than erroring; both real impls override — InProcessFanout closes the
+    /// user's connections, RedisFanout kicks its LOCAL connections only
+    /// (cross-instance propagation over pub/sub is pending the R1-B/M4 HA
+    /// work; the Redis path is not wired in main.rs today).
     fn kick_user(&self, _user_id: Uuid) {}
 
     /// 频道当前在线用户列表（presence）。默认空；进程内实现覆盖。
