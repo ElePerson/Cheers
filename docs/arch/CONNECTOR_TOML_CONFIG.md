@@ -29,8 +29,10 @@ you can hand-tune or audit it.
 - **Relative paths resolve against the config file's directory**, not your shell's
   CWD. `~` expands to your home directory.
 - **One file can host many bots.** Each `[accounts.<id>...]` block is one bot; `<id>`
-  is a local label (letters, digits, `_`, `-`) and must match the `--name` you pass
-  to the daemon.
+  is a local label (letters, digits, `_`, `-`). A single daemon runs **every** account
+  in its config file — `--name` labels the *daemon instance* (its state/log/pid dir at
+  `~/.cheers/acp-connector/<name>/`), it does **not** select one account, and `<id>`
+  need not match it.
 - This is **L0** in the config layering model: the connector always re-clamps
   anything the Backend pushes (model, mode, config options) against these ceilings.
   A permissive Backend can never exceed what L0 allows here.
@@ -53,10 +55,10 @@ Applies to the whole daemon process, not a single bot.
 
 | Key          | Type   | Default | Meaning |
 |--------------|--------|---------|---------|
-| `name`       | string | none    | Cosmetic daemon name (logs). |
-| `home_dir`   | string | none    | Base dir for state + logs. Overridden by `--home` / `CHEERS_ACP_HOME`. |
-| `state_path` | string | `state.json` | Where the daemon persists runtime state. |
-| `log_dir`    | string | `logs`  | Directory for rotating daemon logs. |
+| `name`       | string | none    | Reserved; currently accepted but not read. |
+| `home_dir`   | string | —       | Reserved; the daemon home is set by `--home` / `CHEERS_ACP_HOME` (default `~/.cheers/acp-connector`), **not** by this key. |
+| `state_path` | string | `state.json` | Where the daemon persists runtime state (relative to the config file's directory). |
+| `log_dir`    | string | `~/.cheers/acp-connector/<name>/` | Where the daemon writes its `stdout`/`stderr` logs. When set, they become `<log_dir>/<name>.stdout.log` / `.stderr.log`. |
 
 ---
 
