@@ -11,7 +11,9 @@ use uuid::Uuid;
 use crate::{
     api::middleware::Claims,
     app_state::AppState,
+    domain::messages::{self, CreateMessageParams},
     errors::AppError,
+    gateway::realtime::frame::WireFrame,
     infra::crypto::{generate_bot_token, hash_bot_token},
 };
 
@@ -854,10 +856,188 @@ pub async fn bot_self_status(
     .execute(&state.db)
     .await?;
 
+    // Push the new status to channel viewers so the bot's member card updates live
+    // (mirrors what update_me does for users — a bot is a member too).
+    broadcast_bot_member_update(&state, &bot_id).await;
+
     Ok(Json(json!({
         "bot_id": bot_id,
         "status_text": status_text,
         "status_emoji": status_emoji,
         "updated": true,
+    })))
+}
+
+/// Broadcast a bot's current card (name/avatar/description/status) to every channel
+/// it's in, as a `member_updated` frame — the bot-side analogue of
+/// [`crate::api::users::broadcast_member_update`]. Best-effort; a bot's `bio` on the
+/// member card is its `description`. Never fails the caller.
+pub async fn broadcast_bot_member_update(state: &AppState, bot_id: &str) {
+    let row = match sqlx::query(
+        "SELECT display_name, avatar_url, description, status_text, status_emoji
+         FROM bot_accounts WHERE bot_id = $1",
+    )
+    .bind(bot_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(r)) => r,
+        _ => return,
+    };
+    let profile = json!({
+        "member_id": bot_id,
+        "member_type": "bot",
+        "display_name": row.try_get::<Option<String>, _>("display_name").ok().flatten(),
+        "avatar_url": row.try_get::<Option<String>, _>("avatar_url").ok().flatten(),
+        "bio": row.try_get::<Option<String>, _>("description").ok().flatten(),
+        "status_text": row.try_get::<Option<String>, _>("status_text").ok().flatten(),
+        "status_emoji": row.try_get::<Option<String>, _>("status_emoji").ok().flatten(),
+    });
+
+    let channels: Vec<String> = sqlx::query_scalar(
+        "SELECT channel_id::text FROM channel_memberships
+         WHERE member_id = $1 AND member_type = 'bot'",
+    )
+    .bind(bot_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    for cid in channels {
+        let Ok(channel_uuid) = Uuid::parse_str(&cid) else {
+            continue;
+        };
+        let mut data = profile.clone();
+        data["channel_id"] = json!(cid);
+        state
+            .fanout
+            .broadcast_channel(channel_uuid, WireFrame::channel(channel_uuid, "member_updated", data))
+            .await;
+    }
+}
+
+/// Fallback when a bot has no `status_update_prompt` configured, so the manual
+/// refresh button works out of the box.
+const DEFAULT_STATUS_REFRESH_PROMPT: &str =
+    "Update your status: set a short status line (and optional emoji) reflecting what \
+     you're currently working on by calling your self-status endpoint.";
+
+/// POST /api/v1/bots/:bot_id/status/refresh — owner/admin asks the agent to refresh
+/// its own status NOW. Posts the bot's configured `status_update_prompt` (mentioning
+/// the bot) into a **DM** the caller shares with it, so the normal prompt path runs
+/// the agent — which then writes its status via `/self-status`. A DM (not any shared
+/// group channel) is required so the prompt — which `list_bots` redacts from
+/// non-managers — is never made visible to other human members. Reuses the
+/// `session/prompt` INITIATE gate (the panel is already owner/admin-only); no
+/// connector changes needed.
+pub async fn refresh_bot_status(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(bot_id): Path<String>,
+) -> Result<Json<Value>, AppError> {
+    ensure_bot_owner_or_admin(&state, &claims, &bot_id).await?;
+
+    let bot_uuid =
+        Uuid::parse_str(&bot_id).map_err(|_| AppError::BadRequest("invalid bot id".into()))?;
+    let caller = Uuid::parse_str(&claims.sub)
+        .map_err(|_| AppError::Unauthorized("invalid user id".into()))?;
+
+    // The prompt that makes the agent produce its status; default so the button works
+    // before a custom `status_update_prompt` is configured.
+    let configured: Option<String> =
+        sqlx::query_scalar("SELECT status_update_prompt FROM bot_accounts WHERE bot_id = $1")
+            .bind(&bot_id)
+            .fetch_optional(&state.db)
+            .await?
+            .flatten();
+    let prompt = configured
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_STATUS_REFRESH_PROMPT.to_string());
+
+    // A DM the caller AND the bot both belong to: create_message needs the caller to be
+    // a member, and mention-triggering needs the bot to be one. We REQUIRE a DM (not any
+    // shared channel) — posting the configured `status_update_prompt` into a group room
+    // would expose it to other human members, contradicting the manager-only redaction
+    // `list_bots` applies to that same field. If no DM exists yet, ask the owner to open
+    // one rather than leaking the prompt.
+    let channel_id: Option<String> = sqlx::query_scalar(
+        "SELECT c.channel_id::text FROM channels c
+         JOIN channel_memberships cu
+           ON cu.channel_id = c.channel_id AND cu.member_id = $1 AND cu.member_type = 'user'
+         JOIN channel_memberships cb
+           ON cb.channel_id = c.channel_id AND cb.member_id = $2 AND cb.member_type = 'bot'
+         WHERE c.type = 'dm'
+         LIMIT 1",
+    )
+    .bind(&claims.sub)
+    .bind(&bot_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let channel_id = channel_id
+        .and_then(|c| Uuid::parse_str(&c).ok())
+        .ok_or_else(|| {
+            AppError::BadRequest(
+                "no DM with this bot — open a direct message with it first, then refresh".into(),
+            )
+        })?;
+
+    // INITIATE(prompt) gate. `create_message` posts the prompt but *silently skips*
+    // waking the bot when this event is denied (it `continue`s the dispatch loop and
+    // still returns Ok) — which would make this endpoint report a false success while
+    // the agent never runs. Check the same gate `send_message` uses up front and fail
+    // loudly instead. Fail-open on a rules error, matching create_message/cancel_message.
+    let caller_role: String = sqlx::query(
+        "SELECT role FROM channel_memberships
+         WHERE channel_id = $1 AND member_id = $2 AND member_type = 'user'",
+    )
+    .bind(channel_id.to_string())
+    .bind(&claims.sub)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .and_then(|r| r.try_get::<Option<String>, _>("role").ok().flatten())
+    .unwrap_or_else(|| "member".to_string());
+    let may_prompt = crate::domain::acp_policy::allows(
+        &state.db,
+        &bot_id,
+        &channel_id.to_string(),
+        &claims.sub,
+        &caller_role,
+        "session/prompt",
+        crate::domain::bot_event_policy::Capability::Initiate,
+    )
+    .await
+    .unwrap_or(true);
+    if !may_prompt {
+        return Err(AppError::Forbidden(
+            "not authorized to prompt this bot here — status refresh needs the ACP prompt permission"
+                .into(),
+        ));
+    }
+
+    let dto = messages::create_message(
+        &state.db,
+        &state.fanout,
+        &state.stream_registry,
+        &state.bot_locator,
+        CreateMessageParams {
+            user_id: caller,
+            channel_id,
+            content: prompt,
+            msg_type: None,
+            reply_to_msg_id: None,
+            file_ids: vec![],
+            mention_ids: vec![bot_uuid],
+            session_id: None,
+        },
+    )
+    .await?;
+
+    Ok(Json(json!({
+        "ok": true,
+        "channel_id": channel_id.to_string(),
+        "msg_id": dto.msg_id,
     })))
 }
