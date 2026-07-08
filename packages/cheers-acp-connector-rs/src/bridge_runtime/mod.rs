@@ -2972,7 +2972,14 @@ mod tests {
             cwd: None,
             additional_dirs: Vec::new(),
         };
-        let prompt = build_prompt(&task, &test_identity(), &test_prompt_policy(false), None, false, false);
+        let prompt = build_prompt(
+            &task,
+            &test_identity(),
+            &test_prompt_policy(false),
+            None,
+            false,
+            false,
+        );
         let text = prompt[0]["text"].as_str().expect("text block");
         assert!(
             text.contains("channel_id=chan-1"),
