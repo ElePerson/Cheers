@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { listWorkspaces, getPersonalWorkspace } from "@/api/workspaces";
 import { listChannels, listDms } from "@/api/channels";
 import toast from "react-hot-toast";
+import { Button } from "@/components/ui/button";
 import { useChatStore } from "@/stores/chatStore";
 import { useNotificationStore } from "@/stores/notificationStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -52,8 +53,12 @@ export default function ChatLayout() {
   const [navOpen, setNavOpen] = useState(false);
 
   // Load workspaces + the personal workspace on mount. The personal workspace is the
-  // user's home (DMs + private space), so it's the default selection.
-  useEffect(() => {
+  // user's home (DMs + private space), so it's the default selection. On failure we
+  // raise bootstrapFailed and show a retry panel in the main area instead of the
+  // pristine empty states — an unreachable gateway must never look like a brand-new
+  // account (mirrors BotsManager's loadFailed pattern).
+  const [bootstrapFailed, setBootstrapFailed] = useState(false);
+  const loadWorkspaces = useCallback(() => {
     Promise.all([listWorkspaces(), getPersonalWorkspace().catch(() => null)])
       .then(([ws, personal]) => {
         setWorkspaces(ws);
@@ -61,8 +66,18 @@ export default function ChatLayout() {
         if (!selectedWorkspaceId) {
           selectWorkspace(personal?.workspace_id ?? ws[0]?.workspace_id ?? null);
         }
+        setBootstrapFailed(false);
       })
-      .catch(() => {});
+      .catch(() => {
+        setBootstrapFailed(true);
+        toast.error(
+          "Couldn't load your workspaces — check the gateway connection, then retry."
+        );
+      });
+  }, [selectedWorkspaceId, setWorkspaces, setPersonalWorkspace, selectWorkspace]);
+  useEffect(() => {
+    loadWorkspaces();
+    // Run once on mount; the Retry button re-invokes loadWorkspaces directly.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load channels when the workspace changes. DMs are consolidated into the
@@ -79,12 +94,53 @@ export default function ChatLayout() {
       isPersonal ? listDms().catch(() => []) : Promise.resolve([]),
     ])
       .then(([chs, dms]) => setChannels([...chs, ...dms]))
-      .catch(() => {});
+      .catch(() => {
+        toast.error("Couldn't load channels — check the gateway connection.");
+      });
   }, [selectedWorkspaceId, personalWorkspace, setChannels]);
 
   useEffect(() => {
     refreshChannels();
   }, [refreshChannels]);
+
+  // Desktop: collapsible channel sidebar (the workspace rail always stays). The
+  // preference survives reloads; ⌘/Ctrl+B mirrors the header toggle button.
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => localStorage.getItem("cheers.sidebar.open") !== "0"
+  );
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((o) => {
+      try {
+        localStorage.setItem("cheers.sidebar.open", o ? "0" : "1");
+      } catch {
+        /* ignore */
+      }
+      return !o;
+    });
+  }, []);
+  useEffect(() => {
+    // Desktop-only chrome: on mobile the shortcut would do nothing visible but
+    // still persist a hidden-sidebar preference for the next desktop session.
+    if (isMobile) return;
+    const isMac = /Mac/i.test(navigator.platform || navigator.userAgent);
+    const onKey = (e: KeyboardEvent) => {
+      // Platform-appropriate modifier ONLY: on macOS Ctrl+B is native
+      // move-cursor-back in text fields — never intercept it there.
+      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+      if (!mod || e.shiftKey || e.altKey || e.key.toLowerCase() !== "b") return;
+      // Don't steal the keystroke from editable targets (composer, dialogs).
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
+      )
+        return;
+      e.preventDefault();
+      toggleSidebar();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isMobile, toggleSidebar]);
 
   // Mobile: picking a channel pushes the conversation screen.
   const openChatScreen = useCallback(() => {
@@ -123,6 +179,19 @@ export default function ChatLayout() {
   const selectedChannel =
     channels.find((c) => c.channel_id === selectedChannelId) ?? null;
 
+  // Shown in the main area when the mount-time load failed, so a dead gateway
+  // surfaces a reason + retry instead of silent empty states.
+  const bootstrapErrorPanel = (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+      <p className="max-w-xs text-sm text-red-400">
+        Couldn't load your workspaces. Check the gateway connection, then retry.
+      </p>
+      <Button size="sm" onClick={loadWorkspaces}>
+        Retry
+      </Button>
+    </div>
+  );
+
   if (isMobile) {
     const showChat = chatPushed && !!selectedChannel;
     return (
@@ -131,6 +200,8 @@ export default function ChatLayout() {
           <main className="flex-1 min-w-0 flex flex-col">
             <ChannelView channel={selectedChannel} onBack={closeChatScreen} />
           </main>
+        ) : bootstrapFailed ? (
+          <main className="flex-1 min-w-0 flex flex-col">{bootstrapErrorPanel}</main>
         ) : (
           <>
             <Sidebar
@@ -159,9 +230,21 @@ export default function ChatLayout() {
   return (
     <div className="flex h-full bg-zinc-950">
       <WorkspaceRail />
-      <Sidebar workspace={selectedWorkspace} />
+      {/* CSS-hidden (not unmounted) so sidebar-hosted dialogs (New DM / New
+          channel / workspace settings) and their drafts survive a toggle. */}
+      <div className={sidebarOpen ? "contents" : "hidden"}>
+        <Sidebar workspace={selectedWorkspace} />
+      </div>
       <main className="flex-1 min-w-0 flex flex-col">
-        <ChannelView channel={selectedChannel} />
+        {bootstrapFailed ? (
+          bootstrapErrorPanel
+        ) : (
+          <ChannelView
+            channel={selectedChannel}
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={toggleSidebar}
+          />
+        )}
       </main>
     </div>
   );

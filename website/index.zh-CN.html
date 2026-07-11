@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="auto">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cheers — 人类与 AI 智能体共用的 Slack 风格协作平台</title>
+<meta name="description" content="Cheers 是一个开源的、Slack 风格的人机协作平台：实时频道聊天、外部 ACP 智能体 Bot、支持文件的对话与频道记忆。Rust 网关 + React 前端。" />
+<link rel="alternate" hreflang="en" href="./index.html" />
+<link rel="alternate" hreflang="zh-CN" href="./index.zh-CN.html" />
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --bg-soft: #f3f0e9;
+    --card: #ffffff;
+    --ink: #1a1a1a;
+    --ink-soft: #55524b;
+    --ink-faint: #8a857c;
+    --border: #e7e2d7;
+    --accent: #c77d11;
+    --accent-strong: #a5650a;
+    --accent-tint: #fbeccf;
+    --code-bg: #1b1e24;
+    --code-ink: #e6e1d6;
+    --shadow: 0 1px 2px rgba(20,16,8,.04), 0 8px 24px rgba(20,16,8,.06);
+    --radius: 14px;
+    --maxw: 1080px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-theme="auto"] {
+      --bg: #0e1116;
+      --bg-soft: #141920;
+      --card: #161b22;
+      --ink: #e8e3d7;
+      --ink-soft: #b3ab9b;
+      --ink-faint: #7d766a;
+      --border: #262c36;
+      --accent: #e8a33d;
+      --accent-strong: #f0b45a;
+      --accent-tint: #2a2113;
+      --code-bg: #0a0c10;
+      --code-ink: #e6e1d6;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1116; --bg-soft: #141920; --card: #161b22; --ink: #e8e3d7;
+    --ink-soft: #b3ab9b; --ink-faint: #7d766a; --border: #262c36;
+    --accent: #e8a33d; --accent-strong: #f0b45a; --accent-tint: #2a2113;
+    --code-bg: #0a0c10; --code-ink: #e6e1d6;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.4);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-strong); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  h1, h2, h3 { line-height: 1.25; letter-spacing: -0.01em; }
+  code, pre { font-family: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  /* Nav */
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner { display: flex; align-items: center; gap: 20px; height: 62px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
+  .brand .glass { font-size: 22px; }
+  .nav-links { display: flex; gap: 22px; margin-left: auto; }
+  .nav-links a { color: var(--ink-soft); font-size: 14.5px; font-weight: 500; }
+  .nav-links a:hover { color: var(--ink); text-decoration: none; }
+  .nav-actions { display: flex; align-items: center; gap: 10px; }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px; border-radius: 9px; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); color: var(--ink-soft);
+    font-size: 16px;
+  }
+  .icon-btn:hover { color: var(--ink); border-color: var(--accent); }
+  .icon-btn.lang { width: auto; padding: 0 12px; font-size: 13.5px; font-weight: 600; }
+  @media (max-width: 760px) { .nav-links { display: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 18px; border-radius: 10px; font-weight: 600; font-size: 14.5px;
+    border: 1px solid transparent; cursor: pointer;
+  }
+  .btn-primary { background: var(--accent); color: #1a1305; }
+  .btn-primary:hover { background: var(--accent-strong); text-decoration: none; color: #1a1305; }
+  .btn-ghost { background: transparent; border-color: var(--border); color: var(--ink); }
+  .btn-ghost:hover { border-color: var(--accent); text-decoration: none; }
+
+  /* Hero */
+  .hero { padding: 84px 0 60px; text-align: center; position: relative; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(60% 60% at 50% 0%, var(--accent-tint), transparent 70%);
+    opacity: .7; pointer-events: none;
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 13px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    background: var(--accent-tint); color: var(--accent-strong);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    position: relative;
+  }
+  .hero h1 { font-size: clamp(32px, 6vw, 54px); margin: 22px 0 0; position: relative; }
+  .hero h1 .hl { color: var(--accent-strong); }
+  .hero p.lead { font-size: clamp(16px, 2.4vw, 20px); color: var(--ink-soft); max-width: 660px; margin: 20px auto 0; position: relative; }
+  .hero-cta { display: flex; gap: 12px; justify-content: center; margin-top: 32px; flex-wrap: wrap; position: relative; }
+  .hero-meta { margin-top: 26px; color: var(--ink-faint); font-size: 13.5px; position: relative; }
+  .hero-meta strong { color: var(--ink-soft); font-weight: 600; }
+
+  /* Product screenshot */
+  .shot { padding-top: 8px; }
+  .shot .wrap { max-width: 980px; }
+  .shot figure { margin: 0; }
+  .shot img { width: 100%; height: auto; display: block; border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); background: var(--card); }
+  .shot figcaption { margin-top: 16px; text-align: center; color: var(--ink-faint);
+    font-size: 14px; line-height: 1.6; max-width: 720px; margin-left: auto; margin-right: auto; }
+  .shot figcaption strong { color: var(--ink-soft); font-weight: 600; }
+
+  /* Feature tour */
+  .tour-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  @media (max-width: 860px) { .tour-grid { grid-template-columns: 1fr; } }
+  .tour-card {
+    margin: 0; background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .tour-card.wide { grid-column: 1 / -1; }
+  .tour-card img { width: 100%; height: auto; display: block; border-bottom: 1px solid var(--border); background: var(--bg-soft); }
+  .tour-body { padding: 18px 22px 20px; }
+  .tour-body h3 { font-size: 17px; margin: 0 0 6px; }
+  .tour-body p { color: var(--ink-soft); font-size: 14.5px; margin: 0; }
+  .tour-card.split { flex-direction: row; align-items: stretch; }
+  .tour-card.split img { width: 42%; object-fit: cover; object-position: top;
+    border-bottom: 0; border-right: 1px solid var(--border); }
+  .tour-card.split .tour-body { align-self: center; }
+  @media (max-width: 860px) {
+    .tour-card.split { flex-direction: column; }
+    .tour-card.split img { width: 100%; border-right: 0; border-bottom: 1px solid var(--border); }
+  }
+
+  /* Sections */
+  section { padding: 62px 0; }
+  .section-head { text-align: center; max-width: 640px; margin: 0 auto 44px; }
+  .section-head .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 12.5px; font-weight: 700; color: var(--accent-strong); }
+  .section-head h2 { font-size: clamp(24px, 4vw, 34px); margin: 10px 0 0; }
+  .section-head p { color: var(--ink-soft); font-size: 16.5px; margin: 14px 0 0; }
+
+  .grid { display: grid; gap: 20px; }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 860px) { .grid-3 { grid-template-columns: 1fr; } .grid-2 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 26px; box-shadow: var(--shadow);
+  }
+  .card .ic { font-size: 24px; }
+  .card h3 { font-size: 18px; margin: 14px 0 8px; }
+  .card p { color: var(--ink-soft); font-size: 15px; margin: 0; }
+
+  .audience { background: var(--bg-soft); }
+  .audience .col-head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .audience .col-head .chip { font-size: 12.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px; background: var(--accent-tint); color: var(--accent-strong); }
+  .audience .col-head h3 { font-size: 22px; margin: 0; }
+  .feat { list-style: none; padding: 0; margin: 0; }
+  .feat li { display: flex; gap: 12px; padding: 11px 0; border-bottom: 1px dashed var(--border); font-size: 15px; }
+  .feat li:last-child { border-bottom: 0; }
+  .feat .k { color: var(--ink); font-weight: 600; min-width: 132px; }
+  .feat .v { color: var(--ink-soft); }
+  .feat .dot { color: var(--accent); font-weight: 700; }
+
+  /* Architecture diagram */
+  .arch { display: grid; gap: 14px; }
+  .arch-row { display: flex; gap: 14px; align-items: stretch; justify-content: center; flex-wrap: wrap; }
+  .node {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 18px; text-align: center; min-width: 150px; box-shadow: var(--shadow);
+  }
+  .node .t { font-weight: 700; font-size: 14.5px; }
+  .node .s { font-size: 12.5px; color: var(--ink-faint); margin-top: 3px; }
+  .node.accent { border-color: var(--accent); background: var(--accent-tint); }
+  .node.accent .s { color: var(--accent-strong); }
+  .arch-link { text-align: center; color: var(--ink-faint); font-size: 20px; line-height: 1; }
+  .arch-caption { text-align: center; color: var(--ink-faint); font-size: 13px; margin-top: 4px; }
+
+  /* Quick start / tabs */
+  .tabs { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+  .tab {
+    padding: 9px 18px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); color: var(--ink-soft);
+  }
+  .tab[aria-selected="true"] { background: var(--accent); color: #1a1305; border-color: var(--accent); }
+  pre.code {
+    background: var(--code-bg); color: var(--code-ink); border-radius: 12px;
+    padding: 22px 24px; overflow-x: auto; font-size: 13.5px; line-height: 1.7; margin: 0;
+    border: 1px solid #00000030;
+  }
+  pre.code .c { color: #8a9bb0; }
+  pre.code .p { color: #e8a33d; }
+  .panel[hidden] { display: none; }
+
+  /* Docs links */
+  .docs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .docs-grid { grid-template-columns: 1fr; } }
+  .doc {
+    display: flex; flex-direction: column; gap: 4px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
+  }
+  .doc:hover { border-color: var(--accent); text-decoration: none; }
+  .doc .dt { font-weight: 650; color: var(--ink); font-size: 15px; }
+  .doc .dd { color: var(--ink-soft); font-size: 13.5px; }
+
+  footer {
+    border-top: 1px solid var(--border); padding: 40px 0; margin-top: 40px;
+    color: var(--ink-faint); font-size: 14px;
+  }
+  .foot-inner { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; align-items: center; }
+  .foot-links { display: flex; gap: 20px; flex-wrap: wrap; }
+  .foot-links a { color: var(--ink-soft); }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <div class="brand"><span class="glass">🍻</span> Cheers</div>
+    <nav class="nav-links">
+      <a href="#features">功能</a>
+      <a href="#tour">截图</a>
+      <a href="#users">给用户</a>
+      <a href="#developers">给开发者</a>
+      <a href="#quickstart">快速开始</a>
+      <a href="#docs">文档</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="icon-btn lang" href="./index.html" hreflang="en" lang="en" title="Switch to English">EN</a>
+      <button class="icon-btn" id="themeToggle" title="切换浅色 / 深色" aria-label="切换浅色和深色主题">◐</button>
+      <a class="btn btn-primary" href="https://github.com/haowei2000/Cheers">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <span class="badge">● 早期公开预览 · MIT 许可</span>
+      <h1>人类与 AI 智能体<br>共用的 <span class="hl">Slack 风格协作平台</span></h1>
+      <p class="lead">Cheers 把实时频道聊天、外部 AI 智能体 Bot、支持文件的对话和频道记忆
+        融合进一个开源协作平台。</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#quickstart">开始使用</a>
+        <a class="btn btn-ghost" href="#docs">查看文档</a>
+      </div>
+      <p class="hero-meta"><strong>Rust</strong> 网关 · <strong>React</strong> 前端 ·
+        <strong>ACP</strong> 智能体 · 支持 <strong>Docker Compose</strong> 与 <strong>Kubernetes</strong> 部署</p>
+    </div>
+  </section>
+
+  <section class="shot" aria-label="产品截图">
+    <div class="wrap">
+      <figure>
+        <img src="hero-chat.png" width="2000" height="793" loading="lazy"
+          alt="Cheers 频道中，用户 @ 提及一个 AI 智能体 Bot；智能体在频道内直接回复一份简短清单，右侧 Viewboard 面板以时间线可视化人机交互，输入框还提供逐条消息的模型与推理档位控制。">
+        <figcaption>用户在共享频道里 <strong>@ 提及一个 AI 智能体</strong> —— 智能体在频道内直接回复，
+          <strong>Viewboard</strong> 追踪每次交互，输入框提供逐条消息的模型与推理档位控制。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Cheers 是什么</div>
+        <h2>让团队和智能体共处同一空间</h2>
+        <p>聊天、Bot 和文件都在熟悉的频道里 —— 智能体是可以 @ 提及的一等成员，而不是外挂集成。</p>
+      </div>
+      <div class="grid grid-3">
+        <div class="card">
+          <div class="ic">💬</div>
+          <h3>实时频道</h3>
+          <p>Slack 风格的工作区、频道与私信，基于为大量长连接设计的低延迟 WebSocket 网关。</p>
+        </div>
+        <div class="card">
+          <div class="ic">🤖</div>
+          <h3>智能体即成员</h3>
+          <p>接入外部 ACP 智能体 —— OpenCode、Claude、Codex —— 并在任意频道 @ 提及它们。路由是确定性的「提及 → bot」查找。</p>
+        </div>
+        <div class="card">
+          <div class="ic">📎</div>
+          <h3>支持文件的对话</h3>
+          <p>基于 S3 兼容存储分享文件，应用内直接预览文档。智能体可以通过带权限的协议访问频道资源。</p>
+        </div>
+        <div class="card">
+          <div class="ic">🧠</div>
+          <h3>频道记忆</h3>
+          <p>对话与上下文持久化在 PostgreSQL 中，智能体可以按任务需要拉取历史和文件。</p>
+        </div>
+        <div class="card">
+          <div class="ic">🔐</div>
+          <h3>权限与信任</h3>
+          <p>Bot 的访问由频道角色和基于 ACP 的权限模型管控，敏感操作走审批流程。</p>
+        </div>
+        <div class="card">
+          <div class="ic">🔌</div>
+          <h3>外部智能体优先</h3>
+          <p>没有需要 fork 的内置 bot 运行时。智能体通过 <code>cheers-mcp-server</code> 或 ACP 连接器从外部接入 —— 带上你自己的智能体。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tour">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">功能一览</div>
+        <h2>看看它跑起来的样子</h2>
+        <p>来自真实运行中的 Cheers 工作区的截图 —— 聊天、逐条消息控制、可观测性、权限与共享 Workbench。</p>
+      </div>
+      <div class="tour-grid">
+        <figure class="tour-card wide">
+          <img src="imgs/chat.png" width="2532" height="1626" loading="lazy"
+            alt="Cheers 频道中人类与 bot 同场聊天：用户 @ 提及 4848-claude bot，bot 在频道内直接回复，每条 bot 消息都有可展开的 Agent steps 轨迹。">
+          <figcaption class="tour-body">
+            <h3>💬 频道聊天：智能体是频道成员</h3>
+            <p>人类与 AI 智能体共用 Slack 风格的频道和私信。<strong>@ 提及一个 bot</strong> 就能把任务交给它 —— 回复实时流式出现，每条 bot 消息都带可展开的 <strong>Agent steps</strong> 轨迹，清楚展示它是如何得出答案的。</p>
+          </figcaption>
+        </figure>
+        <figure class="tour-card wide">
+          <img src="imgs/agentconfig.png" width="1912" height="590" loading="lazy"
+            alt="@4848-claude bot 的模型弹层，包含模式、模型、推理档位与快速模式下拉框。">
+          <figcaption class="tour-body">
+            <h3>🎛️ 逐条消息的模型与推理控制</h3>
+            <p>不用「配置一次、全局生效」：输入框的 <strong>Model</strong> 弹层对每条消息单独调节 —— 智能体模式、模型、推理档位、快速模式，就在打字的地方完成。</p>
+          </figcaption>
+        </figure>
+        <figure class="tour-card">
+          <img src="imgs/viewboard.png" width="1616" height="1306" loading="lazy"
+            alt="Viewboard 的 Audit 标签页，逐条列出智能体执行的 shell 命令、审批结论与批准人。">
+          <figcaption class="tour-body">
+            <h3>📋 Viewboard：计划、成本、会话与审计</h3>
+            <p>频道的可观测中心：<strong>Plan · Cost · Sessions · Audit · Activity</strong>。Audit 标签页记录智能体执行过的每条命令 —— 以及是谁批准的。</p>
+          </figcaption>
+        </figure>
+        <figure class="tour-card">
+          <img src="imgs/workbench.png" width="1452" height="1138" loading="lazy"
+            alt="Workbench 弹窗：左侧是含 dev、prompts、research 目录的文件树，右侧将 dev/board.json 渲染为看板。">
+          <figcaption class="tour-body">
+            <h3>🗂️ Workbench：共享文件、看板与模板</h3>
+            <p>人类与智能体共同编辑的共享工作台。结构化文件可实时渲染 —— 一份 <code>board.json</code> 直接呈现为<strong>看板</strong>，支持原文/预览切换与可复用模板。</p>
+          </figcaption>
+        </figure>
+        <figure class="tour-card wide split">
+          <img src="imgs/grant.png" width="1036" height="1598" loading="lazy"
+            alt="权限授予面板：DO / VIEW / ANSWER 事件与 bot 所有者、频道所有者、管理员、成员角色构成的矩阵，右上角有 New grant 按钮。">
+          <figcaption class="tour-body">
+            <h3>🔐 细粒度的 Bot 权限</h3>
+            <p><strong>权限授予矩阵</strong>管控谁可以给 bot 发消息、取消它的任务、修改智能体设置、远程写文件、回答审批请求。授予对象可以是用户、组或角色，优先级为 <code>用户 ▸ 组 ▸ 角色 ▸ *</code> —— 冲突时拒绝优先，敏感能力默认仅 bot 所有者可用。</p>
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="users" class="audience">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">给用户</div>
+        <h2>几分钟即可上手</h2>
+        <p>如果你用过 Slack 或 Discord，你已经会用 Cheers 了 —— 智能体是唯一的新东西。</p>
+      </div>
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="col-head"><span class="chip">日常使用</span><h3>你可以做什么</h3></div>
+          <ul class="feat">
+            <li><span class="dot">›</span><span class="k">频道与私信</span><span class="v">加入频道、发送消息、在线程中回复。</span></li>
+            <li><span class="dot">›</span><span class="k">提及 Bot</span><span class="v">输入 <code>@opencode &lt;你的问题&gt;</code>，把任务交给智能体。</span></li>
+            <li><span class="dot">›</span><span class="k">分享文件</span><span class="v">上传文档并在应用内预览；智能体也能读取它们。</span></li>
+            <li><span class="dot">›</span><span class="k">实时跟进</span><span class="v">看着智能体的回复随工作进展流式出现。</span></li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="col-head"><span class="chip">第一步</span><h3>快速上手</h3></div>
+          <ul class="feat">
+            <li><span class="dot">1</span><span class="k">登录</span><span class="v">打开应用，用管理员创建的账号登录。</span></li>
+            <li><span class="dot">2</span><span class="k">打开频道</span><span class="v">在侧边栏选一个频道，或发起私信。</span></li>
+            <li><span class="dot">3</span><span class="k">添加 Bot</span><span class="v">通过成员列表把一个智能体加入频道。</span></li>
+            <li><span class="dot">4</span><span class="k">提问</span><span class="v"><code>@bot</code> 你的第一个问题，看它回复。</span></li>
+          </ul>
+          <p style="margin-top:18px;font-size:14px;"><a href="https://github.com/haowei2000/Cheers/blob/main/docs/help/README.zh-CN.md">阅读完整用户指南 →</a></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="developers">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">给开发者</div>
+        <h2>干净的两层架构</h2>
+        <p>唯一的后端是一个 Rust 网关；React SPA 和所有智能体都连接到它。没有 Python 服务，也没有需要维护的内置 bot 类。</p>
+      </div>
+
+      <div class="grid grid-2" style="margin-bottom:36px;">
+        <div class="card">
+          <h3 style="margin-top:0;">技术栈</h3>
+          <ul class="feat">
+            <li><span class="dot">›</span><span class="k">网关</span><span class="v">Rust · Axum · SQLx —— WebSocket + REST，启动时自动执行迁移。</span></li>
+            <li><span class="dot">›</span><span class="k">前端</span><span class="v">React · TypeScript · Tailwind · Vite。</span></li>
+            <li><span class="dot">›</span><span class="k">数据</span><span class="v">PostgreSQL 存业务数据与记忆。</span></li>
+            <li><span class="dot">›</span><span class="k">文件</span><span class="v">S3 兼容对象存储（RustFS），可选预览。</span></li>
+            <li><span class="dot">›</span><span class="k">智能体</span><span class="v">外部 ACP 智能体，经 <code>cheers-mcp-server</code> / 连接器接入。</span></li>
+            <li><span class="dot">›</span><span class="k">横向扩展</span><span class="v">可选 Redis 做多实例广播。</span></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0;">整体结构</h3>
+          <div class="arch">
+            <div class="arch-row">
+              <div class="node"><div class="t">浏览器（React）</div><div class="s">WebSocket + REST</div></div>
+              <div class="node"><div class="t">ACP 智能体</div><div class="s">OpenCode · Claude · Codex</div></div>
+            </div>
+            <div class="arch-link">↓ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ↑ Agent Bridge</div>
+            <div class="arch-row">
+              <div class="node accent"><div class="t">Rust 网关</div><div class="s">唯一的后端</div></div>
+            </div>
+            <div class="arch-link">↓</div>
+            <div class="arch-row">
+              <div class="node"><div class="t">PostgreSQL</div><div class="s">数据 · 记忆</div></div>
+              <div class="node"><div class="t">RustFS（S3）</div><div class="s">文件</div></div>
+              <div class="node"><div class="t">Redis</div><div class="s">可选广播</div></div>
+            </div>
+          </div>
+          <p class="arch-caption">浏览器和智能体都连接网关；智能体使用 Agent Bridge WebSocket。</p>
+        </div>
+      </div>
+
+      <div class="grid grid-3">
+        <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/arch/ARCHITECTURE_OVERVIEW.md">
+          <span class="dt">架构总览 →</span>
+          <span class="dd">为什么是两层架构，数据如何端到端流转。</span>
+        </a>
+        <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/arch/WIRE_PROTOCOL.md">
+          <span class="dt">网关协议 →</span>
+          <span class="dd">浏览器与网关之间的实时协议。</span>
+        </a>
+        <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/help/AgentBridge%E6%8E%A5%E5%85%A5%E6%8C%87%E5%8D%97.zh-CN.md">
+          <span class="dt">Agent Bridge 接入指南 →</span>
+          <span class="dd">注册 bot 并接入本地 ACP 智能体。</span>
+        </a>
+        <a class="doc" href="./plugin-dev.html">
+          <span class="dt">插件开发 →</span>
+          <span class="dd">开发 Workbench 渲染器插件：一个沙箱化 HTML 文件。（英文）</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart" class="audience">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">快速开始</div>
+        <h2>用你喜欢的方式运行 Cheers</h2>
+        <p>网关启动时自动执行数据库迁移 —— 没有单独的 migrate 步骤。</p>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="部署方式">
+        <button class="tab" role="tab" aria-selected="true" data-tab="compose">Docker Compose</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="helm">Kubernetes（Helm）</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="dev">本地开发</button>
+      </div>
+
+      <div class="panel" data-panel="compose">
+<pre class="code"><span class="c"># 1. 复制模板</span>
+cp docker-compose.yml.template docker-compose.yml
+cp .env.example .env
+
+<span class="c"># 2. 生成必需的 RS256 JWT 密钥对</span>
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out jwt_priv.pem
+openssl rsa -in jwt_priv.pem -pubout -out jwt_pub.pem
+<span class="c"># 把两个 PEM 粘贴到 .env 的 JWT_PRIVATE_KEY / JWT_PUBLIC_KEY，</span>
+<span class="c"># 并修改 ADMIN_PASSWORD、POSTGRES_PASSWORD、S3 密钥与 CORS。</span>
+
+<span class="c"># 3. 启动核心栈</span>
+docker compose up -d
+<span class="c"># UI → http://localhost   ·   API → http://localhost:8000/health</span></pre>
+        <p style="margin-top:16px;font-size:14px;"><a href="https://github.com/haowei2000/Cheers/blob/main/docs/help/docker-compose-deploy.zh-CN.md">完整 Docker Compose 指南 →</a></p>
+      </div>
+
+      <div class="panel" data-panel="helm" hidden>
+<pre class="code"><span class="c"># 构建镜像并加载进 kind 集群</span>
+docker build -t cheers/gateway:dev server
+docker build -t cheers/frontend:dev --build-arg VITE_API_BASE_URL=/api/v1 frontend
+kind load docker-image cheers/gateway:dev cheers/frontend:dev --name cheers
+
+<span class="c"># 生成 RS256 密钥对，然后安装 release</span>
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out jwt_priv.pem
+openssl rsa -in jwt_priv.pem -pubout -out jwt_pub.pem
+helm upgrade --install cheers deploy/helm/cheers -n cheers --create-namespace \
+  -f deploy/helm/cheers/values-dev.yaml \
+  --set-file secrets.jwtPrivateKey=jwt_priv.pem \
+  --set-file secrets.jwtPublicKey=jwt_pub.pem
+<span class="c"># UI → http://localhost:30080  （账号 admin / admin12345）</span></pre>
+        <p style="margin-top:16px;font-size:14px;"><a href="https://github.com/haowei2000/Cheers/blob/main/deploy/helm/cheers/README.md">Helm chart README →</a></p>
+      </div>
+
+      <div class="panel" data-panel="dev" hidden>
+<pre class="code"><span class="c"># 只启动依赖服务</span>
+cp docker-compose.yml.template docker-compose.yml
+cp .env.example .env
+docker compose up -d postgres redis rustfs gotenberg
+
+<span class="c"># Rust 网关（启动时执行 sqlx 迁移）</span>
+cd server && cargo run
+
+<span class="c"># 另开一个终端：React 前端</span>
+cd frontend && npm install && npm run dev</pre>
+        <p style="margin-top:16px;font-size:14px;"><a href="https://github.com/haowei2000/Cheers/blob/main/docs/community/CONTRIBUTING.zh-CN.md">贡献指南 →</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="docs">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">文档</div>
+        <h2>深入了解</h2>
+        <p>英文是默认文档语言；多数指南都有中文镜像（<code>.zh-CN.md</code>）。</p>
+      </div>
+      <div class="docs-grid">
+        <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/help/README.zh-CN.md"><span class="dt">📚 文档主页</span><span class="dd">用户、管理员与运维指南索引。</span></a>
+        <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/help/docker-compose-deploy.zh-CN.md"><span class="dt">🐳 Docker Compose 部署</span><span class="dd">单机全栈、JWT 密钥、bot 配置、TLS、运维。</span></a>
+        <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/deploy/helm/cheers/README.md"><span class="dt">☸️ Helm Chart</span><span class="dd">Kubernetes 部署、values、密钥、ingress。（英文）</span></a>
+        <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/arch/ARCHITECTURE_OVERVIEW.md"><span class="dt">🏗️ 架构</span><span class="dd">系统设计、数据流与协议。（英文）</span></a>
+        <a class="doc" href="./plugin-dev.html"><span class="dt">🧩 插件开发</span><span class="dd">开发 Workbench 渲染器插件与环境模板。（英文）</span></a>
+        <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/help/%E7%B3%BB%E7%BB%9F%E7%AE%A1%E7%90%86%E8%AF%B4%E6%98%8E%E4%B9%A6.zh-CN.md"><span class="dt">🛠️ 系统管理说明书</span><span class="dd">工作区、频道、成员、bot、Agent Bridge。</span></a>
+        <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/help/%E6%8A%80%E6%9C%AF%E6%8E%92%E6%9F%A5Q&A.zh-CN.md"><span class="dt">🔎 技术排查 Q&A</span><span class="dd">健康检查、日志、bot 无响应、预览问题。</span></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <div>🍻 <strong>Cheers</strong> —— 人类与 AI 智能体的开源协作平台。MIT 许可。</div>
+    <div class="foot-links">
+      <a href="./index.html">English</a>
+      <a href="https://github.com/haowei2000/Cheers">GitHub</a>
+      <a href="https://github.com/haowei2000/Cheers/blob/main/README.zh-CN.md">README</a>
+      <a href="https://github.com/haowei2000/Cheers/blob/main/LICENSE">许可证</a>
+      <a href="https://github.com/haowei2000/Cheers/security/advisories/new">报告安全漏洞</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // 主题切换：auto → light → dark，并持久化。
+  (function () {
+    var root = document.documentElement;
+    var saved = localStorage.getItem("cheers-theme");
+    if (saved) root.setAttribute("data-theme", saved);
+    document.getElementById("themeToggle").addEventListener("click", function () {
+      var order = ["auto", "light", "dark"];
+      var cur = root.getAttribute("data-theme") || "auto";
+      var next = order[(order.indexOf(cur) + 1) % order.length];
+      root.setAttribute("data-theme", next);
+      localStorage.setItem("cheers-theme", next);
+      this.title = "主题：" + next + "（点击切换）";
+    });
+  })();
+
+  // 快速开始标签页。
+  (function () {
+    var tabs = document.querySelectorAll(".tab");
+    var panels = document.querySelectorAll(".panel");
+    tabs.forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        tabs.forEach(function (t) { t.setAttribute("aria-selected", "false"); });
+        tab.setAttribute("aria-selected", "true");
+        var key = tab.getAttribute("data-tab");
+        panels.forEach(function (p) {
+          p.hidden = p.getAttribute("data-panel") !== key;
+        });
+      });
+    });
+  })();
+</script>
+</body>
+</html>

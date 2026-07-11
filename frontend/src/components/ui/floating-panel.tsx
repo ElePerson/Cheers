@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Maximize2, Minimize2, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -24,6 +24,8 @@ export function FloatingPanel({
   defaultPosClassName = "top-20 left-1/2 -translate-x-1/2",
   bodyClassName,
   headerExtra,
+  docked,
+  dockedClassName,
   children,
 }: {
   title: ReactNode;
@@ -38,10 +40,16 @@ export function FloatingPanel({
   bodyClassName?: string;
   /** Extra header controls, rendered between the title and the close button. */
   headerExtra?: ReactNode;
+  /** Desktop: render as a DOCKED work-area column (static layout space, no
+   *  drag/resize/minimize) instead of a floating window. Mobile keeps the
+   *  full-screen sheet either way. */
+  docked?: boolean;
+  /** Flex sizing of the docked column, e.g. "shrink basis-[720px] min-w-[480px]". */
+  dockedClassName?: string;
   children: ReactNode;
 }) {
   const isMobile = useIsMobile();
-  const drag = useWindowDrag(storageKey, !isMobile);
+  const drag = useWindowDrag(storageKey, !isMobile && !docked);
   // Minimized = just the title bar (a compact chip you can park anywhere).
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(`${storageKey}.min`) === "1"
@@ -57,8 +65,73 @@ export function FloatingPanel({
     });
   };
 
+  // On mobile the panel renders as a full-screen sheet that covers the app —
+  // modal-like — so it earns the same Esc-to-dismiss as Dialog. The desktop
+  // window is non-modal (chat stays usable behind it) and keeps close-button
+  // only. Skip defaultPrevented so a nested popover/menu still claims its own Esc.
+  useEffect(() => {
+    if (!isMobile) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        // Claim this Escape so, with several sheets/menus mounted, only the first
+        // to handle it closes — the rest see defaultPrevented and stand down.
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isMobile, onClose]);
+
   // Collapsed keeps the dragged position but sheds the resized width/height.
   const style: CSSProperties = collapsed && !isMobile ? drag.posStyle : drag.style;
+
+  if (docked && !isMobile) {
+    // Same card chrome as the floating window — only the placement differs: a
+    // static flex item inside the channel's work area. Collapsed keeps the
+    // title-bar chip look (content-height, parked at the lane top).
+    return (
+      <div
+        className={cn(
+          "flex min-h-0 flex-col overflow-hidden rounded-xl bg-zinc-900/95 shadow-2xl shadow-black/50 backdrop-blur-sm",
+          collapsed ? "w-[300px] shrink min-w-[10rem] self-start" : dockedClassName
+        )}
+      >
+        <div className="flex items-center gap-2 px-3 h-10 border-b border-zinc-800 flex-shrink-0 select-none">
+          {Icon && <Icon className="w-4 h-4 text-zinc-400 flex-shrink-0" />}
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 truncate">
+            {title}
+          </span>
+          <div className="flex-1" />
+          {!collapsed && headerExtra}
+          <button
+            onClick={toggleCollapsed}
+            title={collapsed ? "Expand" : "Minimize"}
+            className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+          >
+            {collapsed ? <Maximize2 className="w-3.5 h-3.5" /> : <Minimize2 className="w-3.5 h-3.5" />}
+          </button>
+          <button
+            onClick={onClose}
+            title="Close"
+            className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        {!collapsed && (
+          <div
+            className={cn(
+              "flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-3",
+              bodyClassName
+            )}
+          >
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div

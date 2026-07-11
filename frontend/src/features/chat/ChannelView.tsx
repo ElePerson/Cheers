@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { ArrowLeft, Hash, Users, Loader2, PanelRight, Paperclip, FolderTree, Settings, LayoutDashboard, Reply, X, Copy, Forward } from "lucide-react";
+import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from "react";
+import { ArrowLeft, Hash, Users, Loader2, PanelRight, PanelLeftClose, PanelLeftOpen, Paperclip, FolderTree, Settings, LayoutDashboard, Reply, X, Copy, Forward, AlertCircle } from "lucide-react";
 import toast from "react-hot-toast";
 import { listMessages, sendMessage } from "@/api/messages";
 import { listChannelMembers, markChannelRead, joinChannel } from "@/api/channels";
@@ -19,9 +19,18 @@ import { useChatRealtime, type PresenceFocus } from "./hooks/useChatRealtime";
 import { WorkbenchDrawer } from "./workbench/WorkbenchDrawer";
 import { ViewBoardDrawer } from "./workbench/ViewBoardDrawer";
 import { ErrorDialog } from "@/components/ui/ErrorDialog";
-import { ChannelFilesDialog } from "./ChannelFilesDialog";
-import { ChannelSettingsDialog } from "./ChannelSettingsDialog";
-import { RemoteWorkspaceDialog } from "./RemoteWorkspaceDialog";
+import { Button } from "@/components/ui/button";
+// Click-gated dialogs — kept out of the eager ChatLayout chunk. RemoteWorkspaceDialog
+// pulls in DiffView + the workspace browser; all three only mount on explicit user action.
+const ChannelFilesDialog = lazy(() =>
+  import("./ChannelFilesDialog").then((m) => ({ default: m.ChannelFilesDialog })),
+);
+const ChannelSettingsDialog = lazy(() =>
+  import("./ChannelSettingsDialog").then((m) => ({ default: m.ChannelSettingsDialog })),
+);
+const RemoteWorkspaceDialog = lazy(() =>
+  import("./RemoteWorkspaceDialog").then((m) => ({ default: m.RemoteWorkspaceDialog })),
+);
 import { ResolveRefContext, type RefClick } from "./workspaceLink";
 import { ProfileCardProvider, type ProfileData } from "./ProfileHovercard";
 import { resolveRef, getWorkspaceFile } from "@/api/workspace";
@@ -62,9 +71,13 @@ interface Props {
   channel: Channel | null;
   /** Mobile stacked navigation: renders a back button that pops to the channel list. */
   onBack?: () => void;
+  /** Desktop: whether the channel sidebar is expanded (drives the toggle icon). */
+  sidebarOpen?: boolean;
+  /** Desktop: collapse/expand the channel sidebar (renders a header toggle). */
+  onToggleSidebar?: () => void;
 }
 
-export function ChannelView({ channel, onBack }: Props) {
+export function ChannelView({ channel, onBack, sidebarOpen, onToggleSidebar }: Props) {
   const user = useAuthStore((s) => s.user);
   const patchChannel = useChatStore((s) => s.patchChannel);
   // Public channel the caller can see (as a workspace member) but hasn't joined
@@ -75,6 +88,9 @@ export function ChannelView({ channel, onBack }: Props) {
   const [joining, setJoining] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  // Distinguishes a failed initial history load from a genuinely empty channel —
+  // without it a network/server failure renders the "No messages yet" empty state.
+  const [loadError, setLoadError] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [mentionables, setMentionables] = useState<MentionCandidate[]>([]);
@@ -111,6 +127,8 @@ export function ChannelView({ channel, onBack }: Props) {
   );
 
   // A different channel means a different session set — drop any prior target.
+  // Also drop any buffered stream deltas + cancel a pending flush so a stale frame
+  // can't synthesize a phantom bubble in the newly opened channel.
   useEffect(() => {
     setSelectedSessionId("");
     setMentionedBots([]);
@@ -120,7 +138,20 @@ export function ChannelView({ channel, onBack }: Props) {
     setSelectMode(false);
     setSelectedIds(new Set());
     setForward(null);
+    pendingDeltas.current.clear();
+    if (flushHandle.current !== null) {
+      cancelAnimationFrame(flushHandle.current);
+      flushHandle.current = null;
+    }
   }, [channel?.channel_id]);
+
+  // Cancel any scheduled delta flush on unmount.
+  useEffect(
+    () => () => {
+      if (flushHandle.current !== null) cancelAnimationFrame(flushHandle.current);
+    },
+    []
+  );
 
   // Esc backs out of the transient message-action states (reply draft / selection).
   // Composer popups (mention/command picker, attach menu) preventDefault their own
@@ -163,21 +194,31 @@ export function ChannelView({ channel, onBack }: Props) {
     lastSeqRef.current = max;
   }, [messages]);
 
-  // Initial history load (backend returns ascending: oldest first).
-  useEffect(() => {
-    if (!channel || isPreview) {
-      setMessages([]);
-      return;
-    }
+  // Initial history load (backend returns ascending: oldest first). A failure
+  // sets loadError so the render shows a retryable error region instead of the
+  // "No messages yet" empty state (a failed fetch must not masquerade as empty).
+  const loadHistory = useCallback(() => {
+    if (!channel || isPreview) return;
     setLoading(true);
+    setLoadError(false);
     setMessages([]);
     listMessages(channel.channel_id, { limit: 50 })
       .then((res) => {
         setMessages(sortMessages(res.messages ?? res.data ?? []));
         setHasMore(res.meta?.has_more_before ?? false);
       })
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
+  }, [channel, isPreview]);
+
+  useEffect(() => {
+    if (!channel || isPreview) {
+      setMessages([]);
+      setLoadError(false);
+      return;
+    }
+    loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channel?.channel_id, isPreview]);
 
   // Opening a channel marks it read: clear the unread + mention badges
@@ -239,6 +280,12 @@ export function ChannelView({ channel, onBack }: Props) {
       });
       setMessages((prev) => mergeMessages(prev, res.messages ?? res.data ?? []));
       setHasMore(res.meta?.has_more_before ?? false);
+    } catch {
+      // hasMore stays true, so scrolling up again retries this page. Stable id so a
+      // momentum-scroll at the top that re-fires loadMore collapses to one toast.
+      toast.error("Couldn't load older messages — scroll up to try again", {
+        id: "load-older-failed",
+      });
     } finally {
       setLoadingMore(false);
     }
@@ -269,29 +316,67 @@ export function ChannelView({ channel, onBack }: Props) {
     }
   }, []);
 
-  const handleStreamDelta = useCallback((msgId: string, delta: string) => {
+  // Stream deltas arrive one WS frame per token chunk (tens/sec). Applying a
+  // setMessages per frame runs a full channel render + O(N) list rebuild each time.
+  // Instead buffer per-msg_id text and flush once per animation frame: the final
+  // rendered content is byte-identical, only intermediate paint frequency drops from
+  // token-rate to display-refresh-rate.
+  const pendingDeltas = useRef<Map<string, string>>(new Map());
+  const flushHandle = useRef<number | null>(null);
+
+  const flushDeltas = useCallback(() => {
+    flushHandle.current = null;
+    const batch = pendingDeltas.current;
+    if (batch.size === 0) return;
+    pendingDeltas.current = new Map();
     setMessages((prev) => {
-      const idx = prev.findIndex((m) => m.msg_id === msgId);
-      if (idx === -1) {
-        // Defensive: a delta beat its placeholder bubble — synthesize one.
-        return upsertMessage(prev, {
-          msg_id: msgId,
-          sender_type: "bot",
-          content: delta,
-          is_partial: true,
-          _streaming: true,
-        });
+      let out = prev;
+      let copied = false; // true once `out` is a fresh array safe to mutate in place
+      for (const [msgId, delta] of batch) {
+        const idx = out.findIndex((m) => m.msg_id === msgId);
+        if (idx === -1) {
+          // Defensive: a delta beat its placeholder bubble — synthesize one.
+          out = upsertMessage(out, {
+            msg_id: msgId,
+            sender_type: "bot",
+            content: delta,
+            is_partial: true,
+            _streaming: true,
+          });
+          copied = true; // upsertMessage returns a fresh array
+        } else {
+          if (!copied) {
+            out = out.slice();
+            copied = true;
+          }
+          out[idx] = {
+            ...out[idx],
+            content: (out[idx].content ?? "") + delta,
+            _streaming: true,
+          };
+        }
       }
-      return prev.map((m, i) =>
-        i === idx
-          ? { ...m, content: (m.content ?? "") + delta, _streaming: true }
-          : m
-      );
+      return out;
     });
   }, []);
 
+  const handleStreamDelta = useCallback(
+    (msgId: string, delta: string) => {
+      const pending = pendingDeltas.current;
+      pending.set(msgId, (pending.get(msgId) ?? "") + delta);
+      if (flushHandle.current === null) {
+        flushHandle.current = requestAnimationFrame(flushDeltas);
+      }
+    },
+    [flushDeltas]
+  );
+
   const handleStreamDone = useCallback(
     (update: Partial<Message> & { msg_id: string }) => {
+      // The done frame carries the full final content and overwrites wholesale, so
+      // any buffered deltas for this message are stale — drop them (flushing first
+      // would either duplicate text or append after finalize).
+      pendingDeltas.current.delete(update.msg_id);
       setMessages((prev) =>
         upsertMessage(prev, { ...update, _streaming: false, _trace: null })
       );
@@ -308,6 +393,7 @@ export function ChannelView({ channel, onBack }: Props) {
   );
 
   const handleDeleted = useCallback((msgId: string) => {
+    pendingDeltas.current.delete(msgId);
     setMessages((prev) =>
       prev.map((m) =>
         m.msg_id === msgId ? { ...m, is_deleted: true, content: "" } : m
@@ -500,6 +586,41 @@ export function ChannelView({ channel, onBack }: Props) {
     []
   );
 
+  // Stable handlers for the memoized drawers so a streaming re-render of ChannelView
+  // doesn't hand them fresh closures (which would defeat React.memo).
+  const closeViewBoard = useCallback(() => setVbOpen(false), []);
+  const toggleViewBoardMinimal = useCallback(() => setVbMinimal((m) => !m), []);
+  const closeWorkbench = useCallback(() => setWbOpen(false), []);
+
+  // Hoisted so the memoized MessageComposer isn't handed a fresh `toolbar` element
+  // on every streaming delta render. Null when there's no channel (composer unmounted).
+  const composerToolbar = useMemo(
+    () =>
+      channel ? (
+        <>
+          <SessionSwitcher
+            channelId={channel.channel_id}
+            bots={switcherBots}
+            value={selectedSessionId}
+            onChange={setSelectedSessionId}
+          />
+          {/* Model/mode + config for the @mentioned bot(s); with no live
+              mention, fall back to the channel's bots so the controls are
+              always reachable. */}
+          <ComposerModelPopover
+            channelId={channel.channel_id}
+            bots={
+              mentionedBots.length > 0
+                ? mentionedBots.map((m) => ({ botId: m.id, name: m.label }))
+                : switcherBots
+            }
+            selectedSessionId={selectedSessionId}
+          />
+        </>
+      ) : null,
+    [channel, switcherBots, selectedSessionId, mentionedBots]
+  );
+
   // Resolve a clicked file reference by PROVENANCE and TAKE THE USER TO where it
   // lives — the channel files view (inbox), the workbench File panel (desk), or the
   // workspace browser — instead of a silent download. Never assumes the bot followed
@@ -554,12 +675,13 @@ export function ChannelView({ channel, onBack }: Props) {
     [channel, botLabels]
   );
 
-  async function handleSend(
-    content: string,
-    mentionIds: string[],
-    fileIds: string[],
-    mentionNames: string[] = []
-  ) {
+  const handleSend = useCallback(
+    async (
+      content: string,
+      mentionIds: string[],
+      fileIds: string[],
+      mentionNames: string[] = []
+    ) => {
     if (!channel) return;
     const sendParams: NonNullable<Message["_sendParams"]> = {
       content,
@@ -590,7 +712,9 @@ export function ChannelView({ channel, onBack }: Props) {
       };
       setMessages((prev) => sortMessages([...prev, failed]));
     }
-  }
+    },
+    [channel, selectedSessionId, replyTo, user]
+  );
 
   // Retry a failed send: flip the placeholder to "sending", replay the original
   // arguments verbatim, then drop the placeholder on success (the confirmed row
@@ -703,9 +827,30 @@ export function ChannelView({ channel, onBack }: Props) {
     }
   }
 
+  // Desktop sidebar collapse toggle — lives in the channel header (and floats in
+  // the empty state, so an expanded toggle is always reachable while collapsed).
+  const isMac = /Mac/i.test(navigator.platform || navigator.userAgent);
+  const sidebarToggle = onToggleSidebar ? (
+    <button
+      onClick={onToggleSidebar}
+      title={`${sidebarOpen ? "Hide" : "Show"} sidebar (${isMac ? "⌘B" : "Ctrl+B"})`}
+      aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+      className="max-md:hidden flex items-center justify-center w-7 h-7 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 flex-shrink-0 transition-colors"
+    >
+      {sidebarOpen ? (
+        <PanelLeftClose className="w-4 h-4" />
+      ) : (
+        <PanelLeftOpen className="w-4 h-4" />
+      )}
+    </button>
+  ) : null;
+
   if (!channel) {
     return (
-      <div className="flex-1 flex items-center justify-center text-zinc-600 text-sm flex-col gap-3">
+      <div className="relative flex-1 flex items-center justify-center text-zinc-400 text-sm flex-col gap-3">
+        {sidebarToggle && (
+          <div className="absolute top-2.5 left-3">{sidebarToggle}</div>
+        )}
         <Hash className="w-10 h-10 text-zinc-700" />
         <span>Select a channel to start chatting</span>
       </div>
@@ -731,6 +876,7 @@ export function ChannelView({ channel, onBack }: Props) {
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-3 max-md:gap-1 px-4 max-md:px-2 h-12 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm flex-shrink-0">
+          {sidebarToggle && <div className="-ml-1 mr-1">{sidebarToggle}</div>}
           {onBack && (
             <button
               onClick={onBack}
@@ -750,9 +896,9 @@ export function ChannelView({ channel, onBack }: Props) {
           <Hash className="w-10 h-10 text-zinc-700" />
           <div className="text-zinc-100 font-semibold text-lg">#{channel.name}</div>
           {channel.purpose && (
-            <p className="text-sm text-zinc-500 max-w-md">{channel.purpose}</p>
+            <p className="text-sm text-zinc-400 max-w-md">{channel.purpose}</p>
           )}
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-zinc-400">
             You&apos;re not a member of this channel yet. Join to read and send
             messages.
           </p>
@@ -770,15 +916,20 @@ export function ChannelView({ channel, onBack }: Props) {
     );
   }
 
+  const anyWorkOpen = vbOpen || wbOpen || wsOpen;
+
   return (
     <ProfileCardProvider members={memberById}>
-    {/* Instrument windows FLOAT over the chat (no reserved column), so opening
-        them never squeezes the message list or the composer. */}
+    {/* Desktop: instrument panels DOCK into a dedicated work area on the right,
+        which reserves real layout space. The chat column is always width-capped:
+        centered while the work area is closed, docked against it when open.
+        Mobile: the panels stay full/near-full-screen overlay sheets. */}
     <div className="flex flex-col h-full">
       {/* Channel header — `relative z-30` lifts the header's stacking context (it
           already makes one via backdrop-blur) above the message list, so header
           dropdowns like the session panel render over the chat, not under it. */}
       <div className="relative z-30 flex items-center gap-3 max-md:gap-1 px-4 max-md:px-2 h-12 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm flex-shrink-0">
+        {sidebarToggle && <div className="-ml-1 mr-1">{sidebarToggle}</div>}
         {onBack && (
           <button
             onClick={onBack}
@@ -796,13 +947,13 @@ export function ChannelView({ channel, onBack }: Props) {
         {channel.purpose && (
           <div className="hidden md:flex items-center gap-3 min-w-0">
             <div className="w-px h-4 bg-zinc-700" />
-            <span className="text-xs text-zinc-500 truncate">
+            <span className="text-xs text-zinc-400 truncate">
               {channel.purpose}
             </span>
           </div>
         )}
         <div className="flex-1" />
-        <div className="hidden md:flex items-center gap-3 text-xs text-zinc-500">
+        <div className="hidden md:flex items-center gap-3 text-xs text-zinc-400">
           {onlineCount > 0 && (
             <span className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -889,10 +1040,33 @@ export function ChannelView({ channel, onBack }: Props) {
         )}
       </div>
 
+      <div className="flex-1 min-h-0 flex">
+      {/* Chat region — the capped column inside centers or right-docks. The
+          md floor keeps the chat usable however crowded the dock gets (the
+          dock scrolls horizontally past that point instead). */}
+      <div className="flex-1 min-w-0 md:min-w-[24rem] flex flex-col">
+      <div
+        className={`flex flex-col h-full w-full min-w-0 md:max-w-[52rem] ${
+          anyWorkOpen ? "md:ml-auto" : "md:mx-auto"
+        }`}
+      >
       {/* Messages */}
       {loading ? (
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="w-5 h-5 text-zinc-600 animate-spin" />
+        </div>
+      ) : loadError ? (
+        <div
+          role="alert"
+          className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
+        >
+          <AlertCircle className="w-8 h-8 text-zinc-700" />
+          <p className="text-sm text-zinc-400 max-w-xs">
+            Couldn&apos;t load messages. Check your connection and try again.
+          </p>
+          <Button variant="secondary" size="sm" onClick={loadHistory}>
+            Retry
+          </Button>
         </div>
       ) : (
         <ResolveRefContext.Provider value={resolveAndOpenRef}>
@@ -918,7 +1092,7 @@ export function ChannelView({ channel, onBack }: Props) {
           <span className="text-zinc-300 font-medium">
             {selectedIds.size} selected
           </span>
-          <span className="text-zinc-600">· click messages to toggle</span>
+          <span className="text-zinc-400">· click messages to toggle</span>
           <div className="flex-1" />
           <button
             type="button"
@@ -946,7 +1120,7 @@ export function ChannelView({ channel, onBack }: Props) {
           <button
             type="button"
             onClick={clearSelection}
-            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-zinc-500 hover:text-zinc-200"
+            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-zinc-400 hover:text-zinc-200"
           >
             <X className="w-3.5 h-3.5" />
             Cancel
@@ -958,9 +1132,9 @@ export function ChannelView({ channel, onBack }: Props) {
       {replyTo && !selectMode && (
         <div className="flex items-center gap-2 px-4 py-1.5 border-t border-zinc-800 bg-zinc-900/60 text-xs">
           <Reply className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-          <span className="text-zinc-500 flex-shrink-0">Replying to</span>
+          <span className="text-zinc-400 flex-shrink-0">Replying to</span>
           <span className="text-zinc-300 font-medium flex-shrink-0">{displayName(replyTo)}</span>
-          <span className="text-zinc-600 truncate italic">
+          <span className="text-zinc-400 truncate italic">
             {(replyTo.content ?? "").replace(/<#file:[^>]+>/g, "").trim().slice(0, 120)}
           </span>
           <button
@@ -980,64 +1154,88 @@ export function ChannelView({ channel, onBack }: Props) {
         channelName={channel.name}
         mentionables={mentionables}
         commands={commands}
-        toolbar={
-          <>
-            <SessionSwitcher
-              channelId={channel.channel_id}
-              bots={switcherBots}
-              value={selectedSessionId}
-              onChange={setSelectedSessionId}
-            />
-            {/* Model/mode + config for the @mentioned bot(s); with no live
-                mention, fall back to the channel's bots so the controls are
-                always reachable. Collapsed behind a "Model" button — click to
-                open the popover (each bot's row self-hides when it advertises
-                nothing). */}
-            <ComposerModelPopover
-              channelId={channel.channel_id}
-              bots={
-                mentionedBots.length > 0
-                  ? mentionedBots.map((m) => ({ botId: m.id, name: m.label }))
-                  : switcherBots
-              }
-              selectedSessionId={selectedSessionId}
-            />
-          </>
-        }
+        toolbar={composerToolbar}
         onMentionsChange={setMentionedBots}
         onSend={handleSend}
       />
+      </div>
+      </div>
 
-      <WorkbenchDrawer
-        open={wbOpen}
-        onClose={() => setWbOpen(false)}
-        channelId={channel.channel_id}
-        sendResourceReq={sendResourceReq}
-        openFilePath={wbTarget}
-        filesTick={boardTick.files}
-      />
+      {/* Work area — a dedicated lane on the right where the instrument cards
+          (unchanged chrome) are laid out side by side instead of floating over
+          the chat. Cards shrink from their preferred width toward their minimum
+          before the lane scrolls; the chat column always keeps its floor. On
+          mobile the wrapper is display:contents — the panels stay overlay
+          sheets there. */}
+      <aside
+        className={`max-md:contents flex min-w-0 min-h-0 ${
+          anyWorkOpen ? "md:gap-3 md:p-3 md:overflow-x-auto" : ""
+        }`}
+      >
+        {wsOpen && (
+          <Suspense fallback={null}>
+          <RemoteWorkspaceDialog
+            channelId={channel.channel_id}
+            onClose={() => setWsOpen(false)}
+            initialBotId={wsInit.botId}
+            initialPath={wsInit.path}
+            // Default the browse to the composer's active session ("" = Auto → no
+            // session scope → the dialog shows the bot's full allowed roots).
+            sessionId={selectedSessionId || undefined}
+            // "workspace" board tick (an agent finished a turn; carries the emitting
+            // bot) → the dialog refetches its current dir + a clean open file, but
+            // only when the tick's bot is the one being browsed.
+            workspaceTick={workspaceTick}
+            // Live-watch: the bot-scoped `workspace_signal` (agent touched a file). The
+            // dialog registers a watch while open and refetches when a signal for ITS bot
+            // arrives. See onWorkspaceSignal → workspaceSignal above.
+            workspaceSignal={workspaceSignal}
+            // Workspace presence: broadcast our own focus + render who ELSE is viewing this
+            // bot's workspace. `focus` is the parsed presence list; names resolve via the
+            // channel member map; currentUserId filters ourselves out of the chips.
+            sendPresenceFocus={sendPresenceFocus}
+            workspaceFocus={workspaceFocus}
+            currentUserId={user?.user_id}
+            memberNames={memberNames}
+          />
+          </Suspense>
+        )}
 
-      <ViewBoardDrawer
-        open={vbOpen}
-        onClose={() => setVbOpen(false)}
-        channelId={channel.channel_id}
-        sendResourceReq={sendResourceReq}
-        selectedSessionId={selectedSessionId}
-        boardTick={boardTick}
-        shiftedForWorkbench={wbOpen}
-        minimal={vbMinimal}
-        onToggleMinimal={() => setVbMinimal((m) => !m)}
-        onJumpToMessage={jumpToMessage}
-      />
-      {filesOpen && (
-        <ChannelFilesDialog
+        <ViewBoardDrawer
+          open={vbOpen}
+          onClose={closeViewBoard}
           channelId={channel.channel_id}
-          onClose={() => setFilesOpen(false)}
-          focusFileId={filesFocus}
+          sendResourceReq={sendResourceReq}
+          selectedSessionId={selectedSessionId}
+          boardTick={boardTick}
+          minimal={vbMinimal}
+          onToggleMinimal={toggleViewBoardMinimal}
+          onJumpToMessage={jumpToMessage}
         />
+
+        <WorkbenchDrawer
+          open={wbOpen}
+          onClose={closeWorkbench}
+          channelId={channel.channel_id}
+          sendResourceReq={sendResourceReq}
+          openFilePath={wbTarget}
+          filesTick={boardTick.files}
+        />
+      </aside>
+      </div>
+      {filesOpen && (
+        <Suspense fallback={null}>
+          <ChannelFilesDialog
+            channelId={channel.channel_id}
+            onClose={() => setFilesOpen(false)}
+            focusFileId={filesFocus}
+          />
+        </Suspense>
       )}
       {settingsOpen && (
-        <ChannelSettingsDialog channel={channel} onClose={() => setSettingsOpen(false)} />
+        <Suspense fallback={null}>
+          <ChannelSettingsDialog channel={channel} onClose={() => setSettingsOpen(false)} />
+        </Suspense>
       )}
       {forward && (
         <ForwardDialog
@@ -1051,32 +1249,6 @@ export function ChannelView({ channel, onBack }: Props) {
         />
       )}
       {refError && <ErrorDialog message={refError} onClose={() => setRefError(null)} />}
-      {wsOpen && (
-        <RemoteWorkspaceDialog
-          channelId={channel.channel_id}
-          onClose={() => setWsOpen(false)}
-          initialBotId={wsInit.botId}
-          initialPath={wsInit.path}
-          // Default the browse to the composer's active session ("" = Auto → no
-          // session scope → the dialog shows the bot's full allowed roots).
-          sessionId={selectedSessionId || undefined}
-          // "workspace" board tick (an agent finished a turn; carries the emitting
-          // bot) → the dialog refetches its current dir + a clean open file, but
-          // only when the tick's bot is the one being browsed.
-          workspaceTick={workspaceTick}
-          // Live-watch: the bot-scoped `workspace_signal` (agent touched a file). The
-          // dialog registers a watch while open and refetches when a signal for ITS bot
-          // arrives. See onWorkspaceSignal → workspaceSignal above.
-          workspaceSignal={workspaceSignal}
-          // Workspace presence: broadcast our own focus + render who ELSE is viewing this
-          // bot's workspace. `focus` is the parsed presence list; names resolve via the
-          // channel member map; currentUserId filters ourselves out of the chips.
-          sendPresenceFocus={sendPresenceFocus}
-          workspaceFocus={workspaceFocus}
-          currentUserId={user?.user_id}
-          memberNames={memberNames}
-        />
-      )}
     </div>
     </ProfileCardProvider>
   );

@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Cheers — a Slack-style hub for humans and AI agents</title>
 <meta name="description" content="Cheers is an open-source, Slack-style collaboration hub for humans and AI agents: real-time channel chat, external ACP agent bots, file-aware conversations, and channel memory. Rust gateway + React frontend." />
+<link rel="alternate" hreflang="zh-CN" href="./index.zh-CN.html" />
+<link rel="alternate" hreflang="en" href="./index.html" />
 <style>
   :root {
     --bg: #fbfaf7;
@@ -86,6 +88,7 @@
     font-size: 16px;
   }
   .icon-btn:hover { color: var(--ink); border-color: var(--accent); }
+  .icon-btn.lang { width: auto; padding: 0 12px; font-size: 13.5px; font-weight: 600; }
   @media (max-width: 760px) { .nav-links { display: none; } }
 
   .btn {
@@ -128,6 +131,28 @@
   .shot figcaption { margin-top: 16px; text-align: center; color: var(--ink-faint);
     font-size: 14px; line-height: 1.55; max-width: 720px; margin-left: auto; margin-right: auto; }
   .shot figcaption strong { color: var(--ink-soft); font-weight: 600; }
+
+  /* Feature tour */
+  .tour-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  @media (max-width: 860px) { .tour-grid { grid-template-columns: 1fr; } }
+  .tour-card {
+    margin: 0; background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .tour-card.wide { grid-column: 1 / -1; }
+  .tour-card img { width: 100%; height: auto; display: block; border-bottom: 1px solid var(--border); background: var(--bg-soft); }
+  .tour-body { padding: 18px 22px 20px; }
+  .tour-body h3 { font-size: 17px; margin: 0 0 6px; }
+  .tour-body p { color: var(--ink-soft); font-size: 14.5px; margin: 0; }
+  .tour-card.split { flex-direction: row; align-items: stretch; }
+  .tour-card.split img { width: 42%; object-fit: cover; object-position: top;
+    border-bottom: 0; border-right: 1px solid var(--border); }
+  .tour-card.split .tour-body { align-self: center; }
+  @media (max-width: 860px) {
+    .tour-card.split { flex-direction: column; }
+    .tour-card.split img { width: 100%; border-right: 0; border-bottom: 1px solid var(--border); }
+  }
 
   /* Sections */
   section { padding: 62px 0; }
@@ -217,12 +242,14 @@
     <div class="brand"><span class="glass">🍻</span> Cheers</div>
     <nav class="nav-links">
       <a href="#features">Features</a>
+      <a href="#tour">Screenshots</a>
       <a href="#users">For Users</a>
       <a href="#developers">For Developers</a>
       <a href="#quickstart">Quick Start</a>
       <a href="#docs">Docs</a>
     </nav>
     <div class="nav-actions">
+      <a class="icon-btn lang" href="./index.zh-CN.html" hreflang="zh-CN" lang="zh-CN" title="切换到中文版">中文</a>
       <button class="icon-btn" id="themeToggle" title="Toggle light / dark" aria-label="Toggle light and dark theme">◐</button>
       <a class="btn btn-primary" href="https://github.com/haowei2000/Cheers">GitHub</a>
     </div>
@@ -295,6 +322,58 @@
           <h3>External-agent-first</h3>
           <p>No built-in bot runtime to fork. Agents connect from outside via <code>cheers-mcp-server</code> or an ACP connector — bring your own.</p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tour">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Feature Tour</div>
+        <h2>See it in action</h2>
+        <p>Real screenshots from a running Cheers workspace — chat, per-message controls, observability, permissions, and the shared Workbench.</p>
+      </div>
+      <div class="tour-grid">
+        <figure class="tour-card wide">
+          <img src="imgs/chat.png" width="2532" height="1626" loading="lazy"
+            alt="A Cheers channel with humans and bots chatting together: a user @-mentions the 4848-claude bot, the bot replies inline, and each bot message has an expandable Agent steps trace.">
+          <figcaption class="tour-body">
+            <h3>💬 Channel chat with agents as members</h3>
+            <p>Humans and AI agents share Slack-style channels and DMs. <strong>@-mention a bot</strong> to hand it a task — its reply streams in live, and every bot message carries an expandable <strong>Agent steps</strong> trace showing exactly how it got to its answer.</p>
+          </figcaption>
+        </figure>
+        <figure class="tour-card wide">
+          <img src="imgs/agentconfig.png" width="1912" height="590" loading="lazy"
+            alt="The composer's model popover for the @4848-claude bot with dropdowns for mode, model, reasoning effort, and fast mode.">
+          <figcaption class="tour-body">
+            <h3>🎛️ Per-message model &amp; reasoning controls</h3>
+            <p>No global settings round-trip: the composer's <strong>Model</strong> popover steers each individual message — agent mode, model, reasoning effort, and fast mode — right where you type.</p>
+          </figcaption>
+        </figure>
+        <figure class="tour-card">
+          <img src="imgs/viewboard.png" width="1616" height="1306" loading="lazy"
+            alt="The Viewboard Audit tab listing each shell command executed by an agent together with the approval decision and the approving user.">
+          <figcaption class="tour-body">
+            <h3>📋 Viewboard: plans, cost, sessions &amp; audit</h3>
+            <p>The channel's observability surface: <strong>Plan · Cost · Sessions · Audit · Activity</strong>. The Audit tab records every command an agent ran — and who approved it.</p>
+          </figcaption>
+        </figure>
+        <figure class="tour-card">
+          <img src="imgs/workbench.png" width="1452" height="1138" loading="lazy"
+            alt="The Workbench modal: a file tree with dev, prompts, and research folders on the left, and dev/board.json rendered as a kanban board on the right.">
+          <figcaption class="tour-body">
+            <h3>🗂️ Workbench: shared files, boards &amp; templates</h3>
+            <p>A shared workspace humans and agents edit together. Structured files render live — a <code>board.json</code> becomes a <strong>kanban board</strong> with raw/preview toggle and reusable templates.</p>
+          </figcaption>
+        </figure>
+        <figure class="tour-card wide split">
+          <img src="imgs/grant.png" width="1036" height="1598" loading="lazy"
+            alt="The permission grants panel: a matrix of DO / VIEW / ANSWER events against the bot owner, channel owner, admin, and member roles, with a New grant button.">
+          <figcaption class="tour-body">
+            <h3>🔐 Fine-grained bot permissions</h3>
+            <p>A <strong>permission-grant matrix</strong> governs who may message a bot, cancel its tasks, change agent settings, write files remotely, or answer approval requests. Grants target a user, group, or role with precedence <code>user ▸ group ▸ role ▸ *</code> — deny wins ties, and sensitive capabilities start owner-only.</p>
+          </figcaption>
+        </figure>
       </div>
     </div>
   </section>

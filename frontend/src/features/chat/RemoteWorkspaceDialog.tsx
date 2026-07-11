@@ -6,6 +6,7 @@ import {
   Download,
   FileText,
   Folder,
+  FolderPlus,
   GitBranch,
   GitCommit,
   GitCompare,
@@ -15,6 +16,11 @@ import {
   Save,
   X,
 } from "lucide-react";
+import toast from "react-hot-toast";
+import {
+  createChannelBotSession,
+  getSessionControls,
+} from "@/api/sessionControl";
 import {
   downloadWorkspaceFile,
   getGitCommitFiles,
@@ -66,7 +72,7 @@ function cleanErr(e: unknown): string {
  */
 function gitMark(xy: string): { m: string; cls: string } | null {
   if (xy === "!!") return null;
-  if (xy === "??") return { m: "?", cls: "text-zinc-500" };
+  if (xy === "??") return { m: "?", cls: "text-zinc-400" };
   if (xy.includes("D")) return { m: "D", cls: "text-rose-400" };
   if (xy.includes("A")) return { m: "A", cls: "text-emerald-400" };
   if (xy.includes("R")) return { m: "R", cls: "text-sky-400" };
@@ -118,6 +124,20 @@ function isStagedCode(xy: string): boolean {
 /** A worktree status char that means the change is unstaged or untracked (not `.` clean). */
 function isUnstagedCode(xy: string): boolean {
   return xy[1] !== ".";
+}
+
+/**
+ * Absolute path of a root-relative browse location: the connector's canonical browse
+ * root (`WorkspaceTree.root`, always absolute POSIX) joined with a root-relative
+ * `path` (`""` = the root itself). Collapses the boundary slash so neither a trailing
+ * slash on the root nor a leading slash on the relative part yields `//`. This is the
+ * `cwd` handed to session creation, which the gateway requires to be absolute and the
+ * connector re-clamps against its `allowed_roots`.
+ */
+function joinAbs(root: string, rel: string): string {
+  const base = root.replace(/\/+$/, "");
+  const r = rel.replace(/^\/+/, "");
+  return r ? `${base}/${r}` : base || "/";
 }
 
 export function RemoteWorkspaceDialog({
@@ -188,7 +208,7 @@ export function RemoteWorkspaceDialog({
   );
   const deepLinked = useRef(false);
   // Session-scoped by default: browse only the active session's root set. Un-checking
-  // "整个允许目录" drops the session id so the user sees the bot's ENTIRE allowed roots.
+  // "Entire allowed roots" drops the session id so the user sees the bot's ENTIRE allowed roots.
   const [scoped, setScoped] = useState(true);
   const effectiveSessionId = scoped ? sessionId : undefined;
   // Workspace policy metadata (allowed/effective roots, cwd, git availability) for the
@@ -197,6 +217,14 @@ export function RemoteWorkspaceDialog({
   // Explicitly selected browse root (one of meta.effective_roots). null = "Auto"
   // (connector default: session root / default_cwd / first allowed root).
   const [root, setRoot] = useState<string | null>(null);
+
+  // Whether the caller holds the `session_create` INITIATE grant for this bot in this
+  // channel (from /session-controls). Fail-closed: false until the server confirms it,
+  // so the "new session here" affordances stay hidden without the grant. The gateway
+  // re-checks the same grant on the create call — this only gates the UI. Reset per bot.
+  const [canCreateSession, setCanCreateSession] = useState(false);
+  // In-flight guard so a double-click can't fire two create calls.
+  const [creatingSession, setCreatingSession] = useState(false);
 
   // ── Read-only git visibility for the current directory's repo (supplementary) ──
   // Cleared silently when the dir isn't a git repo (`repo: false` answer) or git
@@ -436,6 +464,23 @@ export function RemoteWorkspaceDialog({
       alive = false;
     };
   }, [channelId, botId, effectiveSessionId]);
+
+  // Resolve the caller's session-create grant for the selected bot (best-effort). The
+  // affordance is fail-closed: any error / older gateway leaves it hidden. Independent
+  // of the browse scope — the grant is per (bot, channel), not per root set.
+  useEffect(() => {
+    if (!botId) {
+      setCanCreateSession(false);
+      return;
+    }
+    let alive = true;
+    getSessionControls(channelId, botId)
+      .then((c) => alive && setCanCreateSession(c.can_create_session === true))
+      .catch(() => alive && setCanCreateSession(false));
+    return () => {
+      alive = false;
+    };
+  }, [channelId, botId]);
 
   // Refetch whenever the browse context changes (bot / directory / scope).
   useEffect(() => {
@@ -717,6 +762,29 @@ export function RemoteWorkspaceDialog({
     setRoot(null); // the other scope has a different effective root set
   }, []);
 
+  // Spin up a new "other" session rooted at a folder in this browse view. `rel` is a
+  // root-relative directory path ("" = the current browse root); the absolute `cwd`
+  // is treeRoot ⊕ rel. Gated in the UI by the caller's session_create grant, and
+  // re-validated server-side against the connector's `allowed_roots` — that gateway
+  // check (not this one) is the security boundary. The session then shows up in the
+  // channel's Sessions panel.
+  const createSessionAt = useCallback(
+    async (rel: string) => {
+      if (!botId || treeRoot === null || !canCreateSession || creatingSession) return;
+      const cwdAbs = joinAbs(treeRoot, rel);
+      setCreatingSession(true);
+      try {
+        await createChannelBotSession(channelId, botId, { cwd: cwdAbs });
+        toast.success(`New session rooted at ${cwdAbs}`);
+      } catch (e) {
+        toast.error(cleanErr(e));
+      } finally {
+        setCreatingSession(false);
+      }
+    },
+    [channelId, botId, treeRoot, canCreateSession, creatingSession]
+  );
+
   // Switch the browse to another allowed root (null = Auto): reset like a scope flip.
   const selectRoot = useCallback((r: string | null) => {
     setRoot(r);
@@ -893,17 +961,32 @@ export function RemoteWorkspaceDialog({
     <FloatingPanel
       title="Remote workspace"
       icon={FolderTree}
-      onClose={onClose}
+      // Guard against silently discarding edits to a file on the bot's machine:
+      // a dirty buffer must confirm before the panel closes (X, backdrop, Esc).
+      onClose={() => {
+        if (
+          dirty &&
+          file &&
+          !window.confirm(`Discard unsaved changes to ${file.filename}?`)
+        )
+          return;
+        onClose();
+      }}
       storageKey="cheers.float.workspace"
       className="w-[1024px]"
       defaultPosClassName="top-16 left-1/2 -translate-x-1/2"
-      // Mobile: the panes stack and stretch (max-md:flex-1 inside) — the body must
-      // be a non-scrolling flex column there, same as Dialog's fullScreenOnMobile.
-      bodyClassName="max-md:flex max-md:flex-col max-md:overflow-hidden"
+      // Desktop: laid out in the channel's work area (widest card — it hosts a
+      // side-by-side tree + editor; shrinks when the lane gets crowded).
+      // Mobile: full-screen sheet via FloatingPanel.
+      docked
+      dockedClassName="w-[1024px] shrink min-w-[480px]"
+      // The panes stack (mobile) or sit side-by-side (docked) and stretch — the
+      // body must be a non-scrolling flex column in both cases.
+      bodyClassName="flex flex-col overflow-hidden"
     >
       {/* Bot picker */}
-      <div className="flex items-center gap-2 mb-2 text-xs flex-wrap max-md:flex-shrink-0">
-        <span className="text-zinc-500">Bot</span>
+      <div className="flex items-center gap-2 mb-2 text-xs flex-wrap flex-shrink-0">
+        <span className="text-zinc-400">Bot</span>
         <select
           value={botId ?? ""}
           onChange={(e) => {
@@ -956,7 +1039,7 @@ export function RemoteWorkspaceDialog({
         <div className="flex-1" />
         {meta?.git_ops === "off" && (
           <span
-            className="text-zinc-600"
+            className="text-zinc-400"
             title="This connector's policy disables git inspection (git_ops = off)"
           >
             git off
@@ -964,8 +1047,8 @@ export function RemoteWorkspaceDialog({
         )}
         {sessionId && (
           <label
-            className="flex items-center gap-1 text-zinc-500 cursor-pointer select-none"
-            title="勾选:浏览该 bot 的全部允许目录(不再限定在当前会话的根集)"
+            className="flex items-center gap-1 text-zinc-400 cursor-pointer select-none"
+            title="Browse this bot's entire allowed roots (not limited to the current session's root set)"
           >
             <input
               type="checkbox"
@@ -973,14 +1056,14 @@ export function RemoteWorkspaceDialog({
               onChange={toggleScoped}
               className="accent-emerald-600"
             />
-            整个允许目录
+            Entire allowed roots
           </label>
         )}
       </div>
 
       {/* Git branch badge — quiet, only when the current dir resolves to a repo. */}
       {botId && git && (
-        <div className="flex items-center gap-2 mb-2 text-[11px] text-zinc-400">
+        <div className="flex items-center gap-2 mb-2 text-[11px] text-zinc-400 flex-shrink-0">
           <GitBranch className="w-3 h-3 text-zinc-500 shrink-0" />
           <span
             className="text-zinc-300 font-mono truncate"
@@ -992,13 +1075,13 @@ export function RemoteWorkspaceDialog({
           {!!git.behind && <span className="text-amber-400">↓{git.behind}</span>}
           {git.upstream && (
             <span
-              className="text-zinc-600 font-mono truncate"
+              className="text-zinc-400 font-mono truncate"
               title={`Tracking ${git.upstream}`}
             >
               vs {git.upstream}
             </span>
           )}
-          <span className="text-zinc-500">
+          <span className="text-zinc-400">
             {git.entries.length} change{git.entries.length === 1 ? "" : "s"}
           </span>
         </div>
@@ -1007,8 +1090,8 @@ export function RemoteWorkspaceDialog({
       {/* Workspace presence — who ELSE is viewing this bot's workspace right now, so
           co-editing is visible before conflicts happen. */}
       {botId && viewers.length > 0 && (
-        <div className="flex items-center flex-wrap gap-1.5 mb-2 text-[11px]">
-          <span className="text-zinc-600 shrink-0">Viewing</span>
+        <div className="flex items-center flex-wrap gap-1.5 mb-2 text-[11px] flex-shrink-0">
+          <span className="text-zinc-400 shrink-0">Viewing</span>
           {viewers.map((v) => {
             const name = memberNames?.get(v.user_id) || v.user_id.slice(0, 8);
             const base = v.path ? v.path.split("/").pop() : null;
@@ -1026,7 +1109,7 @@ export function RemoteWorkspaceDialog({
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                 <span className="text-zinc-300">{name}</span>
-                {base && <span className="text-zinc-500 truncate max-w-[140px]">· {base}</span>}
+                {base && <span className="text-zinc-400 truncate max-w-[140px]">· {base}</span>}
                 {sameFile && <span className="text-amber-400 shrink-0">· also editing</span>}
               </span>
             );
@@ -1035,38 +1118,40 @@ export function RemoteWorkspaceDialog({
       )}
 
       {!botId ? (
-        <div className="py-10 text-center text-xs text-zinc-600">
+        <div className="py-10 text-center text-xs text-zinc-400">
           Select an online bot to browse the workspace on its machine.
         </div>
       ) : (
-        // Desktop: side-by-side tree + editor at a fixed height. Mobile: the dialog is a
-        // full-screen sheet (fullScreenOnMobile), so stack the panes vertically and let
-        // this body fill the remaining height; each pane keeps its own internal scroll.
-        <div className="flex gap-3 h-[62vh] max-md:h-auto max-md:flex-1 max-md:min-h-0 max-md:flex-col">
+        // Desktop (docked): side-by-side tree + editor filling the column height.
+        // Mobile: a full-screen sheet, so stack the panes vertically. Either way the
+        // panes fill the remaining body height and keep their own internal scroll.
+        <div className="flex gap-3 flex-1 min-h-0 max-md:flex-col">
           {/* Tree pane */}
           <div className="w-1/3 min-w-[200px] max-md:w-full max-md:min-w-0 max-md:h-2/5 max-md:flex-none rounded overflow-hidden flex flex-col">
             {/* Files / Changes / History switch — the latter two only for a git repo. */}
             {git && (
-              <div className="flex items-center border-b border-zinc-800 text-[11px]">
+              <div className="flex items-center gap-1 px-2 py-1.5 border-b border-zinc-800">
                 <button
                   onClick={() => {
                     setLeftView("files");
                     setDiff(null);
                   }}
-                  className={`px-2.5 py-1.5 ${
+                  aria-pressed={leftView === "files"}
+                  className={`rounded-md px-2 py-1 text-xs transition-colors ${
                     leftView === "files"
-                      ? "text-zinc-100 bg-zinc-800"
-                      : "text-zinc-500 hover:text-zinc-300"
+                      ? "bg-zinc-800 text-zinc-100"
+                      : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
                   }`}
                 >
                   Files
                 </button>
                 <button
                   onClick={() => setLeftView("changes")}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 ${
+                  aria-pressed={leftView === "changes"}
+                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
                     leftView === "changes"
-                      ? "text-zinc-100 bg-zinc-800"
-                      : "text-zinc-500 hover:text-zinc-300"
+                      ? "bg-zinc-800 text-zinc-100"
+                      : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
                   }`}
                 >
                   Changes
@@ -1078,10 +1163,11 @@ export function RemoteWorkspaceDialog({
                 </button>
                 <button
                   onClick={() => setLeftView("history")}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 ${
+                  aria-pressed={leftView === "history"}
+                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
                     leftView === "history"
-                      ? "text-zinc-100 bg-zinc-800"
-                      : "text-zinc-500 hover:text-zinc-300"
+                      ? "bg-zinc-800 text-zinc-100"
+                      : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
                   }`}
                 >
                   <History className="w-3 h-3" /> History
@@ -1149,7 +1235,7 @@ export function RemoteWorkspaceDialog({
                       );
                     };
                     const label = (text: string, n: number) => (
-                      <div className="px-2 pt-2 pb-1 text-[10px] uppercase tracking-wide text-zinc-500">
+                      <div className="px-2 pt-2 pb-1 text-[10px] uppercase tracking-wide text-zinc-400">
                         {text} <span className="tabular-nums text-zinc-400">{n}</span>
                       </div>
                     );
@@ -1168,7 +1254,7 @@ export function RemoteWorkspaceDialog({
                           </>
                         )}
                         {git.entries.length === 0 && (
-                          <div className="px-2 py-3 text-[11px] text-zinc-600">
+                          <div className="px-2 py-3 text-[11px] text-zinc-400">
                             Working tree clean
                           </div>
                         )}
@@ -1215,7 +1301,7 @@ export function RemoteWorkspaceDialog({
                             {c.subject}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1 pl-4 text-[10px] text-zinc-500">
+                        <div className="flex items-center gap-1 pl-4 text-[10px] text-zinc-400">
                           <span className="truncate">{c.author}</span>
                           <span className="shrink-0">· {relDate(c.date)}</span>
                         </div>
@@ -1223,16 +1309,16 @@ export function RemoteWorkspaceDialog({
                     );
                   })}
                   {log !== null && log.length === 0 && !logBusy && (
-                    <div className="px-2 py-3 text-[11px] text-zinc-600">No commits</div>
+                    <div className="px-2 py-3 text-[11px] text-zinc-400">No commits</div>
                   )}
                   {log === null && logBusy && (
-                    <div className="px-2 py-3 text-[11px] text-zinc-600">Loading…</div>
+                    <div className="px-2 py-3 text-[11px] text-zinc-400">Loading…</div>
                   )}
                   {log !== null && log.length > 0 && !logDone && (
                     <button
                       onClick={() => void loadMoreLog()}
                       disabled={logBusy}
-                      className="w-full px-2 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+                      className="w-full px-2 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
                     >
                       {logBusy ? "Loading…" : `Load ${LOG_PAGE} more`}
                     </button>
@@ -1258,6 +1344,16 @@ export function RemoteWorkspaceDialog({
                       className="p-0.5 rounded hover:bg-zinc-800"
                     >
                       <GitCompare className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {canCreateSession && treeRoot !== null && (
+                    <button
+                      onClick={() => void createSessionAt(cwd)}
+                      disabled={creatingSession}
+                      title={`Start a new session rooted here (${joinAbs(treeRoot, cwd)})`}
+                      className="p-0.5 rounded hover:bg-zinc-800 hover:text-emerald-300 disabled:opacity-40"
+                    >
+                      <FolderPlus className="w-3.5 h-3.5" />
                     </button>
                   )}
                   <button onClick={() => void refreshAll()} title="Refresh" className="p-0.5 rounded hover:bg-zinc-800">
@@ -1290,24 +1386,43 @@ export function RemoteWorkspaceDialog({
                             </span>
                           )}
                         </button>
-                        {/* Directory-scoped diff, on hover (repo dirs only). */}
-                        {ent.is_dir && git && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void openDiff(ent.path, false);
-                            }}
-                            title={`Diff ${ent.name}/ (working tree)`}
-                            className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover/row:flex items-center p-0.5 rounded bg-zinc-800 text-zinc-400 hover:text-zinc-100"
-                          >
-                            <GitCompare className="w-3 h-3" />
-                          </button>
+                        {/* Per-directory hover actions: start a new session rooted at
+                            this folder (with the session_create grant), and — for repo
+                            dirs — diff it. Grouped so the two buttons never overlap. */}
+                        {ent.is_dir && (canCreateSession || git) && (
+                          <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover/row:flex items-center gap-1">
+                            {canCreateSession && treeRoot !== null && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void createSessionAt(ent.path);
+                                }}
+                                disabled={creatingSession}
+                                title={`Start a new session rooted at ${ent.name}/`}
+                                className="flex items-center p-0.5 rounded bg-zinc-800 text-zinc-400 hover:text-emerald-300 disabled:opacity-40"
+                              >
+                                <FolderPlus className="w-3 h-3" />
+                              </button>
+                            )}
+                            {git && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void openDiff(ent.path, false);
+                                }}
+                                title={`Diff ${ent.name}/ (working tree)`}
+                                className="flex items-center p-0.5 rounded bg-zinc-800 text-zinc-400 hover:text-zinc-100"
+                              >
+                                <GitCompare className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     );
                   })}
                   {entries?.length === 0 && (
-                    <div className="px-2 py-3 text-[11px] text-zinc-600">Empty directory</div>
+                    <div className="px-2 py-3 text-[11px] text-zinc-400">Empty directory</div>
                   )}
                 </div>
               </>
@@ -1412,7 +1527,7 @@ export function RemoteWorkspaceDialog({
                 <DiffView diff={diff.text} className="flex-1" />
               </>
             ) : !file ? (
-              <div className="flex-1 flex items-center justify-center text-xs text-zinc-600">
+              <div className="flex-1 flex items-center justify-center text-xs text-zinc-400">
                 Select a file on the left to view it
               </div>
             ) : (
@@ -1421,7 +1536,7 @@ export function RemoteWorkspaceDialog({
                   <span className="text-zinc-200 truncate flex-1" title={file.path}>
                     {file.filename}
                   </span>
-                  <span className="text-zinc-600">{file.size_bytes}B</span>
+                  <span className="text-zinc-400">{file.size_bytes}B</span>
                   {file.is_text &&
                     (canWrite ? (
                       dirty && (
@@ -1453,31 +1568,33 @@ export function RemoteWorkspaceDialog({
                 {conflict && (
                   <div className="flex items-center gap-2 max-md:flex-wrap px-2 py-1.5 border-b border-amber-800/50 bg-amber-950/30 text-[11px] text-amber-300">
                     <span className="flex-1">
-                      文件已被其他进程修改(远端 {conflict.sizeBytes}B)。「重新载入」会用远端内容替换当前编辑;「强制覆盖」会覆盖远端改动。
+                      File changed on the server (remote {conflict.sizeBytes}B).
+                      Reload replaces your edits; Force overwrite discards the
+                      remote change.
                     </span>
                     <button
                       onClick={() => void openFile(file.path)}
                       disabled={busy}
-                      title="放弃当前编辑,重新载入远端最新内容"
+                      title="Discard your edits and reload the latest from the server"
                       className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100 disabled:opacity-40"
                     >
-                      <RefreshCw className="w-3 h-3" /> 重新载入
+                      <RefreshCw className="w-3 h-3" /> Reload
                     </button>
                     <button
                       onClick={() => {
                         if (
                           window.confirm(
-                            "强制覆盖会覆盖远端已改动的版本,该版本将丢失。确定继续?"
+                            "Force overwrite will discard the version changed on the server — that version will be lost. Continue?"
                           )
                         ) {
                           void doSave(conflict.currentEtag ?? undefined);
                         }
                       }}
                       disabled={busy}
-                      title="用当前编辑覆盖远端版本"
+                      title="Overwrite the server version with your edits"
                       className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded bg-amber-700 hover:bg-amber-600 text-zinc-100 disabled:opacity-40"
                     >
-                      <Save className="w-3 h-3" /> 强制覆盖
+                      <Save className="w-3 h-3" /> Force overwrite
                     </button>
                   </div>
                 )}
@@ -1500,7 +1617,7 @@ export function RemoteWorkspaceDialog({
                       className="max-w-full"
                     />
                   ) : (
-                    <div className="p-4 text-xs text-zinc-500">
+                    <div className="p-4 text-xs text-zinc-400">
                       Binary file — no preview. Use "Download" above to get it.
                     </div>
                   )}

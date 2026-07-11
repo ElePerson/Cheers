@@ -33,9 +33,17 @@ export interface ViewBoardContext {
   onJumpToMessage?: (msgId: string) => void;
 }
 
+// Trailing-coalesce window for tick-driven refetches. A user↔bot exchange or a
+// board_signal burst bumps the tick several times in quick succession; without this
+// each bump fired a full refetch (e.g. the Activity board pulls 200 events + the
+// member list). We fire the first bump immediately (zero latency for a lone message)
+// then swallow further bumps into one trailing refetch per window.
+const BOARD_REFETCH_DEBOUNCE_MS = 500;
+
 /** Tick-driven refetch that (a) skips the mount (useResourceQuery / the board's own
- *  initial load already fetched), and (b) defers while hidden, catching up once the
- *  board becomes visible again. Shared by defineViewBoard and self-fetching boards. */
+ *  initial load already fetched), (b) defers while hidden, catching up once the board
+ *  becomes visible again, and (c) coalesces bursts of ticks into at most one refetch
+ *  per ~500ms window. Shared by defineViewBoard and self-fetching boards. */
 export function useBoardTickRefetch(
   ctx: ViewBoardContext,
   boardId: string,
@@ -46,12 +54,50 @@ export function useBoardTickRefetch(
   // Initialize to the mount tick so a signal that arrived before mount doesn't
   // duplicate the initial fetch.
   const lastTick = useRef(tick);
+  // Newest observed tick + latest refetch identity, read at flush time so a coalesced
+  // flush always targets the current scope/params rather than a stale closure.
+  const latestTick = useRef(tick);
+  latestTick.current = tick;
+  const refetchRef = useRef(refetch);
+  refetchRef.current = refetch;
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRunAt = useRef(0);
+
   useEffect(() => {
-    if (visible && tick > lastTick.current) {
-      lastTick.current = tick;
-      refetch();
+    if (!visible) {
+      // Went hidden: drop any pending flush WITHOUT advancing lastTick, so the board
+      // catches up exactly once when it's revealed again.
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
     }
-  }, [tick, visible, refetch]);
+    if (tick <= lastTick.current) return;
+    // A flush is already scheduled — it will pick up the newest tick when it fires.
+    if (timerRef.current !== null) return;
+
+    const run = () => {
+      timerRef.current = null;
+      lastTick.current = latestTick.current;
+      lastRunAt.current = Date.now();
+      refetchRef.current();
+    };
+    const sinceLast = Date.now() - lastRunAt.current;
+    if (sinceLast >= BOARD_REFETCH_DEBOUNCE_MS) {
+      run(); // idle long enough — refetch immediately, no added latency
+    } else {
+      timerRef.current = setTimeout(run, BOARD_REFETCH_DEBOUNCE_MS - sinceLast);
+    }
+  }, [tick, visible]);
+
+  // Cancel any pending flush on unmount.
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    },
+    []
+  );
 }
 
 export interface ViewBoardDef<T> {
@@ -124,7 +170,7 @@ export function ViewBoardShell({
         {Icon && <Icon className="w-3.5 h-3.5 text-zinc-500" />}
         <span className="text-xs text-zinc-300">{title}</span>
         <div className="flex-1" />
-        {loading && <span className="text-[10px] text-zinc-600">Loading…</span>}
+        {loading && <span className="text-[10px] text-zinc-400">Loading…</span>}
         {onRefresh && (
           <button onClick={onRefresh} title="Refresh" disabled={loading}>
             <RefreshCw
@@ -163,7 +209,7 @@ export function defineViewBoard<T>(def: ViewBoardDef<T>): ViewBoardPanel {
           {Icon && <Icon className="w-3.5 h-3.5 text-zinc-500" />}
           <span className="text-xs text-zinc-300">{def.title}</span>
           <div className="flex-1" />
-          {loading && <span className="text-[10px] text-zinc-600">Loading…</span>}
+          {loading && <span className="text-[10px] text-zinc-400">Loading…</span>}
           <button onClick={onRefresh} title="Refresh" disabled={loading}>
             <RefreshCw
               className={`w-3.5 h-3.5 text-zinc-500 hover:text-zinc-300 ${loading ? "animate-spin" : ""}`}
@@ -176,7 +222,7 @@ export function defineViewBoard<T>(def: ViewBoardDef<T>): ViewBoardPanel {
             <div className="px-3 py-3 text-xs text-red-400">{error}</div>
           ) : data == null ? (
             // First load (no data yet) — neutral hint, not the board's "empty" state.
-            <div className="px-3 py-6 text-xs text-zinc-600">Loading…</div>
+            <div className="px-3 py-6 text-xs text-zinc-400">Loading…</div>
           ) : (
             def.render(data, ctx, refetch)
           )}
