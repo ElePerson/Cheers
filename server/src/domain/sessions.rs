@@ -565,7 +565,12 @@ pub async fn resolve_channel_session(
 /// only cares about `role`, not `detached_at`/session status, so a terminated
 /// session left at role='primary' permanently occupies the scope's primary slot
 /// — no other session (including the deterministic fallback) could ever be
-/// (re)promoted to primary for this bot+scope again.
+/// (re)promoted to primary for this bot+scope again. The demotion can't be
+/// gated on `detached_at IS NULL`: `finalize_session` detaches the binding
+/// after every turn, so a primary that has ever done work already has
+/// `detached_at` set while still being live/addressable (the switcher's rule
+/// is status-based, not detached_at-based) — that guard would silently skip
+/// the demotion on exactly the sessions most likely to be closed.
 pub async fn close_channel_session(
     db: &PgPool,
     channel_id: &str,
@@ -585,7 +590,7 @@ pub async fn close_channel_session(
         "UPDATE cheers_session_bindings
          SET detached_at = COALESCE(detached_at, $1),
              role = CASE WHEN role = 'primary' THEN 'other' ELSE role END
-         WHERE session_id = $2 AND detached_at IS NULL",
+         WHERE session_id = $2",
     )
     .bind(now)
     .bind(session_id.to_string())

@@ -1600,9 +1600,32 @@ async fn phasea_sessions_primary_falls_back_after_promoted_session_closes(db: Pg
         .expect("a primary is bound");
     assert_eq!(primary_id, other.session_id, "promoted session should be primary");
 
+    // The promoted primary handles a turn before it's closed — finalize_session
+    // detaches its binding (COALESCE'd, idempotent) while it stays live/addressable.
+    // close_channel_session's demotion must not be gated on detached_at IS NULL,
+    // or this (the common case: a primary that has done any work) never demotes.
+    server::domain::sessions::finalize_session(&db, other.session_id)
+        .await
+        .expect("finalize promoted session after a turn");
+
     server::domain::sessions::close_channel_session(&db, &cid, other.session_id)
         .await
         .expect("close promoted session");
+    // The closed session's own binding must be demoted off 'primary' even though
+    // it was already detached by finalize_session — `uq_cheers_session_binding_primary`
+    // only cares about role, so a stale 'primary' row here would block any future
+    // promotion for this bot+scope forever.
+    let closed_role: String = sqlx::query_scalar(
+        "SELECT role FROM cheers_session_bindings WHERE session_id = $1",
+    )
+    .bind(other.session_id.to_string())
+    .fetch_one(&db)
+    .await
+    .expect("closed session still has a binding row");
+    assert_eq!(
+        closed_role, "other",
+        "closed session's binding must be demoted off 'primary' even when already detached"
+    );
     assert!(
         server::domain::sessions::resolve_primary_session(&db, bot, &cid)
             .await
