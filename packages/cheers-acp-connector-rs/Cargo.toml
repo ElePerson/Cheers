@@ -1,6 +1,13 @@
+# Mini-workspace: the binary + the shared bridge-protocol frame crate (also
+# consumed by ../../server via a path dependency). The workspace root staying
+# at this directory keeps `cross`/`--locked` release builds and the bot-image
+# COPY of this whole directory working unchanged.
+[workspace]
+members = [".", "bridge-protocol"]
+
 [package]
 name = "cce-acp-connector"
-version = "0.1.26"
+version = "0.1.27"
 edition = "2021"
 
 [[bin]]
@@ -25,6 +32,7 @@ anyhow = "1"
 async-trait = "0.1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
+cheers-bridge-protocol = { path = "bridge-protocol" }
 clap = { version = "4", features = ["derive"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 futures-util = "0.3"
@@ -35,6 +43,9 @@ mime_guess = "2"
 # (no notify-debouncer crate) so event coalescing + the watch TTL live in one task.
 notify = "8"
 rand = "0.8"
+# Self-update downloads (signed manifest + binaries) through the gateway's
+# release proxy. rustls-only, matching tokio-tungstenite's TLS stack.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Content etags for safe remote writes: lowercase-hex SHA-256 of raw file bytes
