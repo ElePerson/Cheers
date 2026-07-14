@@ -968,7 +968,15 @@ pub enum ControlOutbound {
     Ready {
         #[serde(default = "default_bridge_protocol_version")]
         v: u32,
-        connector_version: String,
+        /// Optional only for PARSING legacy frames (the retired TS connector
+        /// sent `plugin_version` instead) — this connector always sets it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        connector_version: Option<String>,
+        // wire-compat: legacy alias for connector_version, kept so a typed
+        // gateway parse still accepts the retired TS connector's ready frame
+        // (pinned by fixtures/compat/ready_plugin_version.json).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plugin_version: Option<String>,
         runtime: RuntimeDescriptor,
         #[serde(default)]
         connector_capabilities: Option<Value>,
@@ -1524,5 +1532,643 @@ impl BridgeWebSocket {
             }
         }
         Ok(None)
+    }
+}
+
+/// Golden-fixture contract tests against `bridge-protocol/fixtures/` — the
+/// same files the gateway's constructor tests are pinned to, so both ends
+/// prove they agree on the exact wire bytes.
+///
+/// - `*/to_connector/*`: written by the GATEWAY's regen (`CHEERS_REGEN_FIXTURES=1
+///   cargo test` in server/); here we prove they parse into the expected typed
+///   variant (a rename/typo would fall through to `Unknown` and fail).
+/// - `*/to_gateway/*`: written by THIS module's regen from typed values; the
+///   assert mode proves parse→serialize round-trips to identical bytes.
+/// - `tolerance/*`, `compat/*`: hand-frozen; only change with a version gate.
+#[cfg(test)]
+mod fixture_tests {
+    use super::*;
+    use serde_json::json;
+    use std::path::PathBuf;
+
+    fn fixtures_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("bridge-protocol/fixtures")
+    }
+
+    fn load(rel: &str) -> Value {
+        let path = fixtures_root().join(rel);
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "missing fixture {} ({e}); to_connector fixtures regen from server/ \
+                 (CHEERS_REGEN_FIXTURES=1 cargo test), to_gateway ones from this crate",
+                path.display()
+            )
+        });
+        serde_json::from_str(&raw).expect("fixture is valid JSON")
+    }
+
+    /// to_gateway golden check: `frame` serializes to exactly the fixture, and
+    /// the fixture parses back to a value that re-serializes identically.
+    /// `CHEERS_REGEN_FIXTURES=1` rewrites the fixture from the typed value.
+    fn assert_round_trips<T>(frame: &T, rel: &str)
+    where
+        T: Serialize + serde::de::DeserializeOwned,
+    {
+        let value = serde_json::to_value(frame).expect("frame serializes");
+        let path = fixtures_root().join(rel);
+        if std::env::var_os("CHEERS_REGEN_FIXTURES").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).expect("create fixtures dir");
+            let pretty = serde_json::to_string_pretty(&value).expect("serialize fixture");
+            std::fs::write(&path, format!("{pretty}\n")).expect("write fixture");
+            return;
+        }
+        let expected = load(rel);
+        assert_eq!(
+            value, expected,
+            "typed frame drifted from fixture {rel}; if intentional, prove wire-safety and regen"
+        );
+        let reparsed: T = serde_json::from_value(expected.clone())
+            .unwrap_or_else(|e| panic!("fixture {rel} no longer parses: {e}"));
+        let reserialized = serde_json::to_value(&reparsed).expect("reserialize");
+        assert_eq!(reserialized, expected, "fixture {rel} does not round-trip");
+    }
+
+    // ── to_connector: every gateway-emitted frame parses to its variant ──────
+
+    #[test]
+    fn control_hello_fixture_parses() {
+        let frame: ControlInbound =
+            serde_json::from_value(load("control/to_connector/hello.json")).expect("hello parses");
+        match frame {
+            ControlInbound::Hello {
+                bot_id,
+                memberships,
+                server_capabilities,
+                connector_config,
+                ..
+            } => {
+                assert_eq!(bot_id, "6f9619ff-8b86-4d01-b42d-00c04fc964ff");
+                assert_eq!(memberships.len(), 1);
+                let caps = server_capabilities.expect("caps present");
+                assert_eq!(caps.latest_connector_version.as_deref(), Some("0.1.27"));
+                assert!(connector_config.is_some());
+            }
+            other => panic!("expected Hello, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_fixture_parses() {
+        let frame: ControlInbound =
+            serde_json::from_value(load("control/to_connector/task.json")).expect("task parses");
+        match frame {
+            ControlInbound::Task {
+                task_id,
+                trigger_msg_id,
+                msg_id,
+                cwd,
+                additional_dirs,
+                attachments,
+                pinned,
+                session,
+                session_policy,
+                session_id,
+                ..
+            } => {
+                assert_eq!(task_id, "99999999-aaaa-4bbb-8ccc-dddddddddddd");
+                // wire-compat: msg_id duplicates trigger_msg_id by contract.
+                assert_eq!(msg_id.as_deref(), Some(trigger_msg_id.as_str()));
+                assert_eq!(cwd.as_deref(), Some("/workspace"));
+                assert_eq!(additional_dirs, vec!["/data".to_string()]);
+                assert_eq!(attachments.len(), 1);
+                assert_eq!(attachments[0].filename.as_deref(), Some("notes.md"));
+                assert_eq!(pinned.len(), 1);
+                assert!(session_id.is_none(), "fixture pins session_id: null");
+                let policy = session_policy.expect("session_policy present");
+                assert_eq!(policy.on_missing, "create");
+                let session = session.expect("nested session ref present");
+                assert!(session.provider_session_key.is_some());
+            }
+            other => panic!("expected Task, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remaining_control_to_connector_fixtures_parse() {
+        for (rel, want) in [
+            ("control/to_connector/cancel.json", "Cancel"),
+            ("control/to_connector/config_update.json", "ConfigUpdate"),
+            (
+                "control/to_connector/config_option_set.json",
+                "ConfigOptionSet",
+            ),
+            ("control/to_connector/mode_set.json", "ModeSet"),
+            (
+                "control/to_connector/permission_resolution.json",
+                "PermissionResolution",
+            ),
+        ] {
+            let frame: ControlInbound = serde_json::from_value(load(rel))
+                .unwrap_or_else(|e| panic!("{rel} failed to parse: {e}"));
+            let got = match &frame {
+                ControlInbound::Cancel { .. } => "Cancel",
+                ControlInbound::ConfigUpdate { settings, .. } => {
+                    assert!(settings.is_some(), "{rel}: settings parsed");
+                    "ConfigUpdate"
+                }
+                ControlInbound::ConfigOptionSet { .. } => "ConfigOptionSet",
+                ControlInbound::ModeSet { .. } => "ModeSet",
+                ControlInbound::PermissionResolution { resolution, .. } => {
+                    assert_eq!(resolution.resolution, "allow", "{rel}");
+                    "PermissionResolution"
+                }
+                other => panic!("{rel}: unexpected variant {other:?}"),
+            };
+            assert_eq!(got, want, "{rel}");
+        }
+    }
+
+    #[test]
+    fn data_to_connector_fixtures_parse() {
+        use DataInbound as D;
+        for (rel, want) in [
+            ("data/to_connector/hello.json", "Hello"),
+            ("data/to_connector/pong.json", "Pong"),
+            ("data/to_connector/resume_ack.json", "ResumeAck"),
+            ("data/to_connector/send_ack_ok.json", "SendAck"),
+            ("data/to_connector/send_ack_err.json", "SendAck"),
+            ("data/to_connector/terminal_ack_ok.json", "TerminalAck"),
+            ("data/to_connector/terminal_ack_err.json", "TerminalAck"),
+            ("data/to_connector/error.json", "Error"),
+            ("data/to_connector/resource_res_ok.json", "ResourceRes"),
+            ("data/to_connector/resource_res_err.json", "ResourceRes"),
+            ("data/to_connector/realize_file.json", "RealizeFile"),
+            ("data/to_connector/workspace_req_read.json", "WorkspaceReq"),
+            ("data/to_connector/workspace_req_write.json", "WorkspaceReq"),
+            (
+                "data/to_connector/workspace_req_git_log.json",
+                "WorkspaceReq",
+            ),
+            ("data/to_connector/workspace_req_watch.json", "WorkspaceReq"),
+        ] {
+            let frame: D = serde_json::from_value(load(rel))
+                .unwrap_or_else(|e| panic!("{rel} failed to parse: {e}"));
+            let got = match &frame {
+                D::Hello { last_event_seq, .. } => {
+                    assert_eq!(*last_event_seq, 0, "{rel}");
+                    "Hello"
+                }
+                D::Pong => "Pong",
+                D::ResumeAck { up_to_seq, .. } => {
+                    assert_eq!(*up_to_seq, 42, "{rel}");
+                    "ResumeAck"
+                }
+                D::SendAck { .. } => "SendAck",
+                D::TerminalAck { .. } => "TerminalAck",
+                D::Error { error } => {
+                    assert_eq!(error.code, "CAPABILITY_DENIED", "{rel}");
+                    "Error"
+                }
+                D::ResourceRes { .. } => "ResourceRes",
+                D::RealizeFile { roots, .. } => {
+                    assert_eq!(roots.len(), 1, "{rel}");
+                    "RealizeFile"
+                }
+                D::WorkspaceReq {
+                    op,
+                    if_etag,
+                    limit,
+                    skip,
+                    content_b64,
+                    ..
+                } => {
+                    match op.as_str() {
+                        "write" => {
+                            assert!(if_etag.is_some(), "{rel}: write carries if_etag");
+                            assert!(content_b64.is_some(), "{rel}: write carries content_b64");
+                        }
+                        "git_log" => {
+                            assert_eq!(*limit, Some(20), "{rel}");
+                            assert_eq!(*skip, Some(40), "{rel}");
+                        }
+                        _ => {}
+                    }
+                    "WorkspaceReq"
+                }
+                other => panic!("{rel}: unexpected variant {other:?}"),
+            };
+            assert_eq!(got, want, "{rel}");
+        }
+    }
+
+    // ── dormant to_connector frames (no gateway emitter today) ──────────────
+
+    #[test]
+    fn dormant_control_frames_round_trip() {
+        assert_round_trips(
+            &ControlInbound::RuntimeSessionControl {
+                v: BRIDGE_PROTOCOL_VERSION,
+                request_id: "99999999-aaaa-4bbb-8ccc-dddddddddddd".into(),
+                action: "terminate".into(),
+                session: RuntimeSessionControlSession {
+                    id: "eeeeeeee-ffff-4000-8111-222222222222".into(),
+                    provider_session_key:
+                        "cheers:channel:77777777-8888-4999-8aaa-bbbbbbbbbbbb:bot:6f9619ff-8b86-4d01-b42d-00c04fc964ff"
+                            .into(),
+                    primary_scope_type: Some("channel".into()),
+                    primary_scope_id: Some("77777777-8888-4999-8aaa-bbbbbbbbbbbb".into()),
+                    task_scope_id: None,
+                    cwd: Some("/workspace".into()),
+                    additional_dirs: vec![],
+                    extra: Default::default(),
+                },
+                runtime: RuntimeDescriptor {
+                    protocol: "acp".into(),
+                    name: None,
+                    version: None,
+                    provider_session_id: None,
+                    config: None,
+                    extra: Default::default(),
+                },
+                reason: Some("user closed session".into()),
+                deadline_ms: None,
+            },
+            "control/to_connector/runtime_session_control.json",
+        );
+        assert_round_trips(
+            &ControlInbound::ChannelJoined {
+                channel: ChannelInfo {
+                    channel_id: "77777777-8888-4999-8aaa-bbbbbbbbbbbb".into(),
+                    channel_name: Some("general".into()),
+                    channel_type: Some("public".into()),
+                    workspace_id: Some("cccccccc-dddd-4eee-8fff-000000000000".into()),
+                    joined_at: Some("2026-06-01T10:15:30Z".into()),
+                },
+                invited_by: Some("33333333-4444-4555-8666-777777777777".into()),
+            },
+            "control/to_connector/channel_joined.json",
+        );
+        assert_round_trips(
+            &ControlInbound::ChannelLeft {
+                channel_id: "77777777-8888-4999-8aaa-bbbbbbbbbbbb".into(),
+                reason: "removed_by_admin".into(),
+            },
+            "control/to_connector/channel_left.json",
+        );
+    }
+
+    // ── to_gateway: one round-trip fixture per outbound variant ─────────────
+
+    const KEY: &str =
+        "cheers:channel:77777777-8888-4999-8aaa-bbbbbbbbbbbb:bot:6f9619ff-8b86-4d01-b42d-00c04fc964ff";
+
+    #[test]
+    fn control_to_gateway_fixtures_round_trip() {
+        assert_round_trips(
+            &ControlOutbound::Auth {
+                v: BRIDGE_PROTOCOL_VERSION,
+                token: "agb_fixture_token".into(),
+                bridge_protocol_version: BRIDGE_PROTOCOL_VERSION,
+                connector: ConnectorInfo {
+                    name: "cce-acp-connector".into(),
+                    version: "0.1.27".into(),
+                },
+            },
+            "control/to_gateway/auth.json",
+        );
+        assert_round_trips(
+            &ControlOutbound::Ready {
+                v: BRIDGE_PROTOCOL_VERSION,
+                connector_version: Some("0.1.27".into()),
+                plugin_version: None,
+                runtime: RuntimeDescriptor {
+                    protocol: "acp".into(),
+                    name: Some("claude-agent-acp".into()),
+                    version: Some("1.4.2".into()),
+                    provider_session_id: None,
+                    config: None,
+                    extra: Default::default(),
+                },
+                connector_capabilities: Some(json!({
+                    "runtime_protocols": ["acp"],
+                    "streaming": true,
+                })),
+            },
+            "control/to_gateway/ready.json",
+        );
+        assert_round_trips(&ControlOutbound::Ping, "control/to_gateway/ping.json");
+        assert_round_trips(
+            &ControlOutbound::RuntimeSessionControlAck {
+                v: BRIDGE_PROTOCOL_VERSION,
+                request_id: "99999999-aaaa-4bbb-8ccc-dddddddddddd".into(),
+                action: "terminate".into(),
+                ok: true,
+                session: Some(RuntimeSessionAckSession {
+                    id: Some("eeeeeeee-ffff-4000-8111-222222222222".into()),
+                    session_id: None,
+                    provider_session_key: Some(KEY.into()),
+                    provider_session_id: Some("acp-session-1".into()),
+                    status: Some("terminated".into()),
+                    extra: Default::default(),
+                }),
+                applied_at: Some("2026-06-01T10:15:30+00:00".into()),
+                code: None,
+                error: None,
+                retryable: None,
+            },
+            "control/to_gateway/runtime_session_control_ack.json",
+        );
+        assert_round_trips(
+            &ControlOutbound::ConfigStatus {
+                v: BRIDGE_PROTOCOL_VERSION,
+                revision: Some(json!(3)),
+                ok: false,
+                applied: vec!["model".into()],
+                rejected: vec![ConfigStatusRejectedField {
+                    field: "cwd".into(),
+                    reason: "outside allowed_roots".into(),
+                }],
+            },
+            "control/to_gateway/config_status.json",
+        );
+        assert_round_trips(
+            &ControlOutbound::ConfigOptions {
+                v: BRIDGE_PROTOCOL_VERSION,
+                options: json!({
+                    "configOptions": [{"id": "model", "value": "claude-sonnet-5"}],
+                    "currentModeId": "default",
+                }),
+            },
+            "control/to_gateway/config_options.json",
+        );
+        assert_round_trips(
+            &ControlOutbound::ConfigOptionStatus {
+                v: BRIDGE_PROTOCOL_VERSION,
+                request_id: "99999999-aaaa-4bbb-8ccc-dddddddddddd".into(),
+                ok: true,
+                session_id: None,
+                provider_session_key: Some(KEY.into()),
+                config_id: Some("model".into()),
+                value: Some("claude-sonnet-5".into()),
+                options: None,
+                error: None,
+                code: None,
+            },
+            "control/to_gateway/config_option_status.json",
+        );
+    }
+
+    #[test]
+    fn data_to_gateway_fixtures_round_trip() {
+        assert_round_trips(
+            &DataOutbound::Auth {
+                v: BRIDGE_PROTOCOL_VERSION,
+                token: "agb_fixture_token".into(),
+                bridge_protocol_version: BRIDGE_PROTOCOL_VERSION,
+                connector: ConnectorInfo {
+                    name: "cce-acp-connector".into(),
+                    version: "0.1.27".into(),
+                },
+            },
+            "data/to_gateway/auth.json",
+        );
+        assert_round_trips(&DataOutbound::Ping, "data/to_gateway/ping.json");
+        assert_round_trips(
+            &DataOutbound::Resume {
+                v: BRIDGE_PROTOCOL_VERSION,
+                last_event_seq: 42,
+            },
+            "data/to_gateway/resume.json",
+        );
+        assert_round_trips(
+            &DataOutbound::Delta {
+                v: BRIDGE_PROTOCOL_VERSION,
+                msg_id: "33333333-4444-4555-8666-777777777777".into(),
+                seq: 7,
+                delta: "Hello, wor".into(),
+                provider_session_key: Some(KEY.into()),
+                provider_session_id: Some("acp-session-1".into()),
+                session_id: None,
+                acp_capability: None,
+            },
+            "data/to_gateway/delta.json",
+        );
+        assert_round_trips(
+            &DataOutbound::Done {
+                v: BRIDGE_PROTOCOL_VERSION,
+                client_msg_id: "client-msg-2".into(),
+                msg_id: "33333333-4444-4555-8666-777777777777".into(),
+                file_ids: vec!["file-1".into()],
+                mention_ids: vec![],
+                content: Some("Hello, world!".into()),
+                provider_session_key: Some(KEY.into()),
+                provider_session_id: Some("acp-session-1".into()),
+                session_id: None,
+                acp_capability: None,
+            },
+            "data/to_gateway/done.json",
+        );
+        assert_round_trips(
+            &DataOutbound::Error {
+                v: BRIDGE_PROTOCOL_VERSION,
+                client_msg_id: "client-msg-2".into(),
+                msg_id: "33333333-4444-4555-8666-777777777777".into(),
+                message: "prompt timed out".into(),
+                provider_session_key: Some(KEY.into()),
+                provider_session_id: None,
+                session_id: None,
+                acp_capability: None,
+            },
+            "data/to_gateway/error.json",
+        );
+        assert_round_trips(
+            &DataOutbound::Send {
+                v: BRIDGE_PROTOCOL_VERSION,
+                client_msg_id: "client-msg-3".into(),
+                channel_id: "77777777-8888-4999-8aaa-bbbbbbbbbbbb".into(),
+                text: "Proactive update: build finished.".into(),
+                in_reply_to_msg_id: None,
+                file_ids: vec![],
+                mention_ids: vec![],
+                session_id: None,
+                provider_session_key: Some(KEY.into()),
+                provider_session_id: None,
+                acp_capability: None,
+            },
+            "data/to_gateway/send.json",
+        );
+        assert_round_trips(
+            &DataOutbound::FileUpload {
+                v: BRIDGE_PROTOCOL_VERSION,
+                client_file_id: "client-file-1".into(),
+                channel_id: "77777777-8888-4999-8aaa-bbbbbbbbbbbb".into(),
+                filename: "report.pdf".into(),
+                content_type: Some("application/pdf".into()),
+                data_b64: "aGVsbG8=".into(),
+            },
+            "data/to_gateway/file_upload.json",
+        );
+        assert_round_trips(
+            &DataOutbound::ResourceReq {
+                v: BRIDGE_PROTOCOL_VERSION,
+                req_id: "req-1".into(),
+                resource: "channel.activity.read".into(),
+                params: Some(json!({"channel_id": "77777777-8888-4999-8aaa-bbbbbbbbbbbb"})),
+                encrypted: None,
+                encrypted_payload: None,
+                acp_capability: None,
+            },
+            "data/to_gateway/resource_req.json",
+        );
+        assert_round_trips(
+            &DataOutbound::WorkspaceRes {
+                v: BRIDGE_PROTOCOL_VERSION,
+                req_id: "req-2".into(),
+                ok: true,
+                data: Some(
+                    json!({"etag": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}),
+                ),
+                error: None,
+                code: None,
+            },
+            "data/to_gateway/workspace_res.json",
+        );
+        assert_round_trips(
+            &DataOutbound::WorkspaceEvent {
+                v: BRIDGE_PROTOCOL_VERSION,
+                root: "/workspace".into(),
+                paths: vec!["src/main.rs".into()],
+                kind: "change".into(),
+            },
+            "data/to_gateway/workspace_event.json",
+        );
+        assert_round_trips(
+            &DataOutbound::PermissionRequest {
+                v: BRIDGE_PROTOCOL_VERSION,
+                client_msg_id: "client-msg-4".into(),
+                channel_id: "77777777-8888-4999-8aaa-bbbbbbbbbbbb".into(),
+                request_id: "99999999-aaaa-4bbb-8ccc-dddddddddddd".into(),
+                task_id: Some("99999999-aaaa-4bbb-8ccc-dddddddddddd".into()),
+                msg_id: Some("33333333-4444-4555-8666-777777777777".into()),
+                acp_session_id: Some("acp-session-1".into()),
+                provider_session_key: Some(KEY.into()),
+                provider_session_id: Some("acp-session-1".into()),
+                session_id: None,
+                title: Some("Run command".into()),
+                body: "The agent wants to run `cargo test`.".into(),
+                tool: Some(json!({"kind": "execute", "title": "cargo test"})),
+                options: vec![PermissionOption {
+                    option_id: "allow_once".into(),
+                    kind: Some("allow_once".into()),
+                    name: Some("Allow once".into()),
+                    description: None,
+                }],
+                acp_capability: None,
+            },
+            "data/to_gateway/permission_request.json",
+        );
+        assert_round_trips(
+            &DataOutbound::PermissionCancel {
+                v: BRIDGE_PROTOCOL_VERSION,
+                request_id: "99999999-aaaa-4bbb-8ccc-dddddddddddd".into(),
+                reason: "timeout".into(),
+            },
+            "data/to_gateway/permission_cancel.json",
+        );
+        assert_round_trips(
+            &DataOutbound::SessionUpdate {
+                v: BRIDGE_PROTOCOL_VERSION,
+                provider_session_key: Some(KEY.into()),
+                provider_session_id: Some("acp-session-1".into()),
+                metadata: Some(json!({"model": "claude-sonnet-5"})),
+                acp_capability: None,
+            },
+            "data/to_gateway/session_update.json",
+        );
+        assert_round_trips(
+            &DataOutbound::Trace {
+                v: BRIDGE_PROTOCOL_VERSION,
+                msg_id: "33333333-4444-4555-8666-777777777777".into(),
+                task_id: Some("99999999-aaaa-4bbb-8ccc-dddddddddddd".into()),
+                channel_id: Some("77777777-8888-4999-8aaa-bbbbbbbbbbbb".into()),
+                run_id: Some("run-1".into()),
+                session_key: None,
+                provider_session_key: Some(KEY.into()),
+                provider_session_id: None,
+                session_id: None,
+                stream: "progress".into(),
+                seq: Some(3),
+                ts: Some(1_780_000_000_000),
+                phase: Some("tool_call".into()),
+                status: Some("running".into()),
+                title: Some("Reading files".into()),
+                message: None,
+                data: None,
+                acp_capability: None,
+            },
+            "data/to_gateway/trace.json",
+        );
+        assert_round_trips(
+            &DataOutbound::AcpEvent {
+                v: BRIDGE_PROTOCOL_VERSION,
+                name: "session/update:plan".into(),
+                channel_id: Some("77777777-8888-4999-8aaa-bbbbbbbbbbbb".into()),
+                task_id: None,
+                msg_id: Some("33333333-4444-4555-8666-777777777777".into()),
+                session_id: None,
+                provider_session_key: Some(KEY.into()),
+                payload: json!({"entries": [{"content": "Fix the bug", "status": "pending"}]}),
+            },
+            "data/to_gateway/acp_event.json",
+        );
+    }
+
+    // ── tolerance + compat (hand-frozen fixtures) ────────────────────────────
+
+    #[test]
+    fn unknown_frame_type_parses_to_unknown() {
+        let raw = load("tolerance/unknown_frame_type.json");
+        let control: ControlInbound =
+            serde_json::from_value(raw.clone()).expect("control tolerates unknown type");
+        assert!(matches!(control, ControlInbound::Unknown));
+        let data: DataInbound = serde_json::from_value(raw).expect("data tolerates unknown type");
+        assert!(matches!(data, DataInbound::Unknown));
+    }
+
+    #[test]
+    fn extra_unknown_field_is_ignored() {
+        let frame: ControlInbound =
+            serde_json::from_value(load("tolerance/extra_unknown_field.json"))
+                .expect("unknown fields are ignored");
+        match frame {
+            ControlInbound::Cancel { msg_id, reason } => {
+                assert_eq!(msg_id, "33333333-4444-4555-8666-777777777777");
+                assert_eq!(reason.as_deref(), Some("user_cancelled"));
+            }
+            other => panic!("expected Cancel, got {other:?}"),
+        }
+    }
+
+    /// The retired TS connector's `ready` (plugin_version, no connector_version)
+    /// must keep parsing forever — the gateway's typed inbound parse (Phase 3)
+    /// relies on this. Frozen; only change with an explicit version gate.
+    #[test]
+    fn legacy_ready_plugin_version_parses() {
+        let frame: ControlOutbound =
+            serde_json::from_value(load("compat/ready_plugin_version.json"))
+                .expect("legacy ready parses");
+        match frame {
+            ControlOutbound::Ready {
+                connector_version,
+                plugin_version,
+                runtime,
+                ..
+            } => {
+                assert!(connector_version.is_none());
+                assert_eq!(plugin_version.as_deref(), Some("0.9.3"));
+                assert_eq!(runtime.protocol, "acp");
+            }
+            other => panic!("expected Ready, got {other:?}"),
+        }
     }
 }

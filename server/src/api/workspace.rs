@@ -960,11 +960,12 @@ pub async fn get_session_workdirs(
     Query(q): Query<WorkdirsQuery>,
 ) -> Result<Json<Value>, AppError> {
     ensure_access(&state, &claims, channel_id, q.bot_id).await?;
-    let workdirs = crate::domain::sessions::channel_session_workdirs(&state.db, channel_id, q.bot_id)
-        .await
-        .into_iter()
-        .map(|(path, session_id)| json!({ "path": path, "session_id": session_id }))
-        .collect::<Vec<_>>();
+    let workdirs =
+        crate::domain::sessions::channel_session_workdirs(&state.db, channel_id, q.bot_id)
+            .await
+            .into_iter()
+            .map(|(path, session_id)| json!({ "path": path, "session_id": session_id }))
+            .collect::<Vec<_>>();
     Ok(Json(json!({ "workdirs": workdirs })))
 }
 

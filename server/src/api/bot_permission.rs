@@ -186,11 +186,9 @@ pub async fn set_posture(
     // L2 push to a live connector (best-effort). It re-clamps via L0 (both gates).
     let delivered = match bot_id.parse::<Uuid>() {
         Ok(uuid) => {
-            let frame = json!({
-                "type": "config_update",
-                "v": 1,
-                "settings": { "agentNativePermissionMode": mode },
-            });
+            let frame = crate::gateway::bridge_frames::config_update_frame(
+                json!({ "agentNativePermissionMode": mode }),
+            );
             state.bot_locator.dispatch_task(uuid, frame).await
         }
         Err(_) => false,
@@ -292,11 +290,9 @@ pub async fn set_config_option(
     // via L0 allowed_config_options and applies per-session.
     let delivered = match bot_id.parse::<Uuid>() {
         Ok(uuid) => {
-            let frame = json!({
-                "type": "config_update",
-                "v": 1,
-                "settings": { "configOptions": desired },
-            });
+            let frame = crate::gateway::bridge_frames::config_update_frame(
+                json!({ "configOptions": desired }),
+            );
             state.bot_locator.dispatch_task(uuid, frame).await
         }
         Err(_) => false,

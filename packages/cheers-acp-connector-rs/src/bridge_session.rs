@@ -287,7 +287,8 @@ pub async fn connect_control_stream(
     control
         .send_json(&ControlOutbound::Ready {
             v: BRIDGE_PROTOCOL_VERSION,
-            connector_version: ready.connector.version.clone(),
+            connector_version: Some(ready.connector.version.clone()),
+            plugin_version: None,
             runtime: ready.runtime.clone(),
             connector_capabilities: ready.connector_capabilities.clone(),
         })

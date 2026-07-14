@@ -1,0 +1,18 @@
+{
+  "type": "ready",
+  "v": 1,
+  "connector_version": "0.1.27",
+  "runtime": {
+    "protocol": "acp",
+    "name": "claude-agent-acp",
+    "version": "1.4.2",
+    "provider_session_id": null,
+    "config": null
+  },
+  "connector_capabilities": {
+    "runtime_protocols": [
+      "acp"
+    ],
+    "streaming": true
+  }
+}

@@ -44,7 +44,10 @@ const CLOSE_PROTOCOL_ERROR: u16 = 4400;
 /// without a clean TCP FIN would otherwise stay "online" until the OS notices.
 const CLOSE_IDLE_TIMEOUT: u16 = 4409;
 const MAX_MALFORMED_FRAMES: u32 = 20;
-const BRIDGE_PROTOCOL_VERSION: u32 = 1;
+use crate::gateway::bridge_frames::{
+    self, bridge_error, send_ack_err, send_ack_ok, terminal_ack_err, terminal_ack_ok,
+    BRIDGE_PROTOCOL_VERSION,
+};
 
 /// Gateway-side liveness: probe with a WS ping every PROBE_INTERVAL (the peer's
 /// WS stack auto-pongs, so this needs no connector cooperation), reap after
@@ -98,23 +101,16 @@ async fn handle_control(mut socket: WebSocket, state: AppState, header_token: Op
 
     // ── 3. 发 hello 帧（membership snapshot）─────────────────────────────
     let memberships = load_memberships(&state.db, bot.bot_id).await;
-    let mut hello = json!({
-        "type": "hello",
-        "v": BRIDGE_PROTOCOL_VERSION,
-        "bridge_protocol_version": BRIDGE_PROTOCOL_VERSION,
-        "stream": "control",
-        "bot_id": bot.bot_id,
-        "bot_username": bot.username,
-        "bot_display_name": bot.display_name,
-        "connection_id": connection_id,
-        "session_id": connection_id,
-        "memberships": memberships,
-        "connector_config": bot.connector_config,
-        "server_capabilities": server_capabilities(&state),
-    });
-    if let Some(acp_security) = &bot.acp_security {
-        hello["acp_security"] = acp_security.clone();
-    }
+    let hello = bridge_frames::control_hello_frame(
+        bot.bot_id,
+        &bot.username,
+        bot.display_name.as_deref(),
+        connection_id,
+        Value::Array(memberships),
+        bot.connector_config.as_ref(),
+        server_capabilities(&state),
+        bot.acp_security.as_ref(),
+    );
     if ws_send(&mut socket, &hello).await.is_err() {
         return;
     }
@@ -128,11 +124,7 @@ async fn handle_control(mut socket: WebSocket, state: AppState, header_token: Op
         .and_then(|c| c.get("agentNativePermissionMode"))
         .and_then(Value::as_str)
     {
-        let cfg = json!({
-            "type": "config_update",
-            "v": BRIDGE_PROTOCOL_VERSION,
-            "settings": { "agentNativePermissionMode": mode },
-        });
+        let cfg = bridge_frames::config_update_frame(json!({ "agentNativePermissionMode": mode }));
         let _ = ws_send(&mut socket, &cfg).await;
     }
 
@@ -145,11 +137,7 @@ async fn handle_control(mut socket: WebSocket, state: AppState, header_token: Op
         .and_then(|c| c.get("configOptions"))
         .filter(|v| v.as_object().is_some_and(|m| !m.is_empty()))
     {
-        let cfg = json!({
-            "type": "config_update",
-            "v": BRIDGE_PROTOCOL_VERSION,
-            "settings": { "configOptions": opts },
-        });
+        let cfg = bridge_frames::config_update_frame(json!({ "configOptions": opts }));
         let _ = ws_send(&mut socket, &cfg).await;
     }
 
@@ -494,20 +482,12 @@ async fn handle_data(mut socket: WebSocket, state: AppState, header_token: Optio
 
     // ── 3. 发 hello 帧 ──────────────────────────────────────────────────
     // last_event_seq: 最后一次事件的 seq（重连重放用，暂返回 0）
-    let mut hello = json!({
-        "type": "hello",
-        "v": BRIDGE_PROTOCOL_VERSION,
-        "bridge_protocol_version": BRIDGE_PROTOCOL_VERSION,
-        "stream": "data",
-        "bot_id": bot.bot_id,
-        "connection_id": connection_id,
-        "session_id": connection_id,
-        "last_event_seq": 0,
-        "server_capabilities": server_capabilities(&state),
-    });
-    if let Some(acp_security) = &bot.acp_security {
-        hello["acp_security"] = acp_security.clone();
-    }
+    let hello = bridge_frames::data_hello_frame(
+        bot.bot_id,
+        connection_id,
+        server_capabilities(&state),
+        bot.acp_security.as_ref(),
+    );
     if ws_send(&mut socket, &hello).await.is_err() {
         return;
     }
@@ -938,7 +918,7 @@ async fn handle_data_frame(frame: &Value, state: &AppState, bot: &BotInfo, socke
         }
 
         "ping" => {
-            let _ = ws_send(socket, &json!({ "type": "pong" })).await;
+            let _ = ws_send(socket, &bridge_frames::pong_frame()).await;
         }
 
         "resume" => {
@@ -951,16 +931,7 @@ async fn handle_data_frame(frame: &Value, state: &AppState, bot: &BotInfo, socke
                 .and_then(Value::as_i64)
                 .unwrap_or(0)
                 .max(0);
-            let _ = ws_send(
-                socket,
-                &json!({
-                    "type": "resume_ack",
-                    "v": BRIDGE_PROTOCOL_VERSION,
-                    "replayed": 0,
-                    "up_to_seq": up_to_seq,
-                }),
-            )
-            .await;
+            let _ = ws_send(socket, &bridge_frames::resume_ack_frame(up_to_seq)).await;
         }
 
         // ── agent 进度（trace）：记录 + 转发给浏览器，让 UI 显示「思考中」状态 ──
@@ -1633,57 +1604,8 @@ fn client_msg_id(frame: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn send_ack_ok(client_msg_id: &str, message_id: Uuid, finalized_placeholder: bool) -> Value {
-    json!({
-        "type": "send_ack",
-        "v": BRIDGE_PROTOCOL_VERSION,
-        "client_msg_id": client_msg_id,
-        "ok": true,
-        "message_id": message_id,
-        "finalized_placeholder": finalized_placeholder,
-    })
-}
-
-fn send_ack_err(client_msg_id: &str, code: &str, error: &str) -> Value {
-    json!({
-        "type": "send_ack",
-        "v": BRIDGE_PROTOCOL_VERSION,
-        "client_msg_id": client_msg_id,
-        "ok": false,
-        "code": code,
-        "error": error,
-    })
-}
-
-fn terminal_ack_ok(client_msg_id: &str, msg_id: Uuid) -> Value {
-    json!({
-        "type": "terminal_ack",
-        "v": BRIDGE_PROTOCOL_VERSION,
-        "client_msg_id": client_msg_id,
-        "ok": true,
-        "msg_id": msg_id,
-    })
-}
-
-fn terminal_ack_err(client_msg_id: &str, code: &str, error: &str) -> Value {
-    json!({
-        "type": "terminal_ack",
-        "v": BRIDGE_PROTOCOL_VERSION,
-        "client_msg_id": client_msg_id,
-        "ok": false,
-        "code": code,
-        "error": error,
-    })
-}
-
-fn bridge_error(code: &str, detail: &str) -> Value {
-    json!({
-        "type": "error",
-        "v": BRIDGE_PROTOCOL_VERSION,
-        "code": code,
-        "detail": detail,
-    })
-}
+// send_ack / terminal_ack / error constructors live in gateway::bridge_frames
+// so their bytes are pinned by the shared golden fixtures.
 
 fn server_capabilities(state: &AppState) -> Value {
     let mut caps = json!({
@@ -1772,6 +1694,36 @@ async fn auth_bot(
 
                 if frame.get("type").and_then(Value::as_str) != Some("auth") {
                     close(socket, CLOSE_AUTH_FAIL, "first JSON frame must be auth").await;
+                    return None;
+                }
+
+                // Protocol negotiation, checked BEFORE the token hits the DB: the
+                // auth frame states the connector's bridge protocol version
+                // (absent ⇒ v1, the legacy default). Reject anything else with a
+                // 4400 close whose reason names the supported version — the
+                // connector-facing half of the handshake; the connector already
+                // strictly validates the gateway's hello (ensure_supported_version).
+                // NOTE: header-Bearer auth carries no auth frame; those connectors
+                // are covered by their own hello-side check.
+                let peer_version = frame
+                    .get("bridge_protocol_version")
+                    .or_else(|| frame.get("v"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(BRIDGE_PROTOCOL_VERSION as u64);
+                if peer_version != BRIDGE_PROTOCOL_VERSION as u64 {
+                    tracing::warn!(
+                        version = peer_version,
+                        connector = ?frame.get("connector"),
+                        "rejecting connector with unsupported bridge protocol version"
+                    );
+                    close(
+                        socket,
+                        CLOSE_PROTOCOL_ERROR,
+                        &format!(
+                            "unsupported bridge protocol version {peer_version}; supported: {BRIDGE_PROTOCOL_VERSION}"
+                        ),
+                    )
+                    .await;
                     return None;
                 }
 

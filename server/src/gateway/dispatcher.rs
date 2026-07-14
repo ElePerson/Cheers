@@ -69,10 +69,7 @@ impl MediaCache {
             return hit;
         }
         let blocks = load_pinned_context(db, channel_id).await;
-        self.pinned
-            .lock()
-            .await
-            .insert(channel_id, blocks.clone());
+        self.pinned.lock().await.insert(channel_id, blocks.clone());
         blocks
     }
 }
@@ -538,7 +535,11 @@ async fn fetch_transcript(row: &AttachmentRow, cache: &MediaCache) -> Option<Str
             None
         }
     };
-    cache.transcript.lock().await.insert(cache_key, result.clone());
+    cache
+        .transcript
+        .lock()
+        .await
+        .insert(cache_key, result.clone());
     result
 }
 
@@ -744,6 +745,39 @@ fn build_task_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gateway::bridge_frames::fixture::assert_matches_fixture;
+
+    /// The `task` frame is pinned to the shared golden fixture (the same file
+    /// the connector parses in its serde tests). `enqueued_at` is now() —
+    /// stripped before comparing.
+    #[test]
+    fn task_frame_matches_fixture() {
+        let frame = build_task_frame(
+            Uuid::parse_str("99999999-aaaa-4bbb-8ccc-dddddddddddd").unwrap(),
+            Uuid::parse_str("77777777-8888-4999-8aaa-bbbbbbbbbbbb").unwrap(),
+            Uuid::parse_str("eeeeeeee-ffff-4000-8111-222222222222").unwrap(),
+            42,
+            0,
+            Uuid::parse_str("33333333-4444-4555-8666-777777777777").unwrap(),
+            "cheers:channel:77777777-8888-4999-8aaa-bbbbbbbbbbbb:bot:6f9619ff-8b86-4d01-b42d-00c04fc964ff",
+            None,
+            TaskContext {
+                trigger_message: json!({
+                    "msg_id": "eeeeeeee-ffff-4000-8111-222222222222",
+                    "content": "hello bot",
+                }),
+                attachments: vec![json!({
+                    "file_id": "file-1",
+                    "filename": "notes.md",
+                    "content_type": "text/markdown",
+                    "size_bytes": 12,
+                })],
+                pinned: vec!["Always answer in English.".to_string()],
+            },
+            (Some("/workspace".to_string()), vec!["/data".to_string()]),
+        );
+        assert_matches_fixture(&frame, "control/to_connector/task.json", &["enqueued_at"]);
+    }
 
     /// I4：同一 (trigger, bot) 必派生同一占位 id（重投收敛同一占位）。
     #[test]

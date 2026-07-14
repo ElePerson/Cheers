@@ -33,6 +33,10 @@ jobs:
           filters: |
             gateway:
               - "server/**"
+              # The gateway's frame constructors are pinned to the shared
+              # bridge-protocol golden fixtures — a fixture edit must re-run
+              # gateway tests too.
+              - "packages/cheers-acp-connector-rs/bridge-protocol/**"
               - ".github/workflows/ci.yml"
             frontend:
               - "frontend/**"
