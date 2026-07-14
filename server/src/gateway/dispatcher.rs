@@ -279,6 +279,10 @@ struct TaskContext {
     /// Pinned convention/prompt blocks (formatted) injected into the prompt every
     /// request — the channel's semantic layer (e.g. a pinned prompt template).
     pinned: Vec<String>,
+    /// Per-message resource context bundle attached to the trigger message
+    /// (docs/design/RESOURCE_CONTEXT.md). Threaded through to the Task frame so the
+    /// agent can resolve the refs as itself. `None` when the message carried none.
+    context_bundle: Option<Value>,
 }
 
 impl TaskContext {
@@ -287,6 +291,7 @@ impl TaskContext {
             trigger_message: json!({ "msg_id": msg_id }),
             attachments: Vec::new(),
             pinned: Vec::new(),
+            context_bundle: None,
         }
     }
 }
@@ -305,6 +310,7 @@ async fn load_task_context(
         msg_type: Option<String>,
         in_reply_to_msg_id: Option<String>,
         file_ids: Option<Value>,
+        context_bundle: Option<Value>,
         sender_name: Option<String>,
     }
 
@@ -318,6 +324,7 @@ async fn load_task_context(
             m.msg_type,
             m.in_reply_to_msg_id,
             m.file_ids,
+            m.context_bundle,
             COALESCE(NULLIF(u.display_name, ''), u.username, NULLIF(b.display_name, ''), b.username) AS sender_name
          FROM messages m
          LEFT JOIN users u ON m.sender_type = 'user' AND u.user_id = m.sender_id
@@ -355,6 +362,7 @@ async fn load_task_context(
         }),
         attachments,
         pinned: Vec::new(),
+        context_bundle: row.context_bundle,
     })
 }
 
@@ -737,6 +745,7 @@ fn build_task_frame(
             })
             .collect(),
         pinned: task_context.pinned,
+        context_bundle: task_context.context_bundle,
         // Per-session ACP root set. The connector re-validates against its
         // allowed_roots and uses default_cwd when cwd is absent (ACP: cwd is a
         // pure session/new argument, immutable for the session's lifetime).
@@ -789,6 +798,7 @@ mod tests {
                     "size_bytes": 12,
                 })],
                 pinned: vec!["Always answer in English.".to_string()],
+                context_bundle: None,
             },
             (Some("/workspace".to_string()), vec!["/data".to_string()]),
         );

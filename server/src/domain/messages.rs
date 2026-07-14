@@ -49,6 +49,10 @@ pub struct CreateMessageParams {
     /// Target a specific "other" session (else the channel's primary). Must be a
     /// session bound to this channel; it determines which bot is prompted.
     pub session_id: Option<Uuid>,
+    /// Optional resource-context bundle attached to this message
+    /// (docs/design/RESOURCE_CONTEXT.md). Persisted on the row and threaded into
+    /// any triggered bot's task frame via `dispatcher::load_task_context`.
+    pub context_bundle: Option<serde_json::Value>,
 }
 
 pub async fn create_message(
@@ -130,8 +134,9 @@ pub async fn create_message(
     sqlx::query(
         "INSERT INTO messages
             (msg_id, channel_id, sender_type, sender_id, content, msg_type,
-             is_partial, is_deleted, in_reply_to_msg_id, file_ids, created_at, channel_seq)
-         VALUES ($1, $2, 'user', $3, $4, $5, FALSE, FALSE, $6, $7, $8, $9)",
+             is_partial, is_deleted, in_reply_to_msg_id, file_ids, created_at, channel_seq,
+             context_bundle)
+         VALUES ($1, $2, 'user', $3, $4, $5, FALSE, FALSE, $6, $7, $8, $9, $10)",
     )
     .bind(msg_id.to_string())
     .bind(params.channel_id.to_string())
@@ -142,6 +147,7 @@ pub async fn create_message(
     .bind(json!(file_ids.clone()))
     .bind(now)
     .bind(seq)
+    .bind(params.context_bundle.clone())
     .execute(&mut *tx)
     .await
     .map_err(AppError::Db)?;
