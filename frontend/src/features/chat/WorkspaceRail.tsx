@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Settings, LogOut, MessageSquare, Plus, Users } from "lucide-react";
+import { Settings, LogOut, MessageSquare, Plus, Radar, Users } from "lucide-react";
 import toast from "react-hot-toast";
 import { cn } from "@/lib/cn";
 import { Avatar } from "@/components/ui/avatar";
@@ -149,6 +149,17 @@ export function WorkspaceRail({
       {/* Bottom actions */}
       <div className="flex flex-col items-center gap-2 mt-auto">
         <NotificationCenter />
+
+        <button
+          onClick={() => {
+            onAction?.();
+            navigate("/fleet");
+          }}
+          title="Fleet — agent status & approvals"
+          className="w-8 h-8 max-md:w-11 max-md:h-11 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 flex items-center justify-center transition-colors"
+        >
+          <Radar className="w-4 h-4" />
+        </button>
 
         <button
           onClick={() => {
