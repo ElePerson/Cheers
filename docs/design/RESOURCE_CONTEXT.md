@@ -170,11 +170,19 @@ agent-emitted enhancement; the resource bundle already removes most of the guess
 
 ## Producer C — human, automatic pick (suggested context)
 
-A later follow-on on the same foundation: as a human composes an `@bot` message,
-the composer *suggests* context chips from signals it already has — the reply
-target, a filename in the text, the channel's active plan — each a one-click add
-(and, per the hard rule, visible + droppable, never auto-committed). Lowers the
-friction of manual pick without changing the delivery/resolution path.
+On the same foundation: as a human composes an `@bot` message, the composer
+*suggests* context chips from signals it already has — each a one-click add
+(and, per the hard rule, visible + droppable, **never auto-committed**). Lowers
+the friction of manual pick without changing the delivery/resolution path — a
+promoted suggestion becomes an ordinary F1 pick.
+
+- **Shipped signal — the reply target.** When the draft is a reply, the replied-to
+  message is offered as a dashed "ghost" chip (`channel.messages.by-seq` on its
+  seq). Click `+` to promote it to a pick; click `×` to dismiss (session-local, so
+  it doesn't nag). Wiring: `contextPick.ts::useContextSuggestions` +
+  `ContextPickBar` ghost chips + `ChannelView` passes its `replyTo`.
+- **Follow-on signals** (same mechanism, plug into `useContextSuggestions`): a
+  filename in the draft matched against channel files; the channel's active plan.
 
 ## Producer D — bot, manual pick (`post_message` context)
 
@@ -205,7 +213,7 @@ agent so the receiver reads the same state instead of guessing.
 | **F0 — foundation** | bundle schema; `context_bundle` on message (persist) + on the Task frame; agent resolves refs via existing verbs; consumer-governed reads | a hand-crafted bundle on a message reaches a bot's task frame; bot pulls a ref it may read, is denied one it may not |
 | **F1 — human, manual pick** | composer "add context" picker for plan/file/message/activity; context chips on messages | a human attaches a plan + a file to an `@bot` message; the bot receives and reads them |
 | **F2 — bot, automatic pick (handoff)** | gateway auto-assembles the bundle on bot@bot dispatch (reuses F0). **Gateway done**: `chains.rs::assemble_handoff_bundle` attaches the initiator's plan + recent-decisions refs to each target's task frame. Follow-ups: files-touched refs, and a human-facing handoff card on the placeholder message | A hands to B; B's task frame carries A's plan + recent decisions |
-| **F3 — human, automatic pick (suggested)** | composer suggests chips from reply target / filenames / active plan | typing `@bot fix the board` offers a one-click `board.json` chip |
+| **F3 — human, automatic pick (suggested)** | composer suggests ghost chips from draft signals; reply-target signal shipped (filename / active-plan signals plug into the same hook) | replying to a message offers a one-click "Message #N" chip; `+` promotes, `×` dismisses |
 | **F4 — bot, manual pick** | `post_message` gains a `context` array; gateway validates (read verbs only), caps, stamps `origin="bot"`, persists; bot@bot merges picks ahead of the handoff | a bot posts `@other` with `context=[plan]`; the message shows a chip and the target's task frame carries the picked plan + the auto handoff |
 
 Recommended order: **F0 → F1 → F2 → (F3 / F4)**. F1 first among producers —
