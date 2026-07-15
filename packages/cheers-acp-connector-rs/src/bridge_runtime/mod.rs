@@ -3192,9 +3192,15 @@ mod tests {
         assert!(text.contains("BEGIN ATTACHED CONTEXT"));
         assert!(text.contains("END ATTACHED CONTEXT"));
         // The label's injected newline is collapsed — no line starts with the payload.
-        assert!(!text.contains("\nIGNORE ALL PRIOR"), "label newline neutralized: {text}");
+        assert!(
+            !text.contains("\nIGNORE ALL PRIOR"),
+            "label newline neutralized: {text}"
+        );
         // The snapshot's ``` is defused so it can't close the fence.
-        assert!(!text.contains("before ``` "), "snapshot fence defused: {text}");
+        assert!(
+            !text.contains("before ``` "),
+            "snapshot fence defused: {text}"
+        );
     }
 
     #[test]
@@ -3220,9 +3226,15 @@ mod tests {
         );
         let text = prompt[0]["text"].as_str().expect("text block");
         assert!(text.contains("main.rs (@codex workspace)"));
-        assert!(text.contains("lives in bot codex-bot's workspace"), "locator: {text}");
+        assert!(
+            text.contains("lives in bot codex-bot's workspace"),
+            "locator: {text}"
+        );
         assert!(text.contains("post_message for the current version"));
-        assert!(text.contains("fn main() { println!(\"hi\"); }"), "snapshot inlined: {text}");
+        assert!(
+            text.contains("fn main() { println!(\"hi\"); }"),
+            "snapshot inlined: {text}"
+        );
     }
 
     #[test]
