@@ -46,6 +46,9 @@ export interface PluginMeta {
   plugin_id: string;
   title: string;
   manifest: PluginManifest;
+  /** 'system' = official, seeded by the gateway release (API refuses PUT; deleting is
+   *  allowed and sticks until a release ships a newer version). 'admin' = API-installed. */
+  origin?: "admin" | "system";
   /** Inline sandbox bundle — present only on SESSION-loaded (temporary) plugins; the
    *  server never sends it (installed bundles are fetched lazily via fetchBundle). */
   bundle?: string;

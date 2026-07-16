@@ -292,7 +292,32 @@ Recipes in words:
   raw text. The user's explicit choice always wins and persists ("Auto" clears it).
   Bindings never live in the file itself — files stay pure content.
 
-## 9. Security model (three layers)
+## 9. Official plugins (gateway-seeded)
+
+A basic renderer set ships **inside the gateway binary** and is seeded into
+`workbench_plugins` at startup (`origin='system'`, "Official" badge in Settings):
+
+| id | claims | does |
+|---|---|---|
+| `cheers-checklist` | markdown with `- [ ]`/`- [x]` lines | interactive checklist; writes the lines back in place |
+| `cheers-table` | JSON whose top level is an **array** (`dataKind`) of objects | editable table — columns inferred from the union of row keys; add/delete rows; pretty-JSON save |
+| `cheers-kanban-md` | markdown with `## ` headings + task lines | kanban: `## Heading` = column, task line = card; move/toggle rewrites only those lines |
+| `cheers-frontmatter` | markdown starting with a `---` fence | frontmatter form for flat `key: value` lines; unparseable lines shown read-only and preserved; body untouched |
+
+These double as reference implementations — sources in
+[`server/assets/workbench-plugins/`](../../server/assets/workbench-plugins/), all built
+on the inline SDK (§6.1).
+
+Lifecycle rules (enforced; policy in `server/src/domain/workbench_official.rs`):
+
+- The **binary is the source of truth**: uploads under an official id are rejected
+  ("copy it under a new id to customize").
+- **Deleting** an official plugin is allowed and **sticks across restarts of the same
+  release**; it returns only when a release ships that plugin with a **higher manifest
+  `version`** (an integer next to `protocol`, used only by the seeder).
+- An id an admin claimed with their own plugin is never overwritten by the seeder.
+
+## 10. Security model (three layers)
 
 1. **Opaque origin** — `sandbox="allow-scripts"` without `allow-same-origin`: the
    plugin cannot steal host credentials.
@@ -300,7 +325,7 @@ Recipes in words:
    `path`; server-side channel-role auth is unchanged.
 3. **Inert manifest** — parsed with `DOMParser`, never executed.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Symptom | Likely cause → fix |
 |---|---|

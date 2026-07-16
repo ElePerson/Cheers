@@ -7,6 +7,8 @@
 
 设置 → Workbench extensions → 「插件」卡上传 `.html`;或**直接把 `.html` 拖进工作台抽屉临时试用**(仅本会话,⏱ 标记,刷新即消失——插件开发的调试回路)。
 
+> 另有一套**官方基础渲染插件**(checklist / table / kanban-md / frontmatter)随 gateway 启动自动预装(Settings 里带 Official 徽章),源码在 [`server/assets/workbench-plugins/`](../../../server/assets/workbench-plugins/),同时是最好的参考实现;规则见英文指南 §9。
+
 | 文件 | 场景 | 说明 |
 |---|---|---|
 | [`md-checklist.plugin.html`](./md-checklist.plugin.html) | 通用 | 把 Markdown 待办(`- [ ]` / `- [x]`)渲染成可勾选清单,勾选写回 md。声明了**接受判断**(`match.requireAny` + 运行期 `cheers:unsupported`),只接受含待办行的 markdown。 |
