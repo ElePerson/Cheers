@@ -43,13 +43,25 @@ describe("validatePluginManifest", () => {
     expect(validatePluginManifest({ ...ok, title: "" })).toMatch(/title/);
   });
 
-  it("rejects missing or empty renderers (incl. retired panels-only manifests)", () => {
+  it("rejects missing or empty renderers", () => {
     expect(validatePluginManifest({ id: "x", title: "X" })).toMatch(/renderers/);
     expect(validatePluginManifest({ id: "x", title: "X", renderers: [] })).toMatch(/renderers/);
-    // a legacy scenario plugin declares panels but no renderers — same rejection path
+  });
+
+  it("rejects retired panels manifests with a dedicated message", () => {
     expect(
       validatePluginManifest({ id: "x", title: "X", panels: [{ id: "notes", title: "Notes" }] })
-    ).toMatch(/renderers/);
+    ).toMatch(/legacy|panels/);
+    // even alongside renderers — a mixed manifest is a legacy manifest
+    expect(
+      validatePluginManifest({ ...ok, panels: [] })
+    ).toMatch(/legacy|panels/);
+  });
+
+  it("accepts protocol 1 (or absent) and rejects anything else", () => {
+    expect(validatePluginManifest({ ...ok, protocol: 1 })).toBeNull();
+    expect(validatePluginManifest({ ...ok, protocol: 2 })).toMatch(/protocol/);
+    expect(validatePluginManifest({ ...ok, protocol: "1" })).toMatch(/protocol/);
   });
 
   it("rejects malformed renderer entries", () => {
@@ -77,5 +89,62 @@ describe("validatePluginManifest", () => {
     expect(
       validatePluginManifest({ ...ok, renderers: [{ id: "r", title: "R", match: ["markdown"] }] })
     ).toMatch(/match/);
+  });
+
+  // Parity with the server's validate_manifest (server/src/domain/workbench_plugins.rs):
+  // whatever session-loads here must also install there.
+
+  it("rejects ids outside ^[a-z0-9][a-z0-9._-]{0,63}$ (server id charset)", () => {
+    expect(validatePluginManifest({ ...ok, id: "Bad_Upper" })).toMatch(/id/);
+    expect(validatePluginManifest({ ...ok, id: "-leading-dash" })).toMatch(/id/);
+    expect(validatePluginManifest({ ...ok, id: "has space" })).toMatch(/id/);
+    expect(validatePluginManifest({ ...ok, id: "x".repeat(65) })).toMatch(/id/);
+    expect(validatePluginManifest({ ...ok, id: "x".repeat(64) })).toBeNull();
+  });
+
+  it("rejects over-long titles and renderer ids (server byte caps)", () => {
+    expect(validatePluginManifest({ ...ok, title: "x".repeat(256) })).toMatch(/title/);
+    expect(validatePluginManifest({ ...ok, title: "x".repeat(255) })).toBeNull();
+    expect(
+      validatePluginManifest({ ...ok, renderers: [{ id: "r".repeat(65), title: "R" }] })
+    ).toMatch(/id/);
+  });
+
+  it("type-checks known match keys but ignores unknown ones", () => {
+    expect(
+      validatePluginManifest({
+        ...ok,
+        renderers: [
+          {
+            id: "r",
+            title: "R",
+            match: {
+              format: ["json", "yaml"],
+              dataKind: "array",
+              dataHas: ["rows"],
+              futureKey: { anything: true },
+            },
+          },
+        ],
+      })
+    ).toBeNull();
+    expect(
+      validatePluginManifest({ ...ok, renderers: [{ id: "r", title: "R", match: { dataKind: "tuple" } }] })
+    ).toMatch(/dataKind/);
+    expect(
+      validatePluginManifest({ ...ok, renderers: [{ id: "r", title: "R", match: { format: [] } }] })
+    ).toMatch(/format/);
+    expect(
+      validatePluginManifest({ ...ok, renderers: [{ id: "r", title: "R", match: { format: [1] } }] })
+    ).toMatch(/format/);
+    expect(
+      validatePluginManifest({ ...ok, renderers: [{ id: "r", title: "R", match: { requireAll: "x" } }] })
+    ).toMatch(/requireAll/);
+    expect(
+      validatePluginManifest({ ...ok, renderers: [{ id: "r", title: "R", match: { jsonHas: [1] } }] })
+    ).toMatch(/jsonHas/);
+    expect(
+      validatePluginManifest({ ...ok, renderers: [{ id: "r", title: "R", match: { glob: 5 } }] })
+    ).toMatch(/glob/);
   });
 });

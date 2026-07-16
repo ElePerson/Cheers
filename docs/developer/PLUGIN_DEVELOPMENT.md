@@ -62,6 +62,7 @@ file the host assigns to it. Bundles are capped at **2 MiB**.
 ```json
 {
   "id": "md-checklist",
+  "protocol": 1,
   "title": "Markdown checklist",
   "renderers": [
     { "id": "checklist", "title": "Checklist", "match": { "format": "markdown" } }
@@ -71,19 +72,22 @@ file the host assigns to it. Bundles are capped at **2 MiB**.
 
 | Field | Meaning |
 |---|---|
-| `id` | Globally unique plugin id (primary key on install) |
-| `title` | Human-readable name |
+| `id` | Globally unique plugin id: `^[a-z0-9][a-z0-9._-]{0,63}$` (primary key on install; must equal the manifest's `id`) |
+| `protocol` | Protocol version. **Absent = 1** (the documented default — every plugin installed before the field existed is a protocol-1 plugin). Hosts skip plugins declaring a protocol they don't implement; the server rejects them at install. This document specifies **protocol 1**. |
+| `title` | Human-readable name (≤255 bytes) |
 | `renderers[]` | Renderers this plugin provides (non-empty; ids unique within the plugin) |
-| `renderers[].id` | Unique within the plugin |
+| `renderers[].id` | Unique within the plugin (≤64 bytes) |
 | `renderers[].title` | Shown in the renderer dropdown |
-| `renderers[].match.format` | `markdown` / `json` / `toml` / `xml` / `text` (host classifies by extension; `text` is the catch-all) |
+| `renderers[].match.format` | Coarse format(s) by extension — a string **or a list**: `markdown` / `json` / `toml` / `xml` / `text` (`text` is the catch-all, matching any path) |
 | `renderers[].match.glob` | Optional path narrowing, e.g. `"reviews/*.md"` |
 | `renderers[].match.requireAll` | Content must contain **all** of these substrings |
 | `renderers[].match.requireAny` | Content must contain **at least one** of these |
-| `renderers[].match.jsonHas` | JSON only: parsed object must have **all** these top-level keys |
+| `renderers[].match.dataHas` | Parsed **structured** content (JSON today; YAML when supported) must have **all** these top-level keys |
+| `renderers[].match.dataKind` | Top-level shape of parsed structured content: `"object"` or `"array"` — the only way to claim "a JSON array" (arrays have no keys for `dataHas`) |
+| `renderers[].match.jsonHas` | **Deprecated** alias of `dataHas` with frozen **JSON-only** semantics (will never match YAML). Valid forever under protocol 1; new manifests should use `dataHas`. |
 
 Hosts **ignore unknown manifest keys** (and unknown `match` keys), so the vocabulary
-can grow without breaking older hosts.
+can grow within protocol 1 without breaking older hosts.
 
 `match` declares *what you accept*. The host evaluates it cheaply (substrings / JSON
 keys — your sandbox is not started) to decide whether you appear among a file's
@@ -97,7 +101,7 @@ renderer candidates. Acceptance has **two layers**, both owned by the renderer:
 > The retired `panels` manifest shape (scenario plugins) is **rejected on upload**.
 > A plugin only provides renderers.
 
-## 5. Protocol reference
+## 5. Protocol reference (protocol 1)
 
 ### 5.1 Messages
 
@@ -105,13 +109,19 @@ All messages are plain objects posted between the plugin window and its parent
 (`parent.postMessage(msg, "*")` — the sandbox's null origin means you cannot target
 a specific origin; the host, in turn, only accepts messages from your iframe).
 
+> **Future direction (non-goal today):** a later protocol 2 may wrap these messages in
+> a JSON-RPC 2.0 envelope (`type` → `method`, `reqId` → `id`, payload → `params`) to
+> align with MCP Apps-style iframe UIs. The mapping is mechanical; nothing else about
+> the capability model would change. Do not build against it — protocol 1 is the
+> contract, and `protocol: 1` manifests will keep working.
+
 | Direction | `type` | Payload | When |
 |---|---|---|---|
 | plugin → host | `cheers:ready` | — | iframe loaded; "assign me work". Send it **after** your message listener is wired. |
 | host → plugin | `cheers:render` | `{ path, format, content, version, rendererId }` | Assigns **one** file. Sent in reply to your `cheers:ready`, and re-sent after a conflicted save — those are the only triggers (§5.2). `rendererId` says which of your manifest's renderers was picked. |
 | plugin → host | `cheers:unsupported` | `{ reason? }` | Runtime verdict: you inspected `content` and can't render it. The host hides your iframe and shows the reason. |
-| plugin → host | `cheers:save` | `{ content }` | Write the assigned file back (whole-content replace). |
-| host → plugin | `cheers:saved` | `{ ok, version, error? }` | Result of your save. On `ok`, adopt the new `version`. |
+| plugin → host | `cheers:save` | `{ content }` | Write the assigned file back (whole-content replace). At most **one** save in flight (§5.3). |
+| host → plugin | `cheers:saved` | `{ ok, version, error? }` | Result of your save. On `ok`, adopt the new `version`. Carries **no correlation id** — it answers "the" pending save, which is why only one may be in flight. |
 | plugin → host | `cheers:resource` | `{ reqId, resource, params }` | Read-only channel info (whitelist, §5.4). `reqId` is your correlation number. |
 | host → plugin | `cheers:resource:result` | `{ reqId, ok, data\|error }` | Resource read result. |
 
@@ -145,6 +155,10 @@ the §5.4 resource whitelist covers channel data only, not file content.
   it last sent you. On conflict you get `cheers:saved {ok:false}` **followed by a fresh
   `cheers:render`** — re-render from the new content and let the user reapply. Do not
   retry the save blindly.
+- **One save in flight.** Hosts do **not** correlate saves: each `cheers:save` is
+  answered by an independent `cheers:saved` with no request id, and completion order is
+  not guaranteed. Plugins MUST wait for `cheers:saved` before sending the next
+  `cheers:save` (the SDK enforces this — an overlapping `save()` rejects).
 - **Safe rendering.** `content` is untrusted text (it may come from a bot or another
   member). Write it to the DOM with `textContent` or controlled form values — **never
   concatenate into `innerHTML`**.
@@ -209,6 +223,27 @@ installed plugins are **admin-vouched** (§8).
 </html>
 ```
 
+### 6.1 Optional inline SDK
+
+If you'd rather not hand-roll the listener/promise plumbing, copy
+[`docs/arch/examples/cheers-plugin-sdk.js`](../arch/examples/cheers-plugin-sdk.js)
+(~50 lines, protocol 1) **inline** into your `<script>` — plugins are self-contained
+files, there is no external loading in the sandbox:
+
+```js
+var host = cheersPlugin({
+  onRender: function (file) {
+    // { path, format, content, version, rendererId } — sent on your ready and
+    // re-sent after a conflicted save (the only triggers, §5.2): always re-draw here.
+  },
+});
+host.save(next).then(function (r) { /* r.version */ }).catch(function (e) { /* show e */ });
+host.resource("channel.info", {}).then(function (data) { /* … */ });
+host.unsupported("no task lines found");
+```
+
+It wires the listener first and posts `cheers:ready` for you.
+
 ## 7. Cookbook
 
 Complete working examples (upload as-is, or drop on the drawer to try):
@@ -217,7 +252,7 @@ Complete working examples (upload as-is, or drop on the drawer to try):
   todo list → interactive checklist. The canonical *"markdown convention + narrow
   `match` + line-preserving rewrite"* recipe.
 - [`lit-review.plugin.html`](../arch/examples/lit-review.plugin.html) — paper-tracker
-  table over `{ "papers": [...] }` JSON (`match.jsonHas` pre-filter + runtime array
+  table over `{ "papers": [...] }` JSON (`match.dataHas` pre-filter + runtime array
   check + form-driven JSON writeback).
 - [`code-review.plugin.html`](../arch/examples/code-review.plugin.html) — markdown
   review findings (`## file` sections, `- [ ] [P0|P1|P2]` items) with severity badges.
@@ -232,9 +267,10 @@ Recipes in words:
 - **Claim a markdown convention** — declare `format:"markdown"` plus `requireAny`
   /`requireAll` markers for your convention; split content into lines on render, edit
   lines in place, `join("\n")` on save so non-convention lines survive byte-for-byte.
-- **Claim a JSON structure** — declare `jsonHas` for your top-level keys; on render,
-  `JSON.parse` in try/catch and verify shapes, `cheers:unsupported` when they don't
-  hold; save with `JSON.stringify(data, null, 2)`.
+- **Claim a JSON structure** — declare `dataHas` for your top-level keys (or
+  `dataKind:"array"` for a top-level array); on render, `JSON.parse` in try/catch and
+  verify shapes, `cheers:unsupported` when they don't hold; save with
+  `JSON.stringify(data, null, 2)`.
 - **Use channel context** — call the §5.4 resource helper, e.g. `channel.members` to
   resolve author ids to names in your UI. Data may be stale seconds later, and renders
   are rare (§5.2: on `ready` and after a conflicted save — never on external edits), so
@@ -247,6 +283,22 @@ Recipes in words:
 - **Install** (admin): Settings → Workbench extensions → upload the `.html` (stored in
   the `workbench_plugins` table, visible to all channels). The installer vouches for
   the code — that is the trust model.
+
+  The server validates the manifest on install (`PUT /workbench/plugins/:id`) and
+  rejects with **400** naming the reason:
+
+  | Rejection | Rule |
+  |---|---|
+  | id charset | plugin id must match `^[a-z0-9][a-z0-9._-]{0,63}$` |
+  | id mismatch | `manifest.id` must equal the id in the URL |
+  | missing title | `manifest.title` non-empty, ≤255 bytes |
+  | unsupported protocol | `protocol` absent or `1` |
+  | legacy manifest | a `panels` key = retired scenario-plugin protocol |
+  | renderers | non-empty array; per renderer: non-empty `id` (≤64, unique) + `title`; `match` type-checked on known keys (unknown keys allowed) |
+  | size (413) | bundle ≤ 2 MiB, manifest ≤ 64 KiB |
+
+  Already-installed plugins are never revalidated (list/bundle paths are untouched);
+  the rules bite on the next install/update.
 - **Bind**: when a file is open, the Workbench resolves `bindings[path]` from
   `.workbench.json`; without a binding it offers the candidate list (most specific
   `match` first, CSS-style cascade) and defaults to the best match, falling back to
