@@ -46,7 +46,7 @@
 | `title` | 给人看的名字 |
 | `renderers[]` | 这个插件提供的渲染器,可多个 |
 | `renderers[].id` | 渲染器在插件内唯一 |
-| `renderers[].match.format` | `markdown` / `json` / `toml` / `xml` / `text`。host 按扩展名归类(`.md`→markdown,无扩展名→text)。 |
+| `renderers[].match.format` | `markdown` / `json` / `yaml` / `toml` / `xml` / `text`(可为数组)。host 按扩展名归类(`.md`→markdown,`.yaml`/`.yml`→yaml,无扩展名→text)。 |
 | `renderers[].match.glob` | (可选)按路径窄化,如 `"reviews/*.md"` |
 | `renderers[].match.requireAll` | (可选)内容必须**全部包含**这些子串。用于「md 含某些标题」,如 `["## 待办","## 进行中"]`。 |
 | `renderers[].match.requireAny` | (可选)内容至少包含**其一**,如 `["- [ ]","- [x]"]`(待办行)。 |

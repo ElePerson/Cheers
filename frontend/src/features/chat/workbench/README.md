@@ -37,9 +37,14 @@ boards are automatically **shared human↔bot state**.
 ```
 
 - **Lenses (built-in renderers)**: `table` (array of row objects; columns from
-  `config`), `kanban` (`{columns:[{name,items:[]}]}`), `markdown` (a string),
+  `config`, else inferred from the union of row keys), `kanban`
+  (`{columns:[{name,items:[]}]}`), `markdown` (a string),
   `chart` (`{xLabel?, yLabel?, series:[{name, points:[[x,y],…]}]}`, view-only).
   Unknown lens ids fail validation — data can never smuggle in code.
+- **Formats**: structured lenses accept `.json` **and** `.yaml`/`.yml` files. YAML
+  writes are comment-preserving (the lens patches the parsed document instead of
+  re-serializing), so a board can carry `# comments` for humans/bots and survive UI
+  edits; seeds targeting a `.yaml` path serialize as YAML.
 - **On activation** the workbench seeds the files (create-only), writes
   `bindings[file] = "builtin:<lens>"` + `configs[file] = config` into
   `.workbench.json` (create-only — a user's explicit binding is never overwritten),
