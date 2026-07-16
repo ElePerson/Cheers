@@ -32,6 +32,8 @@ describe("formatOf", () => {
     expect(formatOf("a.md")).toBe("markdown");
     expect(formatOf("a.MARKDOWN")).toBe("markdown");
     expect(formatOf("a.json")).toBe("json");
+    expect(formatOf("a.yaml")).toBe("yaml");
+    expect(formatOf("a.YML")).toBe("yaml");
     expect(formatOf("a.toml")).toBe("toml");
     expect(formatOf("noext")).toBe("text");
   });
@@ -82,21 +84,50 @@ describe("candidatesFor — content-aware, specificity-ordered", () => {
     );
   });
 
-  it("excludes config-needing builtins (table/kanban) from the picker", () => {
-    // json with `columns`: the plugin board is offered; built-in table/kanban are NOT (pickable=false)
+  it("excludes shape-uncertain builtins (kanban) and non-matching table from the picker", () => {
+    // json OBJECT with `columns`: the plugin board is offered; built-in kanban stays
+    // unpickable and built-in table doesn't accept objects (dataKind: array)
     const ids = idsOf("b.json", '{"columns":[]}', [kanban]);
     expect(ids).toContain("plugin:kb:board");
     expect(ids).not.toContain("builtin:table");
     expect(ids).not.toContain("builtin:kanban");
-    // json that no renderer accepts → empty candidate list
+    // json object that no renderer accepts → empty candidate list
     expect(idsOf("b.json", '{"x":1}', [kanban])).toEqual([]);
+  });
+});
+
+describe("yaml as a structured format", () => {
+  it("builtin table is offered for JSON and YAML arrays, never for objects", () => {
+    expect(idsOf("rows.json", '[{"a":1}]', [])).toContain("builtin:table");
+    expect(idsOf("rows.yaml", "- a: 1\n- a: 2\n", [])).toContain("builtin:table");
+    expect(idsOf("obj.yaml", "a: 1\n", [])).not.toContain("builtin:table");
+    expect(idsOf("prose.yaml", "just a scalar string", [])).not.toContain("builtin:table");
+  });
+
+  it("dataHas matches parsed YAML top-level keys (chart via `series`)", () => {
+    expect(idsOf("m.yaml", "series:\n  - name: s\n    points: []\n", [])).toContain("builtin:chart");
+    expect(idsOf("m.yaml", "other: 1\n", [])).not.toContain("builtin:chart");
+  });
+
+  it("jsonHas stays frozen to JSON — it never matches YAML", () => {
+    const p: PluginMeta = {
+      plugin_id: "jh",
+      title: "jh",
+      manifest: {
+        id: "jh",
+        title: "jh",
+        renderers: [{ id: "r", title: "R", match: { format: ["json", "yaml"], jsonHas: ["columns"] } }],
+      },
+    };
+    expect(idsOf("b.json", '{"columns":[]}', [p])).toContain("plugin:jh:r");
+    expect(idsOf("b.yaml", "columns: []\n", [p])).not.toContain("plugin:jh:r");
   });
 });
 
 describe("getRenderer", () => {
   it("resolves built-ins (incl. unpickable) and plugin renderers", () => {
     expect(getRenderer("builtin:markdown", [])?.lensId).toBe("markdown");
-    expect(getRenderer("builtin:table", [])?.pickable).toBe(false);
+    expect(getRenderer("builtin:kanban", [])?.pickable).toBe(false);
     expect(getRenderer("plugin:md-checklist:checklist", [checklist])?.title).toBe("Checklist");
     expect(getRenderer("nope", [])).toBeUndefined();
   });

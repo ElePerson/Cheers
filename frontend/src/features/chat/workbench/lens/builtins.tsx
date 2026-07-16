@@ -2,13 +2,28 @@ import { useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
 import { registerLens, type LensProps } from "./registry";
 
-// ── table: array of row objects, columns declared in config ──────────────────
+// ── table: array of row objects; columns from config, else inferred ──────────
 interface TableConfig {
   columns: { key: string; label: string; options?: string[] }[];
 }
+// Without a template config (the pickable path — any JSON/YAML array), infer the
+// columns from the union of row keys, first-seen order. `options` dropdowns remain a
+// config-only feature.
+function inferColumns(rows: Record<string, unknown>[]): TableConfig["columns"] {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows)
+    for (const k of Object.keys(r))
+      if (!seen.has(k)) {
+        seen.add(k);
+        keys.push(k);
+      }
+  return (keys.length ? keys : ["value"]).map((k) => ({ key: k, label: k }));
+}
 function TableLens({ data, config, onChange }: LensProps) {
-  const columns = (config as TableConfig | undefined)?.columns ?? [];
   const rows = Array.isArray(data) ? (data as Record<string, unknown>[]) : [];
+  const configured = (config as TableConfig | undefined)?.columns;
+  const columns = configured?.length ? configured : inferColumns(rows);
   const update = (i: number, key: string, v: string) =>
     onChange(rows.map((r, j) => (j === i ? { ...r, [key]: v } : r)));
   const add = () =>

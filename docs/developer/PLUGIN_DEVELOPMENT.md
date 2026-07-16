@@ -78,12 +78,12 @@ file the host assigns to it. Bundles are capped at **2 MiB**.
 | `renderers[]` | Renderers this plugin provides (non-empty; ids unique within the plugin) |
 | `renderers[].id` | Unique within the plugin (≤64 bytes) |
 | `renderers[].title` | Shown in the renderer dropdown |
-| `renderers[].match.format` | Coarse format(s) by extension — a string **or a list**: `markdown` / `json` / `toml` / `xml` / `text` (`text` is the catch-all, matching any path) |
+| `renderers[].match.format` | Coarse format(s) by extension — a string **or a list**: `markdown` / `json` / `yaml` / `toml` / `xml` / `text` (`text` is the catch-all, matching any path) |
 | `renderers[].match.glob` | Optional path narrowing, e.g. `"reviews/*.md"` |
 | `renderers[].match.requireAll` | Content must contain **all** of these substrings |
 | `renderers[].match.requireAny` | Content must contain **at least one** of these |
-| `renderers[].match.dataHas` | Parsed **structured** content (JSON today; YAML when supported) must have **all** these top-level keys |
-| `renderers[].match.dataKind` | Top-level shape of parsed structured content: `"object"` or `"array"` — the only way to claim "a JSON array" (arrays have no keys for `dataHas`) |
+| `renderers[].match.dataHas` | Parsed **structured** content (JSON or YAML) must have **all** these top-level keys |
+| `renderers[].match.dataKind` | Top-level shape of parsed structured content: `"object"` or `"array"` — the only way to claim "a JSON/YAML array" (arrays have no keys for `dataHas`) |
 | `renderers[].match.jsonHas` | **Deprecated** alias of `dataHas` with frozen **JSON-only** semantics (will never match YAML). Valid forever under protocol 1; new manifests should use `dataHas`. |
 
 Hosts **ignore unknown manifest keys** (and unknown `match` keys), so the vocabulary
@@ -100,6 +100,16 @@ renderer candidates. Acceptance has **two layers**, both owned by the renderer:
 
 > The retired `panels` manifest shape (scenario plugins) is **rejected on upload**.
 > A plugin only provides renderers.
+
+**YAML note.** The host classifies `.yaml`/`.yml` as `format: "yaml"` and evaluates
+`dataHas`/`dataKind` on the parsed document, but `cheers:render` still hands your
+sandbox the **raw text** — a plugin claiming YAML must inline its own parser (the
+sandbox loads nothing external). In practice, prefer letting the **built-in lenses**
+cover YAML: the builtin table (arrays of objects) and chart (`series`) accept both
+JSON and YAML, and their writes go through a comment-preserving round-trip —
+comments and blank lines in the file survive machine edits. Also remember YAML 1.2
+semantics: `yes`/`no`/`on`/`off` are plain strings, not booleans — agents writing
+1.1-style files will get strings back.
 
 ## 5. Protocol reference (protocol 1)
 
@@ -329,7 +339,7 @@ Lifecycle rules (enforced; policy in `server/src/domain/workbench_official.rs`):
 
 | Symptom | Likely cause → fix |
 |---|---|
-| **My renderer never appears in the dropdown** | Its `match` doesn't accept the file. Check in order: ① `match.format` vs the file's extension class (`.md`→markdown, `.json`→json, `.toml`→toml, `.xml`→xml, anything else→text); ② every `requireAll` substring is really in the content (exact match, case-sensitive); ③ at least one `requireAny` hit; ④ `jsonHas`: file must parse as a JSON **object** (not array) containing all listed keys; ⑤ `glob` matches the full path. |
+| **My renderer never appears in the dropdown** | Its `match` doesn't accept the file. Check in order: ① `match.format` vs the file's extension class (`.md`→markdown, `.json`→json, `.yaml`/`.yml`→yaml, `.toml`→toml, `.xml`→xml, anything else→text); ② every `requireAll` substring is really in the content (exact match, case-sensitive); ③ at least one `requireAny` hit; ④ `dataHas`/`dataKind`: file must parse (JSON or YAML) with the claimed keys/shape — and `jsonHas` never matches YAML; ⑤ `glob` matches the full path. |
 | **The plugin loads but the iframe stays blank** | You never sent `cheers:ready`, or sent it before wiring your `message` listener (the host's `cheers:render` answer raced past you). Send `ready` as the **last** line of your script. |
 | **"This renderer can't render this file"** | Your own runtime verdict — you replied `cheers:unsupported`. If unexpected, your parse is stricter than your `match`; align them. |
 | **Saves fail repeatedly / edits bounce back** | Version conflict: someone (often the bot) wrote the file between your render and your save. Contract: on `cheers:saved {ok:false}` the host re-sends `cheers:render` with fresh content — re-render and let the user reapply. If you cached `version` yourself and reused it, stop: the host tracks the version, you never send one. |
