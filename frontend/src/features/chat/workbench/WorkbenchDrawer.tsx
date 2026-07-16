@@ -84,9 +84,11 @@ function parseCfg(content: string): WbConfig {
 // Scenarios come from three places:
 //  - GLOBAL templates (DATA, admin-installed, lens-rendered) — shared by every channel
 //  - SESSION templates (DATA, temporarily uploaded here, this browser session only)
-//  - SERVER-LEVEL plugins (CODE, admin-installed, sandboxed iframe renderers)
+//  - SERVER-LEVEL plugins (CODE, sandboxed iframe renderers): admin-installed or
+//    official (seeded by the gateway release, origin='system')
 // Installing global templates / plugins lives in Settings → Workbench extensions (admin);
-// the drawer only CONSUMES them, and offers a no-persistence temporary upload to anyone.
+// the drawer only CONSUMES them, and offers a no-persistence temporary upload to anyone
+// (.json template or .html plugin — the plugin dev loop).
 function WorkbenchDrawerImpl({ open, onClose, channelId, sendResourceReq, openFilePath, filesTick }: Props) {
   const fs = useMemo(() => makeFsClient(sendResourceReq, channelId), [sendResourceReq, channelId]);
   const [cfg, setCfg] = useState<WbConfig>({});

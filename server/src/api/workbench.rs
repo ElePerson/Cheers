@@ -55,6 +55,16 @@ pub async fn install_plugin(
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, AppError> {
     require_admin(&claims)?;
+    // Official (gateway-seeded) plugins are managed by releases — an admin PUT here
+    // would be silently clobbered on the next version bump. Refuse instead.
+    if domain::workbench_plugins::get_origin(&state.db, &plugin_id).await?.as_deref()
+        == Some("system")
+    {
+        return Err(AppError::BadRequest(
+            "official plugin — managed by gateway releases; copy it under a new id to customize"
+                .into(),
+        ));
+    }
     let manifest = body
         .get("manifest")
         .ok_or_else(|| AppError::BadRequest("plugin manifest is required".into()))?;
@@ -85,6 +95,7 @@ pub async fn install_plugin(
         &manifest_str,
         bundle,
         &claims.sub,
+        "admin",
     )
     .await?;
     Ok(Json(json!({ "plugin_id": plugin_id, "ok": true })))
