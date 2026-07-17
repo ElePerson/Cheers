@@ -1970,7 +1970,10 @@ impl RuntimeContext {
                     // Move the accumulated text out (turn is over; the run is about
                     // to be dropped from the shared maps below) so the whole streamed
                     // response isn't deep-cloned just to hand it to the Done frame.
-                    (std::mem::take(&mut guard.text), guard.created_file_ids.clone())
+                    (
+                        std::mem::take(&mut guard.text),
+                        guard.created_file_ids.clone(),
+                    )
                 };
                 let terminal_ack = self
                     .io
