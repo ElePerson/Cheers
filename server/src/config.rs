@@ -92,6 +92,15 @@ pub struct Config {
     /// Display name on outbound mail (`EMAIL_FROM_NAME`, default `Cheers`).
     pub email_from_name: String,
 
+    // Web Push（PWA 通知；不配置则整体禁用，订阅接口返回 key=null）
+    /// VAPID application-server private key, P-256 PEM (`VAPID_PRIVATE_KEY`).
+    /// Generate: `openssl ecparam -genkey -name prime256v1 -noout`. Unset → no
+    /// outbound Web Push (subscribe UI hides itself when the key endpoint is null).
+    pub vapid_private_key_pem: Option<String>,
+    /// VAPID `sub` claim — a contact URI for the push service to reach the
+    /// operator (`VAPID_SUBJECT`, default `mailto:admin@tocheers.com`).
+    pub vapid_subject: String,
+
     /// Whether public self-service sign-up (`POST /auth/register`) is enabled.
     /// Default **false** (secure by default: accounts come from the seeded admin
     /// or `POST /users`); set `OPEN_REGISTRATION=true` to open sign-up.
@@ -203,6 +212,14 @@ impl Config {
                 .ok()
                 .filter(|v| !v.trim().is_empty())
                 .unwrap_or_else(|| "Cheers".into()),
+
+            vapid_private_key_pem: env::var("VAPID_PRIVATE_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            vapid_subject: env::var("VAPID_SUBJECT")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or_else(|| "mailto:admin@tocheers.com".into()),
 
             open_registration: env_flag("OPEN_REGISTRATION", false),
 

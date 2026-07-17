@@ -11,6 +11,7 @@ import {
 } from "react-router-dom";
 import { ErrorState } from "@/components/ui/error-state";
 import { useAuthStore } from "@/stores/authStore";
+import { initPushBridge } from "@/lib/push";
 
 const LoginPage = lazy(() => import("@/features/auth/LoginPage"));
 const RegisterPage = lazy(() => import("@/features/auth/RegisterPage"));
@@ -90,6 +91,12 @@ function SessionExpiredTakeover() {
 }
 
 export default function App() {
+  // Web Push bridge: SW message listener + cold-start deep link. App-level so
+  // a notification click reaching a window on ANY route (Settings, Friends,
+  // /login) still gets handled; see openChannelFromPush's redirect fallback.
+  useEffect(() => {
+    initPushBridge();
+  }, []);
   return (
     <Suspense fallback={<Spinner />}>
       <Routes>

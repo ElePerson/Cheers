@@ -7,6 +7,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { useChatStore } from "@/stores/chatStore";
 import { useNotificationStore } from "@/stores/notificationStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { markChatLayoutMounted } from "@/lib/push";
 import { useUserSocket } from "./hooks/useUserSocket";
 import type { NotificationItem } from "@/api/notifications";
 import { WorkspaceRail } from "./WorkspaceRail";
@@ -206,6 +207,20 @@ export default function ChatLayout() {
     setNavOpen(false);
     if (!chatPushed) navigate(location.pathname, { state: { chat: true } });
   }, [chatPushed, navigate, location.pathname]);
+
+  // Web Push deep links: announce that store-driven channel selection can
+  // navigate (the bridge itself lives in App). A clicked notification selects
+  // the channel through the store; on mobile the conversation screen must
+  // additionally be pushed, which is this layout's private history
+  // convention — hence the event rather than a store field.
+  useEffect(() => markChatLayoutMounted(), []);
+  useEffect(() => {
+    const onPushOpen = () => {
+      if (isMobile) openChatScreen();
+    };
+    window.addEventListener("cheers:push-open-chat", onPushOpen);
+    return () => window.removeEventListener("cheers:push-open-chat", onPushOpen);
+  }, [isMobile, openChatScreen]);
 
   // Mobile: header back (or browser Back) returns to the list. Prefer a real history
   // pop so the stack stays clean; fall back to replace when this is the first entry

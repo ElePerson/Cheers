@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, User, Bot, Blocks, Users, LogOut, KeyRound, AudioLines } from "lucide-react";
+import { ArrowLeft, User, Bot, Blocks, Users, LogOut, KeyRound, AudioLines, Bell } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore, useIsAdmin } from "@/stores/authStore";
 import { changePassword, logout as logoutApi } from "@/api/auth";
+import { disablePush, enablePush, getPushStatus, type PushStatus } from "@/lib/push";
 import { getMe, updateMe } from "@/api/users";
 import { uploadUserAvatar } from "@/api/avatars";
 import { AvatarUpload } from "@/components/ui/AvatarUpload";
@@ -27,6 +28,81 @@ const NAV: { id: SectionId; label: string; icon: typeof User; adminOnly?: boolea
   { id: "speech", label: "Speech-to-text", icon: AudioLines, adminOnly: true },
   { id: "account", label: "Account", icon: LogOut },
 ];
+
+/** Web Push toggle: approval requests and @mentions as OS notifications, so
+ * a pending permission card reaches the user away from the tab. Hidden when
+ * the deployment has no VAPID key, and when the browser can't do push. */
+function PushNotificationsCard() {
+  const [status, setStatus] = useState<PushStatus | "loading">("loading");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void getPushStatus().then((s) => {
+      if (alive) setStatus(s);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Nothing to offer: the server has push disabled, or this browser (or a dev
+  // build without a service worker) can't subscribe.
+  if (status === "unconfigured" || status === "unsupported") return null;
+
+  const enabled = status === "enabled";
+
+  async function toggle() {
+    setBusy(true);
+    try {
+      if (enabled) {
+        await disablePush();
+        setStatus("disabled");
+        toast.success("Push notifications turned off");
+      } else {
+        const next = await enablePush();
+        setStatus(next);
+        if (next === "enabled") {
+          toast.success("Push notifications turned on");
+        } else if (next === "denied") {
+          toast.error(
+            "Notifications are blocked for this site — allow them in your browser settings first"
+          );
+        }
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't update push notifications");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="bg-zinc-900 rounded-2xl p-6 mt-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-zinc-200 flex items-center gap-2">
+            <Bell className="w-4 h-4 text-indigo-400" /> Push notifications
+          </p>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Approval requests and @mentions reach this device even when Cheers
+            isn't open.
+            {status === "denied" &&
+              " Currently blocked in your browser's site settings."}
+          </p>
+        </div>
+        <Button
+          variant={enabled ? "secondary" : "primary"}
+          size="sm"
+          disabled={busy || status === "loading"}
+          onClick={() => void toggle()}
+        >
+          {status === "loading" ? "…" : enabled ? "Turn off" : "Turn on"}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function ChangePasswordCard({ onRotated }: { onRotated: (token: string) => void }) {
   const [current, setCurrent] = useState("");
@@ -401,6 +477,8 @@ export default function SettingsPage() {
 
               <ChangePasswordCard onRotated={(token) => setToken(token)} />
 
+              <PushNotificationsCard />
+
               <div className="bg-zinc-900 rounded-2xl p-6 mt-4">
                 <div className="flex items-center justify-between">
                   <div>
@@ -413,7 +491,11 @@ export default function SettingsPage() {
                     variant="danger"
                     size="sm"
                     onClick={async () => {
-                      // Best-effort server revocation, then clear local state regardless.
+                      // Push first (the DELETE needs the auth token), then
+                      // best-effort server revocation, then clear local state
+                      // regardless — a signed-out browser must not keep
+                      // receiving lock-screen notifications.
+                      await disablePush().catch(() => {});
                       await logoutApi().catch(() => {});
                       logout();
                       navigate("/login", { replace: true });

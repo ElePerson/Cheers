@@ -119,6 +119,26 @@ pub async fn send_message(
         "send_message persisted and broadcasted"
     );
 
+    // Web Push the @mentioned humans (kind=mention). The message is already
+    // durable + broadcast — this is a fire-and-forget out-of-app nudge.
+    let mention_targets: Vec<String> = dto
+        .mentions
+        .iter()
+        .filter(|m| m.member_type == "user" && m.member_id != user_id.to_string())
+        .map(|m| m.member_id.clone())
+        .collect();
+    crate::infra::web_push::spawn_push_to_users(
+        &state,
+        mention_targets,
+        serde_json::json!({
+            "kind": "mention",
+            "channel_id": channel_id,
+            "msg_id": dto.msg_id,
+            "sender_name": dto.sender_name,
+            "body": dto.content.chars().take(200).collect::<String>(),
+        }),
+    );
+
     Ok((StatusCode::CREATED, Json(dto)))
 }
 
