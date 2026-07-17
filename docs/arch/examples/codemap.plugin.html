@@ -533,30 +533,45 @@ function buildModel(doc) {
   return m;
 }
 function areaOf(id) { return id.split(".")[0]; }
-function hashJitter(id, range) {
-  var h = 0;
-  for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-  return (Math.abs(h) % 1000) / 1000 * range - range / 2;
-}
 function layout(m) {
-  // 确定性：区域按首次出现排列成列，模块在列内按 id 排序纵向排布 + 稳定横向抖动
-  var colOf = {}, cols = [];
+  // 确定性打包布局：每个区域一个「块」（模块按 id 纵排，>5 个换双列），块按首次
+  // 出现顺序从左到右流式排布、超过目标行宽换行——目标行宽随总量自适应，让整体
+  // 逼近合理宽高比。之前的「一区一列」在多区域扁平地图上会摊成一字长蛇。
+  var order = [], byArea = {};
   m.modules.forEach(function (id) {
     var a = areaOf(id);
-    if (!(a in colOf)) { colOf[a] = cols.length; cols.push(a); }
+    if (!byArea[a]) { byArea[a] = []; order.push(a); }
+    byArea[a].push(id);
   });
-  var pos = {};
-  var perCol = {};
-  m.modules.slice().sort().forEach(function (id) {
-    var c = colOf[areaOf(id)];
-    var row = perCol[c] = (perCol[c] || 0) + 1;
-    pos[id] = {
-      x: 170 + c * 330 + hashJitter(id, 120),
-      y: 90 + row * 118 + hashJitter(id + "y", 40),
+  var blocks = order.map(function (a) {
+    var ids = byArea[a].slice().sort();
+    var cols = ids.length > 5 ? 2 : 1;
+    var rows = Math.ceil(ids.length / cols);
+    var maxW = 0;
+    ids.forEach(function (id) { maxW = Math.max(maxW, nodeW(m.nodes[id])); });
+    // 展开了卫星的块要占更高的行，免得下一行 hull 压到卫星标签
+    var hasOpenSats = ids.some(function (id) { return expanded[id] && (m.satsOf[id] || []).length; });
+    return {
+      a: a, ids: ids, cols: cols, colW: maxW + 36, maxW: maxW,
+      w: cols * (maxW + 36) + 24,
+      h: rows * 92 + 60 + (hasOpenSats ? 118 : 0),
     };
   });
+  var totalW = 0;
+  blocks.forEach(function (b) { totalW += b.w + 70; });
+  var target = Math.max(760, Math.min(1500, Math.sqrt(totalW * 340)));
+  var pos = {}, x = 0, y = 0, rowH = 0;
+  blocks.forEach(function (b) {
+    if (x > 0 && x + b.w > target) { x = 0; y += rowH + 88; rowH = 0; }
+    b.ids.forEach(function (id, i) {
+      var c = i % b.cols, r = Math.floor(i / b.cols);
+      pos[id] = { x: x + 18 + c * b.colW + b.maxW / 2, y: y + 46 + r * 92 };
+    });
+    x += b.w + 70;
+    rowH = Math.max(rowH, b.h);
+  });
   Object.keys(dragPos).forEach(function (id) { if (pos[id]) pos[id] = dragPos[id]; });
-  return { pos: pos, cols: cols, colOf: colOf };
+  return { pos: pos, cols: order };
 }
 
 /* ═══════════════════ 几何 ═══════════════════ */
@@ -750,7 +765,10 @@ mapEl.addEventListener("mouseout", function (e) {
 
 /* ═══════════════════ minimap / 视图 ═══════════════════ */
 function worldBounds() {
-  if (!L) L = layout(model);   // fit() 可能先于首次 render() 调用——没布局就先算一次
+  // 布局永远跟当前 model 重算：fit() 可能在 model 被替换后、render() 之前被调用，
+  // 一个过期的 L 里没有新节点的坐标（读 undefined.x 会把整次渲染炸掉）。layout()
+  // 对几十个节点是纯算术，重算的代价可以忽略。
+  L = layout(model);
   var x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
   model.modules.forEach(function (id) {
     var r = nodeRect(model.nodes[id], L.pos[id]);
@@ -802,9 +820,11 @@ function centerOn(wx, wy, animate) {
 function fit() {
   var b = worldBounds();
   var k = Math.min(wrap.clientWidth / (b.x2 - b.x1), wrap.clientHeight / (b.y2 - b.y1), 1.4) * 0.96;
+  // 给左下角缩放控件让位，但只在有横向富余时让——别把右边挤出画面
+  var slack = Math.max(0, (wrap.clientWidth - (b.x2 - b.x1) * k) / 2);
   view = {
     k: k,
-    tx: (wrap.clientWidth - (b.x2 - b.x1) * k) / 2 - b.x1 * k + 36,
+    tx: (wrap.clientWidth - (b.x2 - b.x1) * k) / 2 - b.x1 * k + Math.min(36, slack),
     ty: (wrap.clientHeight - (b.y2 - b.y1) * k) / 2 - b.y1 * k,
   };
   render();
