@@ -58,23 +58,35 @@ jobs:
         run: |
           BUNDLE=apps/macos/src-tauri/target/release/bundle
           mkdir dist-assets
-          cp "$BUNDLE"/dmg/Cheers_*_aarch64.dmg dist-assets/
-          tar -C "$BUNDLE/macos" -czf dist-assets/Cheers-macos-arm64.app.tar.gz Cheers.app
+          # End-user-legible names: this build targets macOS on Apple Silicon,
+          # so the system is obvious from the filename (not "aarch64").
+          cp "$BUNDLE"/dmg/Cheers_*.dmg dist-assets/Cheers-macOS-AppleSilicon.dmg
+          tar -C "$BUNDLE/macos" -czf dist-assets/Cheers-macOS-AppleSilicon.app.tar.gz Cheers.app
           shasum -a 256 dist-assets/* | tee dist-assets/SHA256SUMS.txt
           ls -l dist-assets
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          name: Cheers Desktop (macOS · Apple Silicon)
           prerelease: true
           fail_on_unmatched_files: true
           files: |
             dist-assets/*
           body: |
-            Cheers Desktop for macOS (Apple silicon). **Unsigned preview** — on
-            first launch, right-click the app → Open (or clear quarantine with
-            `xattr -dr com.apple.quarantine /Applications/Cheers.app`).
+            ## Cheers Desktop — macOS (Apple Silicon)
 
-            Install: open the `.dmg` and drag Cheers to Applications. The
-            `cheers://` link scheme and Finder "Open With → Cheers" register on
-            first launch of the installed app.
+            **For:** an Apple-silicon Mac (M1/M2/M3…) on **macOS 11+**.
+            Intel Macs are **not** built yet.
+
+            **Unsigned preview** — on first launch, right-click Cheers → Open
+            (or clear quarantine: `xattr -dr com.apple.quarantine /Applications/Cheers.app`).
+
+            **Install:** open `Cheers-macOS-AppleSilicon.dmg` and drag Cheers to
+            Applications. The `cheers://` link scheme and Finder "Open With →
+            Cheers" register on first launch of the installed app.
+
+            | Download | System |
+            |---|---|
+            | `Cheers-macOS-AppleSilicon.dmg` | macOS 11+, Apple Silicon — installer |
+            | `Cheers-macOS-AppleSilicon.app.tar.gz` | macOS 11+, Apple Silicon — bare .app |
