@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Retains one ChatModel per channel across channel switches — the iOS
 /// counterpart of the web client's chatCache. Re-entering a cached channel
@@ -13,6 +14,29 @@ final class ChatModelStore {
     /// recently touched entry, so it can never be the eviction candidate.
     private var order: [String] = []
     private let capacity = 12
+
+    init() {
+        // Platform convention: an in-memory cache sheds under memory pressure.
+        // Safe to be aggressive — evicted history reloads from the SwiftData
+        // cache (MessageStore) without a network round-trip.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.shedAllButCurrent()
+            }
+        }
+    }
+
+    /// Memory warning: drop every cached model except the open channel's (the
+    /// most recently touched entry — the one a view may be holding right now).
+    private func shedAllButCurrent() {
+        guard let current = order.last else { return }
+        models = models.filter { $0.key == current }
+        order = [current]
+    }
 
     func model(for channel: ChannelDto) -> ChatModel {
         if let existing = models[channel.channelId] {

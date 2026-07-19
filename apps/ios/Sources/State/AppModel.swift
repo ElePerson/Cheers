@@ -35,6 +35,10 @@ final class AppModel {
     @ObservationIgnored
     let chatModels = ChatModelStore()
 
+    /// Offline-first message cache (SwiftData) — instant history on relaunch.
+    @ObservationIgnored
+    let messageStore = MessageStore()
+
     @ObservationIgnored
     private var eventListeners: [UUID: (SocketEvent) -> Void] = [:]
 
@@ -120,6 +124,7 @@ final class AppModel {
         socket.disconnect()
         socketConnected = false
         chatModels.removeAll()
+        messageStore.removeAll()
         token = nil
         session = nil
         KeychainStore.remove(Keys.token)

@@ -79,6 +79,34 @@ final class ChatModel {
             messages = Array(messages.suffix(Self.detachKeepCount))
             hasMoreBefore = true
         }
+        // Leaving the channel is the natural durability point — flush the
+        // debounced write so a swipe-away right after can't lose the tail.
+        persistTask?.cancel()
+        persistTask = nil
+        persistNow()
+    }
+
+    // MARK: Persistence (offline-first cache)
+
+    /// Debounced write-through to MessageStore: streaming and busy channels
+    /// mutate `messages` many times a second; one write a second is plenty for
+    /// a cache whose gaps self-heal via since_seq catch-up.
+    @ObservationIgnored private var persistTask: Task<Void, Never>?
+
+    private func schedulePersist() {
+        guard loadedOnce else { return }
+        persistTask?.cancel()
+        persistTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.persistTask = nil
+            self.persistNow()
+        }
+    }
+
+    private func persistNow() {
+        guard loadedOnce, let store = app?.messageStore else { return }
+        store.save(channelId: channel.channelId, messages: messages, hasMoreBefore: hasMoreBefore)
     }
 
     // MARK: History
@@ -99,6 +127,17 @@ final class ChatModel {
         }
         isLoading = true
         defer { isLoading = false }
+
+        // Offline-first: a cold start (fresh model, e.g. after app relaunch)
+        // renders the persisted window immediately; the network refresh below
+        // then lands on top. If it fails, the cached history stays readable.
+        if messages.isEmpty, let cached = app?.messageStore.load(channelId: channel.channelId) {
+            messages = sorted(cached.messages.map(withResolvedSender))
+            hasMoreBefore = cached.hasMoreBefore
+            highestSeq = messages.compactMap(\.channelSeq).max() ?? 0
+            forceBottomTick += 1
+        }
+
         do {
             // Members are fetched alongside history so live bot frames (which
             // carry no sender_name) can show the real name, not "Bot". A
@@ -106,12 +145,31 @@ final class ChatModel {
             async let membersTask: Void = refreshMembers()
             let response = try await api.listMessages(channelId: channel.channelId, limit: 50)
             await membersTask
-            messages = sorted(response.messages.map(withResolvedSender))
-            hasMoreBefore = response.meta?.hasMoreBefore ?? false
+            let fresh = response.messages.map(withResolvedSender)
+            let freshOldestSeq = fresh.compactMap(\.channelSeq).min() ?? 0
+            if messages.isEmpty {
+                messages = sorted(fresh)
+                hasMoreBefore = response.meta?.hasMoreBefore ?? false
+            } else if (response.meta?.hasMoreBefore ?? false), freshOldestSeq > highestSeq + 1 {
+                // More landed while we were offline than one page covers: the
+                // disk window and the fresh page aren't contiguous. Keep only
+                // the fresh page so upward pagination stays gap-free (the
+                // dropped rows are still on the server, reachable via loadOlder).
+                messages = sorted(fresh)
+                hasMoreBefore = true
+            } else {
+                for message in fresh {
+                    upsert(message)
+                }
+                // hasMoreBefore keeps the disk value: our locally cached rows
+                // extend below the fresh page, and whether history exists
+                // beyond THEM is what the stored flag answers.
+            }
             highestSeq = messages.compactMap(\.channelSeq).max() ?? 0
             loadedOnce = true
             forceBottomTick += 1
             markRead()
+            schedulePersist()
         } catch {
             report(error)
         }
@@ -143,6 +201,7 @@ final class ChatModel {
             let older = response.messages.filter { !existing.contains($0.msgId) }
             messages = sorted(older + messages)
             hasMoreBefore = response.meta?.hasMoreBefore ?? false
+            schedulePersist()
         } catch {
             report(error)
         }
@@ -230,6 +289,7 @@ final class ChatModel {
             markRead()
         case .messageDeleted(let channelId, let msgId) where channelId == channel.channelId:
             messages.removeAll { $0.msgId == msgId }
+            app?.messageStore.delete(msgId: msgId)
         default:
             break
         }
@@ -261,6 +321,7 @@ final class ChatModel {
             }
             messages = sorted(messages + [withResolvedSender(incoming)])
         }
+        schedulePersist()
     }
 
     /// Fills a missing `sender_name` from the channel-member map.
