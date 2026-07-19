@@ -433,12 +433,9 @@ const KNOWN_AGENTS: &[(&str, &str, &str, &str)] = &[
         "codex-acp",
         "npm install -g @agentclientprotocol/codex-acp",
     ),
-    (
-        "opencode",
-        "OpenCode",
-        "opencode-acp",
-        "npm install -g opencode-ai",
-    ),
+    // OpenCode's ACP mode is a subcommand of its main binary (`opencode acp`),
+    // so the adapter command IS `opencode` — matching the gateway preset.
+    ("opencode", "OpenCode", "opencode", "npm install -g opencode-ai"),
     // No ACP adapter exists for Gemini yet; empty command → never "installed"
     // (the plain `gemini` CLI is NOT an ACP adapter), shown as unavailable.
     ("gemini", "Gemini", "", ""),
@@ -465,19 +462,15 @@ pub fn detect_agents() -> Vec<DetectedAgent> {
     KNOWN_AGENTS
         .iter()
         .map(|(key, label, cmd, install)| {
-            // OpenCode's real binary is `opencode` (built-in ACP mode); the
-            // preset writes `opencode-acp`, so accept either. An empty command
-            // (gemini) has no adapter, so it never resolves.
+            // Resolve exactly the command the gateway preset writes — no
+            // per-agent aliasing. A fallback here would report "installed" for
+            // a command `absolutize_adapter_command` then fails to resolve,
+            // and onboarding's pre-flight check would wave through a config
+            // that can't start. An empty command (gemini) never resolves.
             let path = if cmd.is_empty() {
                 None
             } else {
-                resolve_on_login_path(cmd).or_else(|| {
-                    if *key == "opencode" {
-                        resolve_on_login_path("opencode")
-                    } else {
-                        None
-                    }
-                })
+                resolve_on_login_path(cmd)
             };
             DetectedAgent {
                 key: (*key).into(),
