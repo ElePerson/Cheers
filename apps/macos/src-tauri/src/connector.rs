@@ -378,6 +378,9 @@ pub async fn connector_start(
     // track that same form so the supervisor's revive/start-with-app matches
     // (the free-text "new instance" form can pass "My Bot" → daemon "My-Bot").
     let name = safe_name(&name);
+    // Zero-prep for "start from an existing .toml" too (onboarding already does
+    // this, but a hand-picked config wouldn't have its workspace dirs created).
+    ensure_workspace_dirs_at(Path::new(&config_path));
     let out = run_cli(&app, &["--name", &name, "--config", &config_path, "start"]).await?;
     state.managed.lock().unwrap().insert(name);
     Ok(out)
@@ -433,10 +436,12 @@ const KNOWN_AGENTS: &[(&str, &str, &str, &str)] = &[
         "codex-acp",
         "npm install -g @agentclientprotocol/codex-acp",
     ),
+    // OpenCode's ACP mode is a subcommand of its main binary (`opencode acp`),
+    // so the adapter command IS `opencode` — matching the gateway preset.
     (
         "opencode",
         "OpenCode",
-        "opencode-acp",
+        "opencode",
         "npm install -g opencode-ai",
     ),
     // No ACP adapter exists for Gemini yet; empty command → never "installed"
@@ -465,19 +470,15 @@ pub fn detect_agents() -> Vec<DetectedAgent> {
     KNOWN_AGENTS
         .iter()
         .map(|(key, label, cmd, install)| {
-            // OpenCode's real binary is `opencode` (built-in ACP mode); the
-            // preset writes `opencode-acp`, so accept either. An empty command
-            // (gemini) has no adapter, so it never resolves.
+            // Resolve exactly the command the gateway preset writes — no
+            // per-agent aliasing. A fallback here would report "installed" for
+            // a command `absolutize_adapter_command` then fails to resolve,
+            // and onboarding's pre-flight check would wave through a config
+            // that can't start. An empty command (gemini) never resolves.
             let path = if cmd.is_empty() {
                 None
             } else {
-                resolve_on_login_path(cmd).or_else(|| {
-                    if *key == "opencode" {
-                        resolve_on_login_path("opencode")
-                    } else {
-                        None
-                    }
-                })
+                resolve_on_login_path(cmd)
             };
             DetectedAgent {
                 key: (*key).into(),
@@ -773,7 +774,86 @@ pub fn connector_write_onboarded(
 
     let config_path = base.join(format!("cheers-daemon.{safe_id}.toml"));
     fs::write(&config_path, config_toml.as_bytes()).map_err(|e| e.to_string())?;
+
+    // Zero-prep: the connector validates that every policy.workspace root exists
+    // at startup (resolve_existing_dirs), and the gateway's default config points
+    // at ~/.cheers/workspace/<bot>, which nothing else creates — so onboarding
+    // from the desktop would fail on a fresh machine. We're on the same box and
+    // own ~/.cheers, so create the referenced workspace dirs now.
+    ensure_workspace_dirs(&config_toml);
+
     Ok(config_path.to_string_lossy().into_owned())
+}
+
+/// Create the workspace directories a freshly-onboarded config references so a
+/// desktop-started connector needs no manual prep. Best-effort (a dir that can't
+/// be created just resurfaces the connector's own clear startup error) and
+/// SCOPED to the user's home dir — a gateway-supplied config must not be able to
+/// make us `mkdir -p` arbitrary system paths.
+fn ensure_workspace_dirs(config_toml: &str) {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    for p in workspace_dirs_in_config(config_toml, &home) {
+        let _ = fs::create_dir_all(&p);
+    }
+}
+
+/// Read a config off disk and ensure its workspace dirs exist. Called before
+/// every start/restart so a daemon that never wrote `daemon.json` (crashed, or
+/// started from an existing `.toml` we didn't onboard) still gets zero-prep.
+fn ensure_workspace_dirs_at(config_path: &Path) {
+    if let Ok(content) = fs::read_to_string(config_path) {
+        ensure_workspace_dirs(&content);
+    }
+}
+
+/// The config path for a connector by name, so `restart` can carry `--config`
+/// even before any `daemon.json` exists — the CLI's restart fails with "restart
+/// requires --config" when there is no prior metadata, which is exactly the case
+/// right after onboarding or after a crash. Prefers the daemon's recorded config
+/// (covers arbitrary "existing .toml" starts), then the desktop's onboarded
+/// location `~/.cheers/cheers-daemon.<safe>.toml`.
+fn config_path_for(name: &str) -> Option<PathBuf> {
+    if let Some(meta) = read_metadata_by_name(name) {
+        return Some(meta.config_path);
+    }
+    let p = dirs::home_dir()?
+        .join(".cheers")
+        .join(format!("cheers-daemon.{}.toml", safe_name(name)));
+    p.exists().then_some(p)
+}
+
+/// The every-account `policy.workspace` roots + `default_cwd` in a config,
+/// tilde-expanded and kept only when under `home`. Pure (no I/O) so the
+/// home-scoping is unit-testable. Malformed TOML / missing keys → empty.
+fn workspace_dirs_in_config(config_toml: &str, home: &Path) -> Vec<PathBuf> {
+    let Ok(doc) = config_toml.parse::<toml::Value>() else {
+        return Vec::new();
+    };
+    let Some(accounts) = doc.get("accounts").and_then(toml::Value::as_table) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for acct in accounts.values() {
+        let Some(ws) = acct.get("policy").and_then(|p| p.get("workspace")) else {
+            continue;
+        };
+        let roots = ws
+            .get("allowed_roots")
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(toml::Value::as_str);
+        let default_cwd = ws.get("default_cwd").and_then(toml::Value::as_str);
+        for raw in roots.chain(default_cwd) {
+            let p = expand_tilde(raw);
+            if p.starts_with(home) {
+                out.push(p);
+            }
+        }
+    }
+    out
 }
 
 /// A config the desktop may start: an existing `.toml` under `~/.cheers/`.
@@ -810,7 +890,16 @@ pub async fn connector_restart(
     state: tauri::State<'_, SupervisorState>,
     name: String,
 ) -> Result<String, String> {
-    let out = run_cli(&app, &["--name", &name, "restart"]).await?;
+    // Carry --config so restart works even with no prior daemon.json (fresh
+    // onboard / after a crash), and create the workspace dirs first.
+    let out = match config_path_for(&name) {
+        Some(cfg) => {
+            ensure_workspace_dirs_at(&cfg);
+            let cfg = cfg.to_string_lossy().into_owned();
+            run_cli(&app, &["--name", &name, "--config", &cfg, "restart"]).await?
+        }
+        None => run_cli(&app, &["--name", &name, "restart"]).await?,
+    };
     state.managed.lock().unwrap().insert(name);
     Ok(out)
 }
@@ -1133,7 +1222,12 @@ pub async fn connector_add_allowed_roots(
     // deliberately-stopped instance stays stopped (it picks the root up on its
     // next start).
     if pid_alive(meta.pid) {
-        if run_cli(&app, &["--name", &name, "restart"]).await.is_ok() {
+        ensure_workspace_dirs_at(&p);
+        let cfg = p.to_string_lossy().into_owned();
+        if run_cli(&app, &["--name", &name, "--config", &cfg, "restart"])
+            .await
+            .is_ok()
+        {
             state.managed.lock().unwrap().insert(name);
         }
     }
@@ -1574,7 +1668,18 @@ pub fn spawn_supervisor(app: tauri::AppHandle) {
                 }
                 *count += 1;
                 let gave_up = *count >= MAX_REVIVES;
-                let revived = run_cli(&app, &["--name", &inst.name, "restart"]).await;
+                // Revive with --config (+ ensure workspace dirs) so a daemon that
+                // died before writing metadata can still come back.
+                let cfg = inst.config_path.clone();
+                if let Some(c) = &cfg {
+                    ensure_workspace_dirs_at(Path::new(c));
+                }
+                let revived = match cfg.as_deref() {
+                    Some(c) => {
+                        run_cli(&app, &["--name", &inst.name, "--config", c, "restart"]).await
+                    }
+                    None => run_cli(&app, &["--name", &inst.name, "restart"]).await,
+                };
                 let body = match (&revived, gave_up) {
                     (Ok(_), false) => format!("Connector \"{}\" died and was restarted.", inst.name),
                     (Ok(_), true) => format!(
@@ -1615,6 +1720,28 @@ mod tests {
     #[test]
     fn parse_ps_group_empty_is_none() {
         assert!(parse_ps_group("", 1).is_none());
+    }
+
+    #[test]
+    fn workspace_dirs_collected_and_home_scoped() {
+        let home = Path::new("/home/u");
+        let cfg = r#"
+            [accounts.bot.policy.workspace]
+            allowed_roots = ["/home/u/.cheers/workspace/bot", "/outside/data"]
+            default_cwd = "/home/u/.cheers/workspace/bot/proj"
+        "#;
+        let dirs = workspace_dirs_in_config(cfg, home);
+        // The two home-scoped paths are kept; the out-of-home root is dropped.
+        assert!(dirs.contains(&PathBuf::from("/home/u/.cheers/workspace/bot")));
+        assert!(dirs.contains(&PathBuf::from("/home/u/.cheers/workspace/bot/proj")));
+        assert!(!dirs.iter().any(|p| p.starts_with("/outside")));
+        assert_eq!(dirs.len(), 2);
+    }
+
+    #[test]
+    fn workspace_dirs_malformed_or_empty_is_empty() {
+        assert!(workspace_dirs_in_config("not = valid = toml", Path::new("/home/u")).is_empty());
+        assert!(workspace_dirs_in_config("[unrelated]\nx = 1", Path::new("/home/u")).is_empty());
     }
 
     #[test]
