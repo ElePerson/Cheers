@@ -1587,6 +1587,7 @@ export function ChannelView({ channel, onBack, sidebarOpen, onToggleSidebar }: P
             channelId={channel.channel_id}
             transcripts={voiceTranscripts}
             speakerNames={voiceSpeakerNames}
+            canManage={channel.can_manage === true || channel.my_role === "owner" || channel.my_role === "admin"}
           />
         </Suspense>
       )}

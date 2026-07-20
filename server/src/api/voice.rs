@@ -13,6 +13,8 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use livekit_api::services::LiveKitApi;
+use livekit_protocol::CreateAgentDispatchRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -28,6 +30,7 @@ use crate::{
 const JOIN_TOKEN_TTL_SECS: i64 = 10 * 60;
 const MAX_TRANSCRIPT_CHARS: usize = 8_000;
 const MAX_SEGMENT_DURATION_MS: i64 = 5 * 60 * 1_000;
+const TRANSCRIBER_AGENT_NAME: &str = "cheers-transcriber";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +89,20 @@ pub struct VoiceSessionDto {
     pub status: String,
     pub transcription_status: String,
     pub started_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VoiceTranscriberContext {
+    pub voice_session_id: String,
+    pub channel_id: String,
+    pub room_name: String,
+    pub started_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VoiceTranscriptionControlResponse {
+    pub voice_session_id: String,
+    pub transcription_status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -348,6 +365,216 @@ pub async fn state(
         enabled: state.config.livekit().is_some(),
         channel_kind: member.channel_kind,
         session,
+    }))
+}
+
+fn livekit_api_host(url: &str) -> Result<String, AppError> {
+    if let Some(rest) = url.strip_prefix("wss://") {
+        return Ok(format!("https://{rest}"));
+    }
+    if let Some(rest) = url.strip_prefix("ws://") {
+        return Ok(format!("http://{rest}"));
+    }
+    if url.starts_with("https://") || url.starts_with("http://") {
+        return Ok(url.to_string());
+    }
+    Err(AppError::ServiceUnavailable(
+        "invalid LiveKit server URL".into(),
+    ))
+}
+
+async fn broadcast_transcription_status(
+    state: &AppState,
+    channel_id: Uuid,
+    voice_session_id: &str,
+    status: &str,
+) {
+    state
+        .fanout
+        .broadcast_channel(
+            channel_id,
+            WireFrame::channel(
+                channel_id,
+                "voice_transcription_updated",
+                json!({
+                    "voice_session_id": voice_session_id,
+                    "transcription_status": status,
+                }),
+            ),
+        )
+        .await;
+}
+
+/// POST /api/v1/channels/:channel_id/voice/transcription/start
+pub async fn start_transcription(
+    State(state): State<AppState>,
+    Extension(claims): Extension<BrowserClaims>,
+    Path(channel_id): Path<String>,
+) -> Result<Json<VoiceTranscriptionControlResponse>, AppError> {
+    let channel_uuid = Uuid::parse_str(&channel_id)
+        .map_err(|_| AppError::BadRequest("invalid channel id".into()))?;
+    let member = voice_member(&state, &channel_id, &claims.sub).await?;
+    if member.channel_kind != "voice" || !matches!(member.channel_role.as_str(), "owner" | "admin")
+    {
+        return Err(AppError::Forbidden(
+            "channel owner or admin is required to start transcription".into(),
+        ));
+    }
+    let (url, api_key, api_secret) = state
+        .config
+        .livekit()
+        .ok_or_else(|| AppError::ServiceUnavailable("real-time voice is not configured".into()))?;
+
+    let mut tx = state.db.begin().await?;
+    let row = sqlx::query(
+        "SELECT voice_session_id, provider_room_id, transcription_status, started_at,
+                transcriber_dispatch_id
+         FROM voice_sessions
+         WHERE channel_id = $1 AND ended_at IS NULL
+         ORDER BY started_at DESC LIMIT 1 FOR UPDATE",
+    )
+    .bind(&channel_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| {
+        AppError::Conflict("join the voice channel before starting transcription".into())
+    })?;
+    let voice_session_id: String = row.try_get("voice_session_id")?;
+    let current_status: String = row.try_get("transcription_status")?;
+    let dispatch_id: Option<String> = row.try_get("transcriber_dispatch_id").ok().flatten();
+    if matches!(current_status.as_str(), "starting" | "active") && dispatch_id.is_some() {
+        tx.commit().await?;
+        return Ok(Json(VoiceTranscriptionControlResponse {
+            voice_session_id,
+            transcription_status: current_status,
+        }));
+    }
+    let pending_dispatch_id = format!("pending:{}", Uuid::new_v4());
+    sqlx::query(
+        "UPDATE voice_sessions
+         SET transcription_status = 'starting', transcriber_dispatch_id = $2, updated_at = NOW()
+         WHERE voice_session_id = $1",
+    )
+    .bind(&voice_session_id)
+    .bind(&pending_dispatch_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    let provider_room_id: String = row.try_get("provider_room_id")?;
+    let started_at: chrono::DateTime<Utc> = row.try_get("started_at")?;
+    let metadata = json!({
+        "voice_session_id": voice_session_id,
+        "channel_id": channel_id,
+        "started_at": started_at.to_rfc3339(),
+    })
+    .to_string();
+    let api = LiveKitApi::with_api_key(&livekit_api_host(url)?, api_key, api_secret);
+    let dispatch = api
+        .agent_dispatch()
+        .create_dispatch(CreateAgentDispatchRequest {
+            room: provider_room_id,
+            agent_name: TRANSCRIBER_AGENT_NAME.into(),
+            metadata,
+            ..Default::default()
+        })
+        .await;
+    let dispatch = match dispatch {
+        Ok(value) => value,
+        Err(error) => {
+            sqlx::query(
+                "UPDATE voice_sessions
+                 SET transcription_status = 'failed', transcriber_dispatch_id = NULL,
+                     updated_at = NOW()
+                 WHERE voice_session_id = $1 AND transcriber_dispatch_id = $2",
+            )
+            .bind(&voice_session_id)
+            .bind(&pending_dispatch_id)
+            .execute(&state.db)
+            .await?;
+            broadcast_transcription_status(&state, channel_uuid, &voice_session_id, "failed").await;
+            tracing::warn!(%channel_id, %voice_session_id, %error, "LiveKit transcriber dispatch failed");
+            return Err(AppError::ServiceUnavailable(
+                "transcription worker is unavailable".into(),
+            ));
+        }
+    };
+    sqlx::query(
+        "UPDATE voice_sessions
+         SET transcriber_dispatch_id = $2, transcription_status = 'active', updated_at = NOW()
+         WHERE voice_session_id = $1 AND transcriber_dispatch_id = $3",
+    )
+    .bind(&voice_session_id)
+    .bind(dispatch.id)
+    .bind(&pending_dispatch_id)
+    .execute(&state.db)
+    .await?;
+    broadcast_transcription_status(&state, channel_uuid, &voice_session_id, "active").await;
+    Ok(Json(VoiceTranscriptionControlResponse {
+        voice_session_id,
+        transcription_status: "active".into(),
+    }))
+}
+
+/// POST /api/v1/channels/:channel_id/voice/transcription/stop
+pub async fn stop_transcription(
+    State(state): State<AppState>,
+    Extension(claims): Extension<BrowserClaims>,
+    Path(channel_id): Path<String>,
+) -> Result<Json<VoiceTranscriptionControlResponse>, AppError> {
+    let channel_uuid = Uuid::parse_str(&channel_id)
+        .map_err(|_| AppError::BadRequest("invalid channel id".into()))?;
+    let member = voice_member(&state, &channel_id, &claims.sub).await?;
+    if member.channel_kind != "voice" || !matches!(member.channel_role.as_str(), "owner" | "admin")
+    {
+        return Err(AppError::Forbidden(
+            "channel owner or admin is required to stop transcription".into(),
+        ));
+    }
+    let (url, api_key, api_secret) = state
+        .config
+        .livekit()
+        .ok_or_else(|| AppError::ServiceUnavailable("real-time voice is not configured".into()))?;
+    let row = sqlx::query(
+        "SELECT voice_session_id, provider_room_id, transcriber_dispatch_id
+         FROM voice_sessions
+         WHERE channel_id = $1 AND ended_at IS NULL
+         ORDER BY started_at DESC LIMIT 1",
+    )
+    .bind(&channel_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::Conflict("no active voice session".into()))?;
+    let voice_session_id: String = row.try_get("voice_session_id")?;
+    let provider_room_id: String = row.try_get("provider_room_id")?;
+    let dispatch_id: Option<String> = row.try_get("transcriber_dispatch_id").ok().flatten();
+    if let Some(dispatch_id) = dispatch_id {
+        if dispatch_id.starts_with("pending:") {
+            return Err(AppError::Conflict(
+                "transcription is still starting; try again shortly".into(),
+            ));
+        }
+        let api = LiveKitApi::with_api_key(&livekit_api_host(url)?, api_key, api_secret);
+        api.agent_dispatch()
+            .delete_dispatch(dispatch_id, provider_room_id)
+            .await
+            .map_err(|error| {
+                tracing::warn!(%channel_id, %voice_session_id, %error, "LiveKit transcriber stop failed");
+                AppError::ServiceUnavailable("could not stop transcription worker".into())
+            })?;
+    }
+    sqlx::query(
+        "UPDATE voice_sessions
+         SET transcriber_dispatch_id = NULL, transcription_status = 'off', updated_at = NOW()
+         WHERE voice_session_id = $1",
+    )
+    .bind(&voice_session_id)
+    .execute(&state.db)
+    .await?;
+    broadcast_transcription_status(&state, channel_uuid, &voice_session_id, "off").await;
+    Ok(Json(VoiceTranscriptionControlResponse {
+        voice_session_id,
+        transcription_status: "off".into(),
     }))
 }
 
@@ -782,6 +1009,41 @@ pub async fn ingest_transcript_segment(
         )
         .await;
     Ok(Json(dto))
+}
+
+/// GET /internal/v1/voice/rooms/:room_name/context
+///
+/// A recovering LiveKit worker may only know the provider room name. This
+/// authenticated lookup resolves it to the current durable Cheers session and
+/// supplies the shared timestamp origin used by transcript segment offsets.
+pub async fn transcriber_context(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(room_name): Path<String>,
+) -> Result<Json<VoiceTranscriberContext>, AppError> {
+    transcriber_authorized(&state, &headers)?;
+    if room_name.is_empty() || room_name.len() > 255 {
+        return Err(AppError::BadRequest("invalid LiveKit room name".into()));
+    }
+    let row = sqlx::query(
+        "SELECT voice_session_id, channel_id, provider_room_id, started_at
+         FROM voice_sessions
+         WHERE provider = 'livekit' AND provider_room_id = $1 AND ended_at IS NULL
+         ORDER BY started_at DESC LIMIT 1",
+    )
+    .bind(&room_name)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    Ok(Json(VoiceTranscriberContext {
+        voice_session_id: row.try_get("voice_session_id")?,
+        channel_id: row.try_get("channel_id")?,
+        room_name: row.try_get("provider_room_id")?,
+        started_at: row
+            .try_get::<chrono::DateTime<Utc>, _>("started_at")?
+            .to_rfc3339(),
+    }))
 }
 
 /// GET /api/v1/channels/:channel_id/voice/transcript

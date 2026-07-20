@@ -128,11 +128,41 @@ export interface VoiceJoinResponse {
   expires_at: number;
 }
 
+export interface VoiceStateResponse {
+  enabled: boolean;
+  channel_kind: string;
+  session: {
+    voice_session_id: string;
+    status: string;
+    transcription_status: "off" | "starting" | "active" | "failed";
+    started_at: string;
+  } | null;
+}
+
+export interface VoiceTranscriptionControlResponse {
+  voice_session_id: string;
+  transcription_status: "off" | "starting" | "active" | "failed";
+}
+
 /** Authorize this member and mint a short-lived, room-scoped LiveKit token. */
 export async function joinVoiceChannel(channelId: string): Promise<VoiceJoinResponse> {
   return apiJson<VoiceJoinResponse>(`/channels/${channelId}/voice/join`, {
     method: "POST",
   });
+}
+
+export async function getVoiceState(channelId: string): Promise<VoiceStateResponse> {
+  return apiJson<VoiceStateResponse>(`/channels/${channelId}/voice/state`);
+}
+
+export async function setVoiceTranscription(
+  channelId: string,
+  enabled: boolean
+): Promise<VoiceTranscriptionControlResponse> {
+  return apiJson<VoiceTranscriptionControlResponse>(
+    `/channels/${channelId}/voice/transcription/${enabled ? "start" : "stop"}`,
+    { method: "POST" }
+  );
 }
 
 /** Initial app-wide occupancy for voice channels visible to the caller. */

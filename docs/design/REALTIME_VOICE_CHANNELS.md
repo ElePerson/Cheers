@@ -1,6 +1,6 @@
 # Real-time voice channels
 
-> Status: 🚧 **Voice V1 + final-transcript contract implemented; streaming worker and task claims proposed** (2026-07)
+> Status: 🚧 **Voice V1 + explicitly dispatched final-transcript worker implemented; task claims proposed** (2026-07)
 > Product goal: Discord-style persistent voice channels with live, speaker-attributed
 > transcription as a first-class collaboration stream
 > Related: [Proactive task claims](PROACTIVE_TASK_CLAIMS.md) ·
@@ -38,6 +38,8 @@ Voice V1 now provides:
 - app-wide voice occupancy snapshots and live sidebar participant presence;
 - authenticated, idempotent final-transcript ingestion with speaker/track validation;
 - durable final captions, transcript REST/Resource reads, and unified channel activity sequencing;
+- owner/admin on-demand transcription controls backed by explicit LiveKit agent dispatch;
+- a pinned, OpenAI-compatible per-microphone STT worker with local Silero VAD;
 - a dedicated small-VM Docker Compose stack for LiveKit, Redis, and Caddy.
 
 The earlier attachment flow still supports:
@@ -48,8 +50,8 @@ The earlier attachment flow still supports:
 - transcript-first delivery to ACP agents, with native audio blocks as a capability-gated
   fallback.
 
-Cheers still does not have the transcription worker, durable live transcript event model,
-moderation controls, or proactive task-claim scheduler.
+Cheers still does not have interim caption text streams, full consent/retention policy UI,
+moderation controls, or the proactive task-claim scheduler.
 The existing `transcription_worker` polls S3-backed files and may take minutes; it must not
 be stretched into a real-time media service.
 
@@ -111,14 +113,16 @@ but that is separate from silent task-claim monitoring.
 
 ### 3.4 One transcription participant per active room
 
-When transcription is enabled and at least one human is publishing audio, a separate
-`voice-transcriber` service joins the room as a hidden service participant. It subscribes
+When an owner/admin starts transcription, the gateway explicitly dispatches the named
+`cheers-transcriber` LiveKit worker with authoritative session metadata. The separate
+`voice-transcriber` service joins the room as a service participant. It subscribes
 to human audio tracks, performs VAD/turn segmentation and streaming STT, and publishes
 interim/final text streams for live UI.
 
-Only final segments are sent to the Cheers gateway for durable persistence and bot task
-evaluation. Interim segments are replaceable presentation state and must not consume
-`channel_seq`, trigger claims, notifications, or audit rows.
+The first implementation sends final segments to the Cheers gateway for durable persistence,
+live UI, and later bot task evaluation. Interim room text streams remain a follow-up; when
+added, they are replaceable presentation state and must not consume `channel_seq`, trigger
+claims, notifications, or audit rows.
 
 The transcriber is media infrastructure, not a second application backend. The Rust gateway
 remains the only owner of Cheers domain data. A first implementation may use a separately

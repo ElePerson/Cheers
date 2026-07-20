@@ -270,6 +270,14 @@ fn build_authed_routes(state: AppState) -> Router<AppState> {
             get(api::voice::transcript),
         )
         .route(
+            "/api/v1/channels/:channel_id/voice/transcription/start",
+            post(api::voice::start_transcription),
+        )
+        .route(
+            "/api/v1/channels/:channel_id/voice/transcription/stop",
+            post(api::voice::stop_transcription),
+        )
+        .route(
             "/api/v1/channels/:channel_id/messages/:msg_id/cancel",
             post(api::messages::cancel_message),
         )
@@ -643,6 +651,10 @@ fn build_public_routes() -> Router<AppState> {
         .route(
             "/internal/v1/voice/sessions/:voice_session_id/transcript-segments",
             post(api::voice::ingest_transcript_segment).layer(DefaultBodyLimit::max(32 * 1024)),
+        )
+        .route(
+            "/internal/v1/voice/rooms/:room_name/context",
+            get(api::voice::transcriber_context),
         )
         // Avatar images: public so an `<img src>` (no auth header) resolves. The
         // path is uuid-versioned + validated; the bytes aren't sensitive.

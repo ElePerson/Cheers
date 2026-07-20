@@ -7,9 +7,9 @@ import {
   type Participant,
   type RemoteTrack,
 } from "livekit-client";
-import { Loader2, Mic, MicOff, PhoneOff, Volume2 } from "lucide-react";
+import { Captions, Loader2, Mic, MicOff, PhoneOff, Volume2 } from "lucide-react";
 import toast from "react-hot-toast";
-import { joinVoiceChannel } from "@/api/channels";
+import { getVoiceState, joinVoiceChannel, setVoiceTranscription } from "@/api/channels";
 import { Button } from "@/components/ui/button";
 import type { VoiceTranscriptSegment } from "@/types";
 
@@ -17,6 +17,7 @@ interface Props {
   channelId: string;
   transcripts?: VoiceTranscriptSegment[];
   speakerNames?: Record<string, string>;
+  canManage?: boolean;
 }
 
 /**
@@ -28,6 +29,7 @@ export function VoiceRoomPanel({
   channelId,
   transcripts = [],
   speakerNames = {},
+  canManage = false,
 }: Props) {
   const roomRef = useRef<Room | null>(null);
   const audioRootRef = useRef<HTMLDivElement>(null);
@@ -38,6 +40,10 @@ export function VoiceRoomPanel({
   const [canPublish, setCanPublish] = useState(true);
   const [participantCount, setParticipantCount] = useState(0);
   const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
+  const [transcriptionStatus, setTranscriptionStatus] = useState<
+    "off" | "starting" | "active" | "failed"
+  >("off");
+  const [changingTranscription, setChangingTranscription] = useState(false);
   const visibleTranscripts = useMemo(() => {
     const superseded = new Set(
       transcripts
@@ -48,6 +54,24 @@ export function VoiceRoomPanel({
       .filter((segment) => !superseded.has(segment.segment_id))
       .slice(-4);
   }, [transcripts]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const voiceState = await getVoiceState(channelId);
+        if (!cancelled) setTranscriptionStatus(voiceState.session?.transcription_status ?? "off");
+      } catch {
+        // Voice can be intentionally disabled; joining surfaces the actionable error.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [channelId]);
 
   const refreshParticipantCount = useCallback((room: Room) => {
     setParticipantCount(room.remoteParticipants.size + 1);
@@ -141,6 +165,23 @@ export function VoiceRoomPanel({
     }
   }, [canPublish, micEnabled]);
 
+  const toggleTranscription = useCallback(async () => {
+    if (!canManage || changingTranscription) return;
+    const enabled = transcriptionStatus !== "active";
+    setChangingTranscription(true);
+    if (enabled) setTranscriptionStatus("starting");
+    try {
+      const result = await setVoiceTranscription(channelId, enabled);
+      setTranscriptionStatus(result.transcription_status);
+      toast.success(enabled ? "Live transcription started" : "Live transcription stopped");
+    } catch (error) {
+      setTranscriptionStatus(enabled ? "failed" : "active");
+      toast.error(error instanceof Error ? error.message : "Couldn't change transcription");
+    } finally {
+      setChangingTranscription(false);
+    }
+  }, [canManage, changingTranscription, channelId, transcriptionStatus]);
+
   return (
     <div className="mx-4 mb-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 flex-shrink-0">
       <div ref={audioRootRef} className="hidden" aria-hidden="true" />
@@ -190,6 +231,50 @@ export function VoiceRoomPanel({
               <PhoneOff className="h-4 w-4" />
             </button>
           </div>
+        )}
+      </div>
+      <div className="mt-3 flex items-center justify-between border-t border-zinc-800 pt-3">
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          <span
+            className={`h-2 w-2 rounded-full ${
+              transcriptionStatus === "active"
+                ? "bg-rose-400 animate-pulse"
+                : transcriptionStatus === "starting"
+                  ? "bg-amber-400 animate-pulse"
+                  : transcriptionStatus === "failed"
+                    ? "bg-rose-700"
+                    : "bg-zinc-600"
+            }`}
+          />
+          <span className="truncate text-zinc-400">
+            {transcriptionStatus === "active"
+              ? "Live transcription is on"
+              : transcriptionStatus === "starting"
+                ? "Starting transcription…"
+                : transcriptionStatus === "failed"
+                  ? "Transcription unavailable"
+                  : "Live transcription is off"}
+          </span>
+        </div>
+        {canManage && (
+          <button
+            type="button"
+            disabled={!connected || changingTranscription}
+            onClick={() => void toggleTranscription()}
+            title={!connected ? "Join the room first" : undefined}
+            className={`ml-3 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              transcriptionStatus === "active"
+                ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25"
+                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            }`}
+          >
+            {changingTranscription ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Captions className="h-3.5 w-3.5" />
+            )}
+            {transcriptionStatus === "active" ? "Stop" : "Start"}
+          </button>
         )}
       </div>
       {!canPublish && connected && (
