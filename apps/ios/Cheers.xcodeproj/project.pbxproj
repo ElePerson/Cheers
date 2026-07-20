@@ -16,6 +16,8 @@
 		CE0000000000000000000207 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000107 /* AppModel.swift */; };
 		CE0000000000000000000208 /* ConversationListModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000108 /* ConversationListModel.swift */; };
 		CE0000000000000000000209 /* ChatModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000109 /* ChatModel.swift */; };
+		CE0000000000000000000223 /* ChatModelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000124 /* ChatModelStore.swift */; };
+		CE0000000000000000000224 /* MessageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000125 /* MessageStore.swift */; };
 		CE000000000000000000020A /* AvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000010A /* AvatarView.swift */; };
 		CE000000000000000000020B /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000010B /* LoginView.swift */; };
 		CE000000000000000000020C /* ConversationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000010C /* ConversationListView.swift */; };
@@ -31,6 +33,7 @@
 		CE0000000000000000000216 /* DrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000117 /* DrawerView.swift */; };
 		CE0000000000000000000217 /* ChatsHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000118 /* ChatsHomeView.swift */; };
 		CE0000000000000000000222 /* ViewBoards.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000123 /* ViewBoards.swift */; };
+		CE0000000000000000000223 /* WorkbenchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000124 /* WorkbenchSheet.swift */; };
 		CE0000000000000000000221 /* ChannelSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000122 /* ChannelSettingsSheet.swift */; };
 		CE0000000000000000000220 /* MembersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000121 /* MembersSheet.swift */; };
 		CE0000000000000000000218 /* ShellComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000119 /* ShellComponents.swift */; };
@@ -54,6 +57,8 @@
 		CE0000000000000000000107 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		CE0000000000000000000108 /* ConversationListModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationListModel.swift; sourceTree = "<group>"; };
 		CE0000000000000000000109 /* ChatModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModel.swift; sourceTree = "<group>"; };
+		CE0000000000000000000124 /* ChatModelStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModelStore.swift; sourceTree = "<group>"; };
+		CE0000000000000000000125 /* MessageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageStore.swift; sourceTree = "<group>"; };
 		CE000000000000000000010A /* AvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarView.swift; sourceTree = "<group>"; };
 		CE000000000000000000010B /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		CE000000000000000000010C /* ConversationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationListView.swift; sourceTree = "<group>"; };
@@ -69,6 +74,7 @@
 		CE0000000000000000000117 /* DrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawerView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000118 /* ChatsHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatsHomeView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000123 /* ViewBoards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewBoards.swift; sourceTree = "<group>"; };
+		CE0000000000000000000124 /* WorkbenchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchSheet.swift; sourceTree = "<group>"; };
 		CE0000000000000000000122 /* ChannelSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelSettingsSheet.swift; sourceTree = "<group>"; };
 		CE0000000000000000000121 /* MembersSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MembersSheet.swift; sourceTree = "<group>"; };
 		CE0000000000000000000119 /* ShellComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellComponents.swift; sourceTree = "<group>"; };
@@ -160,6 +166,8 @@
 				CE0000000000000000000107 /* AppModel.swift */,
 				CE0000000000000000000108 /* ConversationListModel.swift */,
 				CE0000000000000000000109 /* ChatModel.swift */,
+				CE0000000000000000000124 /* ChatModelStore.swift */,
+				CE0000000000000000000125 /* MessageStore.swift */,
 				CE0000000000000000000112 /* ShellModel.swift */,
 				CE0000000000000000000113 /* ActivityModel.swift */,
 				CE0000000000000000000114 /* AgentsModel.swift */,
@@ -181,6 +189,7 @@
 				CE0000000000000000000117 /* DrawerView.swift */,
 				CE0000000000000000000118 /* ChatsHomeView.swift */,
 				CE0000000000000000000123 /* ViewBoards.swift */,
+				CE0000000000000000000124 /* WorkbenchSheet.swift */,
 				CE0000000000000000000122 /* ChannelSettingsSheet.swift */,
 				CE0000000000000000000121 /* MembersSheet.swift */,
 				CE0000000000000000000119 /* ShellComponents.swift */,
@@ -272,6 +281,8 @@
 				CE0000000000000000000207 /* AppModel.swift in Sources */,
 				CE0000000000000000000208 /* ConversationListModel.swift in Sources */,
 				CE0000000000000000000209 /* ChatModel.swift in Sources */,
+				CE0000000000000000000223 /* ChatModelStore.swift in Sources */,
+				CE0000000000000000000224 /* MessageStore.swift in Sources */,
 				CE000000000000000000020A /* AvatarView.swift in Sources */,
 				CE000000000000000000020B /* LoginView.swift in Sources */,
 				CE000000000000000000020C /* ConversationListView.swift in Sources */,
@@ -287,6 +298,7 @@
 				CE0000000000000000000216 /* DrawerView.swift in Sources */,
 				CE0000000000000000000217 /* ChatsHomeView.swift in Sources */,
 				CE0000000000000000000222 /* ViewBoards.swift in Sources */,
+				CE0000000000000000000223 /* WorkbenchSheet.swift in Sources */,
 				CE0000000000000000000221 /* ChannelSettingsSheet.swift in Sources */,
 				CE0000000000000000000220 /* MembersSheet.swift in Sources */,
 				CE0000000000000000000218 /* ShellComponents.swift in Sources */,

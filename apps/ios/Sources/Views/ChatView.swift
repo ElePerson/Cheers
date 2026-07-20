@@ -47,8 +47,10 @@ struct ChatView: View {
     @State private var atBottom = true
     private let listModel: ConversationListModel?
 
-    init(channel: ChannelDto, listModel: ConversationListModel? = nil) {
-        _model = State(initialValue: ChatModel(channel: channel))
+    /// `model` comes from AppModel.chatModels so history survives channel
+    /// switches — creating a fresh ChatModel here would cold-reload every entry.
+    init(model: ChatModel, listModel: ConversationListModel? = nil) {
+        _model = State(initialValue: model)
         self.listModel = listModel
     }
 
@@ -68,7 +70,13 @@ struct ChatView: View {
                 isSending: model.isSending,
                 onSend: { Task { await self.model.send() } },
                 onChooseSession: { showSessionSheet = true },
-                onModelSettings: { showModelSheet = true }
+                onModelSettings: { showModelSheet = true },
+                mentionPool: model.mentionPool,
+                onMentionPicked: { candidate in
+                    if !model.pickedMentions.contains(candidate) {
+                        model.pickedMentions.append(candidate)
+                    }
+                }
             )
         }
         .background(Theme.bgApp)
@@ -105,6 +113,7 @@ struct ChatView: View {
                 switch panel {
                 case .members:   MembersSheet(channel: model.channel)
                 case .viewboard: ViewBoardSheet(channelId: model.channel.channelId)
+                case .workbench: WorkbenchSheet(channelId: model.channel.channelId)
                 case .settings:  ChannelSettingsSheet(channel: model.channel)
                 default:         ChannelPanelSheet(panel: panel)
                 }

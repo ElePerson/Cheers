@@ -30,6 +30,15 @@ final class AppModel {
 
     let socket = ChatSocket()
 
+    /// Per-channel chat models retained across switches — instant re-entry
+    /// (see ChatModelStore). Cleared on sign-out.
+    @ObservationIgnored
+    let chatModels = ChatModelStore()
+
+    /// Offline-first message cache (SwiftData) — instant history on relaunch.
+    @ObservationIgnored
+    let messageStore = MessageStore()
+
     @ObservationIgnored
     private var eventListeners: [UUID: (SocketEvent) -> Void] = [:]
 
@@ -114,6 +123,8 @@ final class AppModel {
     func clearSession() {
         socket.disconnect()
         socketConnected = false
+        chatModels.removeAll()
+        messageStore.removeAll()
         token = nil
         session = nil
         KeychainStore.remove(Keys.token)

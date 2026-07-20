@@ -1,13 +1,38 @@
 import Foundation
 import Observation
 
+/// An entry in the composer's @-mention picker: a channel member (user/bot) or
+/// a group token. Mirrors the web MessageComposer's MentionCandidate.
+struct MentionCandidate: Identifiable, Hashable {
+    /// Picker order: bots (primary @target) → group tokens → people.
+    enum Kind: Int {
+        case bot = 0, group = 1, user = 2
+    }
+
+    /// Member id, or for `.group` the token itself (sent as a mention_name).
+    let id: String
+    let kind: Kind
+    /// Drives the inserted "@label" text.
+    let label: String
+    let sublabel: String?
+
+    /// Group tokens the server expands to real members. `@here` currently
+    /// aliases `@all` (no write-time presence signal yet) — web parity.
+    static let groups: [MentionCandidate] = [
+        MentionCandidate(id: "all", kind: .group, label: "all", sublabel: "Everyone in the channel"),
+        MentionCandidate(id: "bots", kind: .group, label: "bots", sublabel: "All bots — triggers each"),
+        MentionCandidate(id: "humans", kind: .group, label: "humans", sublabel: "All people"),
+        MentionCandidate(id: "here", kind: .group, label: "here", sublabel: "Everyone (currently same as @all)"),
+    ]
+}
+
 /// Per-channel chat state: paginated history, realtime updates, sending.
 /// Ordering mirrors the web client (frontend ChannelView sortMessages):
 /// ascending `channel_seq`, in-flight messages (seq == nil) last.
 @MainActor
 @Observable
 final class ChatModel {
-    let channel: ChannelDto
+    private(set) var channel: ChannelDto
 
     private(set) var messages: [MessageDto] = []
     private(set) var hasMoreBefore = false
@@ -24,6 +49,12 @@ final class ChatModel {
     var selectedSessionId: String?
     /// Bot members of this channel — the session/model picker's candidate bots.
     private(set) var botMembers: [ChannelMemberDto] = []
+    /// Channel members (users + bots) as picker entries, group tokens included —
+    /// the composer's @-mention pool.
+    private(set) var mentionPool: [MentionCandidate] = MentionCandidate.groups
+    /// Mentions the user has picked in the current draft. Routing source of
+    /// truth: only entries whose "@label" token survives in the text are sent.
+    var pickedMentions: [MentionCandidate] = []
 
     /// Bumped when the view should FOLLOW to the bottom — only honoured while the
     /// reader is already parked at the bottom. Incoming messages and streaming
@@ -46,6 +77,12 @@ final class ChatModel {
         self.channel = channel
     }
 
+    /// Cached-model reuse (ChatModelStore): keep the channel DTO fresh
+    /// (rename / purpose edits) without dropping the loaded history.
+    func refresh(channel: ChannelDto) {
+        self.channel = channel
+    }
+
     // MARK: Lifecycle
 
     func attach(_ app: AppModel) {
@@ -58,41 +95,138 @@ final class ChatModel {
         app.socket.subscribe(channelId: channel.channelId)
     }
 
+    /// Keep a cached model's re-entry render bounded: a long scrollback session
+    /// piles up many pages, and re-rendering hundreds of rows would trade the
+    /// network stall for a layout stall. Older pages stay reachable through
+    /// loadOlder — hasMoreBefore flips back on when we trim.
+    private static let detachKeepCount = 100
+
     func detach() {
         if let listenerId, let app {
             app.removeSocketListener(listenerId)
         }
         listenerId = nil
+        if messages.count > Self.detachKeepCount {
+            messages = Array(messages.suffix(Self.detachKeepCount))
+            hasMoreBefore = true
+        }
+        // Leaving the channel is the natural durability point — flush the
+        // debounced write so a swipe-away right after can't lose the tail.
+        persistTask?.cancel()
+        persistTask = nil
+        persistNow()
+    }
+
+    // MARK: Persistence (offline-first cache)
+
+    /// Debounced write-through to MessageStore: streaming and busy channels
+    /// mutate `messages` many times a second; one write a second is plenty for
+    /// a cache whose gaps self-heal via since_seq catch-up.
+    @ObservationIgnored private var persistTask: Task<Void, Never>?
+
+    private func schedulePersist() {
+        guard loadedOnce else { return }
+        persistTask?.cancel()
+        persistTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.persistTask = nil
+            self.persistNow()
+        }
+    }
+
+    private func persistNow() {
+        guard loadedOnce, let store = app?.messageStore else { return }
+        store.save(channelId: channel.channelId, messages: messages, hasMoreBefore: hasMoreBefore)
     }
 
     // MARK: History
 
     func loadInitial() async {
-        guard !loadedOnce, let api = app?.api else { return }
+        guard let api = app?.api else { return }
+        if loadedOnce {
+            // Warm re-entry on a cached model: the in-memory history renders
+            // immediately; just park at the bottom, stamp read, and heal
+            // whatever landed while we were detached via the same since_seq
+            // contract the subscribe ack uses. Members refresh in the
+            // background (someone may have joined while we were away).
+            forceBottomTick += 1
+            markRead()
+            Task { await self.refreshMembers() }
+            await catchUp()
+            return
+        }
         isLoading = true
         defer { isLoading = false }
+
+        // Offline-first: a cold start (fresh model, e.g. after app relaunch)
+        // renders the persisted window immediately; the network refresh below
+        // then lands on top. If it fails, the cached history stays readable.
+        if messages.isEmpty, let cached = app?.messageStore.load(channelId: channel.channelId) {
+            messages = sorted(cached.messages.map(withResolvedSender))
+            hasMoreBefore = cached.hasMoreBefore
+            highestSeq = messages.compactMap(\.channelSeq).max() ?? 0
+            forceBottomTick += 1
+        }
+
         do {
             // Members are fetched alongside history so live bot frames (which
             // carry no sender_name) can show the real name, not "Bot". A
             // members failure is non-fatal.
-            async let membersTask = api.listMembers(channelId: channel.channelId)
+            async let membersTask: Void = refreshMembers()
             let response = try await api.listMessages(channelId: channel.channelId, limit: 50)
-            if let members = try? await membersTask {
-                memberNames = Dictionary(
-                    members.map { ($0.memberId, $0.name) },
-                    uniquingKeysWith: { first, _ in first }
-                )
-                botMembers = members.filter { $0.memberType == "bot" }
+            await membersTask
+            let fresh = response.messages.map(withResolvedSender)
+            let freshOldestSeq = fresh.compactMap(\.channelSeq).min() ?? 0
+            if messages.isEmpty {
+                messages = sorted(fresh)
+                hasMoreBefore = response.meta?.hasMoreBefore ?? false
+            } else if (response.meta?.hasMoreBefore ?? false), freshOldestSeq > highestSeq + 1 {
+                // More landed while we were offline than one page covers: the
+                // disk window and the fresh page aren't contiguous. Keep only
+                // the fresh page so upward pagination stays gap-free (the
+                // dropped rows are still on the server, reachable via loadOlder).
+                messages = sorted(fresh)
+                hasMoreBefore = true
+            } else {
+                for message in fresh {
+                    upsert(message)
+                }
+                // hasMoreBefore keeps the disk value: our locally cached rows
+                // extend below the fresh page, and whether history exists
+                // beyond THEM is what the stored flag answers.
             }
-            messages = sorted(response.messages.map(withResolvedSender))
-            hasMoreBefore = response.meta?.hasMoreBefore ?? false
             highestSeq = messages.compactMap(\.channelSeq).max() ?? 0
             loadedOnce = true
             forceBottomTick += 1
             markRead()
+            schedulePersist()
         } catch {
             report(error)
         }
+    }
+
+    /// Refreshes the member-name map, bot roster and @-mention pool; a failure
+    /// is non-fatal. Also runs on warm re-entry, so a member who joined while
+    /// we were away shows up in the picker without a cold reload.
+    private func refreshMembers() async {
+        guard let api = app?.api else { return }
+        guard let members = try? await api.listMembers(channelId: channel.channelId) else { return }
+        memberNames = Dictionary(
+            members.map { ($0.memberId, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        botMembers = members.filter { $0.memberType == "bot" }
+        mentionPool = MentionCandidate.groups + members
+            .filter { $0.memberType == "user" || $0.memberType == "bot" }
+            .map { member in
+                MentionCandidate(
+                    id: member.memberId,
+                    kind: member.isBot ? .bot : .user,
+                    label: member.name,
+                    sublabel: member.username
+                )
+            }
     }
 
     func loadOlder() async {
@@ -110,15 +244,21 @@ final class ChatModel {
             let older = response.messages.filter { !existing.contains($0.msgId) }
             messages = sorted(older + messages)
             hasMoreBefore = response.meta?.hasMoreBefore ?? false
+            schedulePersist()
         } catch {
             report(error)
         }
     }
 
     /// Heal any gap after (re)subscribe using the highest seen channel_seq —
-    /// same contract as the web client.
+    /// same contract as the web client. In-flight guard: a warm loadInitial and
+    /// the subscribe ack can both request a catch-up back to back; one suffices.
+    @ObservationIgnored private var isCatchingUp = false
+
     private func catchUp() async {
-        guard loadedOnce, highestSeq > 0, let api = app?.api else { return }
+        guard loadedOnce, highestSeq > 0, !isCatchingUp, let api = app?.api else { return }
+        isCatchingUp = true
+        defer { isCatchingUp = false }
         do {
             let response = try await api.listMessages(
                 channelId: channel.channelId,
@@ -142,12 +282,27 @@ final class ChatModel {
         guard !text.isEmpty, !isSending, let api = app?.api else { return }
         isSending = true
         defer { isSending = false }
+        // Only keep mentions whose "@label" token still survives in the text,
+        // then split them: real members → mention_ids, group tokens →
+        // mention_names (the server expands @all/@bots/… into members).
+        let survivors = pickedMentions.filter { text.contains("@\($0.label)") }
+        var seen = Set<String>()
+        let ids = survivors.filter { $0.kind != .group && seen.insert($0.id).inserted }.map(\.id)
+        seen.removeAll()
+        let names = survivors.filter { $0.kind == .group && seen.insert($0.id).inserted }.map(\.id)
         do {
             let sent = try await api.sendMessage(
                 channelId: channel.channelId,
-                SendMessageRequest(content: text, replyToMsgId: replyTo?.msgId, sessionId: selectedSessionId)
+                SendMessageRequest(
+                    content: text,
+                    replyToMsgId: replyTo?.msgId,
+                    mentionIds: ids.isEmpty ? nil : ids,
+                    mentionNames: names.isEmpty ? nil : names,
+                    sessionId: selectedSessionId
+                )
             )
             composerText = ""
+            pickedMentions = []
             replyTo = nil
             upsert(sent)
             forceBottomTick += 1
@@ -192,6 +347,7 @@ final class ChatModel {
             markRead()
         case .messageDeleted(let channelId, let msgId) where channelId == channel.channelId:
             messages.removeAll { $0.msgId == msgId }
+            app?.messageStore.delete(msgId: msgId)
         default:
             break
         }
@@ -223,6 +379,7 @@ final class ChatModel {
             }
             messages = sorted(messages + [withResolvedSender(incoming)])
         }
+        schedulePersist()
     }
 
     /// Fills a missing `sender_name` from the channel-member map.
