@@ -366,7 +366,7 @@ struct MessageFileRef: Codable, Hashable, Identifiable {
     }
 }
 
-struct MessageDto: Decodable, Identifiable, Hashable {
+struct MessageDto: Codable, Identifiable, Hashable {
     var v: Int?
     var msgId: String
     var channelId: String
