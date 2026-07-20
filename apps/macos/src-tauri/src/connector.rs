@@ -1267,7 +1267,9 @@ fn workspace_cwd_allowed(default_cwd: &str, allowed_roots: &[String]) -> bool {
         p.canonicalize().unwrap_or(p)
     };
     let cwd = expand(default_cwd);
-    allowed_roots.iter().any(|root| cwd.starts_with(expand(root)))
+    allowed_roots
+        .iter()
+        .any(|root| cwd.starts_with(expand(root)))
 }
 
 /// Validate the workspace fields the way the connector does at startup, so the
@@ -1278,7 +1280,11 @@ pub fn connector_validate_workspace(
     default_cwd: Option<String>,
     allowed_roots: Vec<String>,
 ) -> bool {
-    match default_cwd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    match default_cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(cwd) => workspace_cwd_allowed(cwd, &allowed_roots),
         None => true, // no cwd set — nothing to validate
     }
@@ -1979,12 +1985,27 @@ mod tests {
     #[test]
     fn workspace_cwd_allowed_tilde_and_command_layer_none() {
         // Same `~/...` prefix on both sides compares equal as strings.
-        assert!(workspace_cwd_allowed("~/Projects/Cheers", &["~/Projects".to_string()]));
-        assert!(!workspace_cwd_allowed("~/Other", &["~/Projects".to_string()]));
+        assert!(workspace_cwd_allowed(
+            "~/Projects/Cheers",
+            &["~/Projects".to_string()]
+        ));
+        assert!(!workspace_cwd_allowed(
+            "~/Other",
+            &["~/Projects".to_string()]
+        ));
         // The command layer trims + filters blank cwd → None → true; the helper
         // itself reports the literal fact that "" is under no root.
-        assert!(super::connector_validate_workspace(None, vec!["/root".into()]));
-        assert!(super::connector_validate_workspace(Some("".into()), vec!["/root".into()]));
-        assert!(super::connector_validate_workspace(Some("   ".into()), vec!["/root".into()]));
+        assert!(super::connector_validate_workspace(
+            None,
+            vec!["/root".into()]
+        ));
+        assert!(super::connector_validate_workspace(
+            Some("".into()),
+            vec!["/root".into()]
+        ));
+        assert!(super::connector_validate_workspace(
+            Some("   ".into()),
+            vec!["/root".into()]
+        ));
     }
 }
