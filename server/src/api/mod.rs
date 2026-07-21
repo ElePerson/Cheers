@@ -21,6 +21,7 @@ pub mod stt_settings;
 pub mod task_claims;
 pub mod users;
 pub mod voice;
+pub mod voice_retention;
 pub mod workbench;
 pub mod workspace;
 pub mod workspaces;

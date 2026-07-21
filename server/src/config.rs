@@ -145,6 +145,10 @@ pub struct Config {
     pub livekit_api_secret: Option<String>,
     /// Independent bearer secret accepted only from the transcription worker.
     pub voice_transcriber_token: Option<String>,
+    /// Kill-switch for proactive task claiming (design §11). When false the
+    /// scheduler is not spawned and monitoring writes are accepted but never
+    /// evaluated — ship-safe default for a first release behind a flag.
+    pub task_claims_enabled: bool,
 }
 
 impl Config {
@@ -271,6 +275,10 @@ impl Config {
             voice_transcriber_token: env::var("VOICE_TRANSCRIBER_TOKEN")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
+            task_claims_enabled: env::var("TASK_CLAIMS_ENABLED")
+                .ok()
+                .map(|v| v.trim().eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
         }
     }
 

@@ -328,6 +328,23 @@ fn build_resource_call(
                 params,
             })
         }
+        // Proactive task claims (design PROACTIVE_TASK_CLAIMS.md). Read-only list
+        // through the resource path; status changes go through the gateway REST
+        // endpoints (POST /cancel, POST /resolve) where the full AppState that
+        // drives the dispatcher is available.
+        "list_task_claims" => {
+            let mut params = Map::new();
+            params.insert(
+                "channel_id".to_string(),
+                Value::String(client.resolve_channel(args)?),
+            );
+            copy_optional(args, &mut params, "status", "status");
+            copy_optional(args, &mut params, "limit", "limit");
+            Ok(ResourceCall {
+                resource: "channel.task_claims.list",
+                params,
+            })
+        }
         "inbox_open" => {
             let mut params = Map::new();
             params.insert(
@@ -697,6 +714,15 @@ fn tool_definitions() -> Vec<Value> {
             string_prop("session_id", "Optional session id from the reference, scoping which workspace root to read."),
             string_prop("root", "Optional workspace root the path is relative to, from the reference. Pass it through verbatim so you read the exact file the reference points at."),
         ], vec!["channel_id", "bot_id", "path"]), true, false),
+        // Proactive task claims (design PROACTIVE_TASK_CLAIMS.md): a bot may apply
+        // to take work; a human approves. List-only through Resource — claim
+        // creation/accept/reject run through the gateway REST dispatcher and
+        // cannot be forged through this read path.
+        tool("list_task_claims", "List proactive task claims", "List task claims in this channel a bot raised and a human can approve or reject. Each claim carries a summary, a proposed action, a confidence and impact, and a status (pending | accepted | rejected | cancelled | executing | completed | failed). Use this to see open work you can take and what is already in flight.", object_schema(vec![
+            channel_id_prop(),
+            string_prop("status", "Optional filter, e.g. \"pending\"."),
+            number_prop("limit", "Default 50, max 100.", Some(1), Some(100)),
+        ], vec!["channel_id"]), true, false),
     ]
 }
 
