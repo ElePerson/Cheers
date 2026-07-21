@@ -171,7 +171,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Opt-in proactive task claiming. Policies default to `off`; PostgreSQL
     // persists rate limits and cursors so restarts never replay claimed ranges.
-    gateway::task_claim_scheduler::spawn(state.clone());
+    // Feature-gated: TASK_CLAIMS_ENABLED=true to activate the scheduler. The
+    // REST/resource endpoints stay mounted so clients can persist policy, but
+    // without the scheduler no evaluations run behind the flag.
+    if state.config.task_claims_enabled {
+        gateway::task_claim_scheduler::spawn(state.clone());
+    } else {
+        tracing::info!("task-claim scheduler disabled (TASK_CLAIMS_ENABLED != true)");
+    }
 
     // Claim-expiry sweeper: pending/executing claims with `expires_at <= NOW()`
     // transition to `failed` so a stale claim never blocks a channel forever.
