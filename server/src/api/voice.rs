@@ -171,6 +171,10 @@ pub struct TranscriptSegmentDto {
     pub supersedes_segment_id: Option<String>,
     pub finalized_at: String,
     pub created_at: String,
+    /// Soft-delete timestamp; Some(...) = segment content has been removed but
+    /// claim audit attribution is retained (design §12).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,13 +183,13 @@ pub struct TranscriptListQuery {
     pub limit: Option<i64>,
 }
 
-struct VoiceMember {
-    channel_kind: String,
-    channel_role: String,
-    display_name: String,
+pub(crate) struct VoiceMember {
+    pub(crate) channel_kind: String,
+    pub(crate) channel_role: String,
+    pub(crate) display_name: String,
 }
 
-async fn voice_member(
+pub(crate) async fn voice_member(
     state: &AppState,
     channel_id: &str,
     user_id: &str,
@@ -769,7 +773,7 @@ fn transcriber_authorized(state: &AppState, headers: &HeaderMap) -> Result<(), A
     Ok(())
 }
 
-fn transcript_dto(row: sqlx::postgres::PgRow) -> TranscriptSegmentDto {
+pub(crate) fn transcript_dto(row: sqlx::postgres::PgRow) -> TranscriptSegmentDto {
     TranscriptSegmentDto {
         segment_id: row.try_get("segment_id").unwrap_or_default(),
         voice_session_id: row.try_get("voice_session_id").unwrap_or_default(),
@@ -794,6 +798,11 @@ fn transcript_dto(row: sqlx::postgres::PgRow) -> TranscriptSegmentDto {
             .try_get::<chrono::DateTime<Utc>, _>("created_at")
             .map(|value| value.to_rfc3339())
             .unwrap_or_default(),
+        deleted_at: row
+            .try_get::<Option<chrono::DateTime<Utc>>, _>("deleted_at")
+            .ok()
+            .flatten()
+            .map(|value| value.to_rfc3339()),
     }
 }
 
@@ -872,12 +881,12 @@ fn validate_transcript(body: &TranscriptSegmentIngestRequest) -> Result<ValidTra
     })
 }
 
-const TRANSCRIPT_SELECT: &str =
+pub(crate) const TRANSCRIPT_SELECT: &str =
     "SELECT segment_id, voice_session_id, channel_id, participant_session_id, user_id,
             provider_segment_id, provider_event_id, track_id, channel_seq, text,
             started_at_ms, ended_at_ms, language,
             confidence::double precision AS confidence,
-            supersedes_segment_id, finalized_at, created_at
+            supersedes_segment_id, finalized_at, created_at, deleted_at
      FROM voice_transcript_segments";
 
 /// POST /internal/v1/voice/sessions/:voice_session_id/transcript-segments
@@ -1099,7 +1108,7 @@ pub async fn transcript(
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
     let sql = format!(
         "{TRANSCRIPT_SELECT}
-         WHERE channel_id = $1 AND channel_seq > $2
+         WHERE channel_id = $1 AND channel_seq > $2 AND deleted_at IS NULL
          ORDER BY channel_seq ASC LIMIT $3"
     );
     let rows = sqlx::query(&sql)
@@ -1266,6 +1275,37 @@ pub async fn withdraw_consent(
         can_publish: false,
     }))
 }
+
+/// Append an audited transcript action (export / delete / policy_change /
+/// consent_withdrawn). Never fails the caller — an audit write error is logged
+/// and swallowed so the primary action still succeeds.
+pub(crate) async fn write_transcript_audit(
+    db: &sqlx::PgPool,
+    channel_id: &str,
+    voice_session_id: Option<&str>,
+    segment_id: Option<&str>,
+    actor_user_id: &str,
+    action: &str,
+    details: serde_json::Value,
+) {
+    let result = sqlx::query(
+        "INSERT INTO transcript_audit_events
+            (channel_id, voice_session_id, segment_id, actor_user_id, action, details)
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(channel_id)
+    .bind(voice_session_id)
+    .bind(segment_id)
+    .bind(actor_user_id)
+    .bind(action)
+    .bind(details)
+    .execute(db)
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(%channel_id, %actor_user_id, %action, %error, "transcript audit write failed");
+    }
+}
+
 
 fn verify_webhook(
     api_key: &str,

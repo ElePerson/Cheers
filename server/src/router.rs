@@ -260,6 +260,10 @@ fn build_authed_routes(state: AppState) -> Router<AppState> {
             post(api::task_claims::resolve_claim),
         )
         .route(
+            "/api/v1/channels/:channel_id/task-claims/:claim_id/cancel",
+            post(api::task_claims::cancel_claim),
+        )
+        .route(
             "/api/v1/channels/:channel_id/bots/:bot_id/monitoring",
             get(api::task_claims::get_monitoring).put(api::task_claims::put_monitoring),
         )
@@ -296,6 +300,18 @@ fn build_authed_routes(state: AppState) -> Router<AppState> {
         .route(
             "/api/v1/channels/:channel_id/voice/consent",
             delete(api::voice::withdraw_consent),
+        )
+        .route(
+            "/api/v1/channels/:channel_id/voice/transcript/export",
+            get(api::voice_retention::export_transcript),
+        )
+        .route(
+            "/api/v1/channels/:channel_id/voice/transcript/:seq",
+            delete(api::voice_retention::delete_transcript_segment),
+        )
+        .route(
+            "/api/v1/channels/:channel_id/voice/config",
+            put(api::voice_retention::update_voice_config),
         )
         .route(
             "/api/v1/channels/:channel_id/messages/:msg_id/cancel",
