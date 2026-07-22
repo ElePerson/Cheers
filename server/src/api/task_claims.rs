@@ -85,6 +85,9 @@ pub struct ClaimDto {
     pub execution_msg_id: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub resolved_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub requester_id: Option<String>,
+    pub source_message_id: Option<String>,
+    pub confirmation_message_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,7 +231,7 @@ pub async fn list_claims(
 ) -> Result<Json<Value>, AppError> {
     actor(&state, channel_id, &claims, false).await?;
     let limit = q.limit.unwrap_or(50).clamp(1, 100);
-    let rows = sqlx::query_as::<_, ClaimDto>(r#"SELECT r.claim_id,r.evaluation_id,r.channel_id,r.bot_id,COALESCE(NULLIF(b.display_name,''),b.username) AS bot_name,r.summary,r.proposed_action,r.confidence::float8 AS confidence,r.impact,r.status,r.resolved_by,r.resolution_note,r.execution_msg_id,r.created_at,r.resolved_at FROM task_claim_requests r JOIN bot_accounts b ON b.bot_id=r.bot_id WHERE r.channel_id=$1 AND ($2::text IS NULL OR r.status=$2) ORDER BY r.created_at DESC LIMIT $3"#)
+    let rows = sqlx::query_as::<_, ClaimDto>(r#"SELECT r.claim_id,r.evaluation_id,r.channel_id,r.bot_id,COALESCE(NULLIF(b.display_name,''),b.username) AS bot_name,r.summary,r.proposed_action,r.confidence::float8 AS confidence,r.impact,r.status,r.resolved_by,r.resolution_note,r.execution_msg_id,r.created_at,r.resolved_at,r.requester_id,r.source_message_id,r.confirmation_message_id FROM task_claim_requests r JOIN bot_accounts b ON b.bot_id=r.bot_id WHERE r.channel_id=$1 AND ($2::text IS NULL OR r.status=$2) ORDER BY r.created_at DESC LIMIT $3"#)
         .bind(channel_id.to_string()).bind(q.status.as_deref()).bind(limit).fetch_all(&state.db).await?;
     Ok(Json(json!({"claims": rows})))
 }
@@ -239,10 +242,19 @@ pub async fn resolve_claim(
     Path((channel_id, claim_id)): Path<(Uuid, Uuid)>,
     Json(input): Json<ResolveInput>,
 ) -> Result<Json<Value>, AppError> {
-    let user_id = actor(&state, channel_id, &claims, true).await?;
+    let user_id = actor(&state, channel_id, &claims, false).await?;
     if !matches!(input.decision.as_str(), "accept" | "reject") {
         return Err(AppError::BadRequest(
             "decision must be accept or reject".into(),
+        ));
+    }
+    let requester_id = sqlx::query_scalar::<_, Option<String>>("SELECT requester_id FROM task_claim_requests WHERE claim_id=$1 AND channel_id=$2 AND status='pending'")
+        .bind(claim_id.to_string()).bind(channel_id.to_string()).fetch_optional(&state.db).await?
+        .flatten()
+        .ok_or_else(|| AppError::Conflict("claim is no longer pending".into()))?;
+    if requester_id != user_id.to_string() {
+        return Err(AppError::Forbidden(
+            "only the mentioned task requester can resolve this claim".into(),
         ));
     }
     let status = if input.decision == "accept" {
@@ -281,6 +293,17 @@ pub async fn resolve_claim(
     let Some(row) = row else {
         return Err(AppError::Conflict("claim is no longer pending".into()));
     };
+    // Persist the response on the confirmation message too. This keeps the
+    // inline controls collapsed after a page reload, not only in local React
+    // state after the click.
+    sqlx::query(
+        "UPDATE messages SET content_data = COALESCE(content_data, '{}'::jsonb) || jsonb_build_object('resolved', TRUE, 'decision', $2, 'resolved_by', $3) WHERE msg_id = (SELECT confirmation_message_id FROM task_claim_requests WHERE claim_id=$1)",
+    )
+    .bind(claim_id.to_string())
+    .bind(&input.decision)
+    .bind(user_id.to_string())
+    .execute(&state.db)
+    .await?;
     let bot_id: Uuid = row
         .try_get::<String, _>("bot_id")?
         .parse()

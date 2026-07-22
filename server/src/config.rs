@@ -139,6 +139,10 @@ pub struct Config {
     // LiveKit real-time voice (optional; all three values are required together).
     /// Browser-reachable LiveKit WebSocket URL, e.g. `wss://voice.example.com`.
     pub livekit_url: Option<String>,
+    /// Optional private LiveKit URL used for server-to-server API calls. This
+    /// lets local Docker deployments return `ws://localhost:7880` to browsers
+    /// while containers reach the same SFU through `ws://livekit:7880`.
+    pub livekit_internal_url: Option<String>,
     /// LiveKit API key used as the issuer (`iss`) of participant access tokens.
     pub livekit_api_key: Option<String>,
     /// LiveKit API secret used only server-side to sign HS256 access tokens.
@@ -266,6 +270,9 @@ impl Config {
             livekit_url: env::var("LIVEKIT_URL")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
+            livekit_internal_url: env::var("LIVEKIT_INTERNAL_URL")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
             livekit_api_key: env::var("LIVEKIT_API_KEY")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
@@ -291,6 +298,14 @@ impl Config {
             self.livekit_api_key.as_deref()?,
             self.livekit_api_secret.as_deref()?,
         ))
+    }
+
+    /// URL for Gateway-to-LiveKit API traffic. The public browser URL remains
+    /// the fallback so existing single-address deployments need no change.
+    pub fn livekit_api_url(&self) -> Option<&str> {
+        self.livekit_internal_url
+            .as_deref()
+            .or(self.livekit_url.as_deref())
     }
 
     /// Browser origins allowed for both CORS and the WebSocket `Origin` check.

@@ -328,10 +328,24 @@ fn build_resource_call(
                 params,
             })
         }
-        // Proactive task claims (design PROACTIVE_TASK_CLAIMS.md). Read-only list
-        // through the resource path; status changes go through the gateway REST
-        // endpoints (POST /cancel, POST /resolve) where the full AppState that
-        // drives the dispatcher is available.
+        // A bot records its proactive-task decision through the resource path.
+        // The gateway validates that the evaluation belongs to this bot before
+        // it can create a claim or confirmation message.
+        "respond_to_task_claim_evaluation" => {
+            let mut params = Map::new();
+            params.insert(
+                "channel_id".to_string(),
+                Value::String(client.resolve_channel(args)?),
+            );
+            copy_required(args, &mut params, "evaluation_id", "evaluation_id")?;
+            copy_required(args, &mut params, "decision", "decision")?;
+            copy_optional(args, &mut params, "confidence", "confidence");
+            Ok(ResourceCall {
+                resource: "channel.task_claims.evaluate",
+                params,
+            })
+        }
+        // Proactive task claims (design PROACTIVE_TASK_CLAIMS.md). Read-only list.
         "list_task_claims" => {
             let mut params = Map::new();
             params.insert(
@@ -714,10 +728,13 @@ fn tool_definitions() -> Vec<Value> {
             string_prop("session_id", "Optional session id from the reference, scoping which workspace root to read."),
             string_prop("root", "Optional workspace root the path is relative to, from the reference. Pass it through verbatim so you read the exact file the reference points at."),
         ], vec!["channel_id", "bot_id", "path"]), true, false),
-        // Proactive task claims (design PROACTIVE_TASK_CLAIMS.md): a bot may apply
-        // to take work; a human approves. List-only through Resource — claim
-        // creation/accept/reject run through the gateway REST dispatcher and
-        // cannot be forged through this read path.
+        tool("respond_to_task_claim_evaluation", "Respond to a proactive task evaluation", "Record this bot's decision for a scheduler evaluation. Call exactly once for every claim-evaluation prompt: use decision=claim only when the task belongs to you, otherwise decision=ignore. The gateway derives the task text from the original channel message and, for a claim, posts the requester confirmation message. Never use post_message as a substitute.", object_schema(vec![
+            channel_id_prop(),
+            string_prop("evaluation_id", "Evaluation id supplied in the proactive-task prompt."),
+            string_prop("decision", "Either claim or ignore."),
+            number_prop("confidence", "Required for claim; 0 to 1.", Some(0), Some(1)),
+        ], vec!["channel_id", "evaluation_id", "decision"]), false, false),
+        // Proactive task claims: read-only history.
         tool("list_task_claims", "List proactive task claims", "List task claims in this channel a bot raised and a human can approve or reject. Each claim carries a summary, a proposed action, a confidence and impact, and a status (pending | accepted | rejected | cancelled | executing | completed | failed). Use this to see open work you can take and what is already in flight.", object_schema(vec![
             channel_id_prop(),
             string_prop("status", "Optional filter, e.g. \"pending\"."),

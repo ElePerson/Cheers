@@ -13,6 +13,13 @@ Required environment:
 - `VOICE_TRANSCRIBER_TOKEN`, identical to the gateway value
 - `VOICE_STT_API_KEY`
 
+Set `VOICE_STT_PROVIDER=openai` (default) for an OpenAI-compatible
+`/audio/transcriptions` endpoint. Set `VOICE_STT_PROVIDER=stepfun` for
+`stepaudio-2.5-asr`; its default endpoint is
+`https://api.stepfun.com/v1/audio/asr/sse` and it consumes PCM audio through
+HTTP/SSE. In that mode set `VOICE_STT_MODEL=stepaudio-2.5-asr` and normally
+`VOICE_STT_LANGUAGE=zh`.
+
 Optional environment:
 
 - `VOICE_STT_MODEL` (default `gpt-4o-mini-transcribe`)

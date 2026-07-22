@@ -28,11 +28,15 @@ export interface OperationData {
   actor_type?: "user" | "bot" | "system";
   actor_id?: string | null;
   target_ref?: string | null;
+  evaluation_id?: string;
+  bot_id?: string;
+  status?: string;
+  error?: string | null;
   created_at?: string;
 }
 
 export interface ActivityEvent {
-  event_type: "message" | "operation";
+  event_type: "message" | "operation" | "task_claim_evaluation";
   channel_seq: number;
   created_at?: string | null;
   data: MessageData & OperationData;
@@ -103,6 +107,21 @@ export function excerpt(content?: string, max = 120): string {
 function normalize(e: ActivityEvent, isBot: (id?: string | null) => boolean): NormEvent {
   const d = e.data;
   const ts = d.created_at ?? e.created_at ?? null;
+  if (e.event_type === "task_claim_evaluation") {
+    const status = d.status ?? "unknown";
+    return {
+      seq: e.channel_seq,
+      ts,
+      kind: "op",
+      actorId: d.bot_id ?? null,
+      actorType: "bot",
+      excerpt: `Task claim evaluation · ${status}${d.error ? ` · ${d.error}` : ""}`,
+      mentions: [],
+      fileCount: 0,
+      opType: `task_claim_${status}`,
+      targetRef: d.evaluation_id ?? null,
+    };
+  }
   if (e.event_type === "operation") {
     const opType = d.op_type ?? "op";
     return {

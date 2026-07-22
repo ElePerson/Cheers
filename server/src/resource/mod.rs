@@ -108,6 +108,9 @@ pub async fn dispatch(db: &PgPool, principal: Principal, frame: &Value) -> Value
 
         // ── 写操作（频道成员 role 可写）────────────────────────────────
         "channel.messages.create" => messages::handle_create(db, &principal, &params).await,
+        "channel.task_claims.evaluate" => {
+            task_claims::handle_evaluate(db, &principal, &params).await
+        }
         // Agent writes its OWN status card (set_status tool); live broadcast is
         // emitted at the WS boundary (agent_bridge), which holds the fanout.
         "bot.status.write" => bot_status::handle_write(db, &principal, &params).await,

@@ -14,6 +14,8 @@ export interface TaskClaim {
   bot_name: string; summary: string; proposed_action: string; confidence: number;
   impact: "low" | "medium" | "high"; status: string; created_at: string;
   resolved_at?: string | null; execution_msg_id?: string | null;
+  requester_id?: string | null; source_message_id?: string | null;
+  confirmation_message_id?: string | null;
 }
 export const getBotMonitoring = (channelId: string, botId: string) =>
   apiJson<BotMonitoring>(`/channels/${channelId}/bots/${botId}/monitoring`);

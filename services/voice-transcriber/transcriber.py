@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 import os
 import time
@@ -34,6 +36,7 @@ class Settings:
     cheers_url: str
     cheers_token: str
     stt_api_key: str
+    stt_provider: str
     stt_model: str
     stt_base_url: str | None
     stt_language: str | None
@@ -44,10 +47,114 @@ class Settings:
             cheers_url=required_env("CHEERS_INTERNAL_URL").rstrip("/"),
             cheers_token=required_env("VOICE_TRANSCRIBER_TOKEN"),
             stt_api_key=required_env("VOICE_STT_API_KEY"),
+            stt_provider=os.getenv("VOICE_STT_PROVIDER", "openai").strip().lower(),
             stt_model=os.getenv("VOICE_STT_MODEL", "gpt-4o-mini-transcribe").strip(),
             stt_base_url=os.getenv("VOICE_STT_BASE_URL", "").strip() or None,
             stt_language=os.getenv("VOICE_STT_LANGUAGE", "").strip() or None,
         )
+
+
+class StepFunSTT(agents.stt.STT):
+    """Batch STT adapter for StepFun's PCM-over-HTTP/SSE ASR endpoint.
+
+    Silero VAD remains responsible for utterance boundaries. Each completed
+    utterance is sent as one StepFun request; the SSE `done` event is converted
+    into the LiveKit Agents final-transcript event consumed by the worker.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(
+            capabilities=agents.stt.STTCapabilities(
+                streaming=False,
+                interim_results=False,
+            )
+        )
+        self._settings = settings
+
+    @property
+    def model(self) -> str:
+        return self._settings.stt_model
+
+    @property
+    def provider(self) -> str:
+        return "stepfun"
+
+    async def _recognize_impl(
+        self,
+        buffer: agents.stt.AudioBuffer,
+        *,
+        language: Any = None,
+        conn_options: Any = None,
+    ) -> agents.stt.SpeechEvent:
+        del language, conn_options
+        frame = rtc.combine_audio_frames(buffer)
+        transcription: dict[str, Any] = {
+            "model": self._settings.stt_model,
+            "enable_itn": True,
+        }
+        if self._settings.stt_language:
+            transcription["language"] = self._settings.stt_language
+        payload = {
+            "audio": {
+                "data": base64.b64encode(bytes(frame.data)).decode("ascii"),
+                "input": {
+                    "transcription": transcription,
+                    "format": {
+                        "type": "pcm",
+                        "codec": "pcm_s16le",
+                        "rate": frame.sample_rate,
+                        "bits": 16,
+                        "channel": frame.num_channels,
+                    },
+                },
+            }
+        }
+        url = self._settings.stt_base_url or "https://api.stepfun.com/v1/audio/asr/sse"
+        headers = {
+            "Authorization": f"Bearer {self._settings.stt_api_key}",
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+        }
+        request_id = ""
+        final_text = ""
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                response.raise_for_status()
+                async for raw_line in response.content:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    event = json.loads(line.removeprefix("data:").strip())
+                    request_id = str(event.get("meta", {}).get("session_id", request_id))
+                    if event.get("type") == "error":
+                        raise RuntimeError(event.get("message", "StepFun ASR failed"))
+                    if event.get("type") == "transcript.text.done":
+                        final_text = str(event.get("text", "")).strip()
+                        break
+        return agents.stt.SpeechEvent(
+            type=SpeechEventType.FINAL_TRANSCRIPT,
+            request_id=request_id,
+            alternatives=[
+                agents.stt.SpeechData(
+                    language=self._settings.stt_language or "zh",
+                    text=final_text,
+                )
+            ],
+        )
+
+
+def build_stt(settings: Settings) -> agents.stt.STT:
+    if settings.stt_provider == "stepfun":
+        return StepFunSTT(settings)
+    if settings.stt_provider == "openai":
+        return openai.STT(
+            model=settings.stt_model,
+            api_key=settings.stt_api_key,
+            base_url=settings.stt_base_url,
+            language=settings.stt_language,
+        )
+    raise RuntimeError(f"unsupported VOICE_STT_PROVIDER: {settings.stt_provider}")
 
 
 class CheersClient:
@@ -95,8 +202,6 @@ async def publish_data(
     low-latency UI in addition to the durable HTTP persist. Failures are logged
     and swallowed — a lost data packet must never break transcription.
     """
-    import json
-
     try:
         await local_participant.publish_data(
             json.dumps(payload).encode("utf-8"),
@@ -121,14 +226,10 @@ async def process_track(
     if publication.source != rtc.TrackSource.SOURCE_MICROPHONE:
         return
 
-    base_stt = openai.STT(
-        model=settings.stt_model,
-        api_key=settings.stt_api_key,
-        base_url=settings.stt_base_url,
-        language=settings.stt_language,
-    )
-    # OpenAI's HTTP transcription API is not a streaming transport. The local
-    # Silero VAD creates utterance boundaries before each request.
+    base_stt = build_stt(settings)
+    # Cloud APIs are batch recognizers; the local Silero VAD creates utterance
+    # boundaries before each request. StepFun then returns its final result over
+    # SSE, while OpenAI returns it as a normal HTTP response.
     stt_engine = agents.stt.StreamAdapter(stt=base_stt, vad=silero.VAD.load())
     stt_stream = stt_engine.stream()
     audio_stream = rtc.AudioStream(track)
@@ -216,8 +317,6 @@ async def transcriber(ctx: agents.JobContext) -> None:
         # The gateway supplies authoritative session metadata in the explicit
         # dispatch. Fall back to the authenticated lookup for safe recovery.
         try:
-            import json
-
             context = json.loads(ctx.job.metadata) if ctx.job.metadata else None
         except (TypeError, ValueError):
             context = None

@@ -49,6 +49,60 @@ pub async fn dispatch_with_effects(state: &AppState, principal: Principal, frame
                 spawn_created_message_effects(state, principal.principal_id, created.clone());
             }
         }
+        Some("channel.task_claims.evaluate") => {
+            if let Some(data) = resp.get("data") {
+                if let Some(message) = data.get("confirmation_message") {
+                    if let Some(channel_id) = message
+                        .get("channel_id")
+                        .and_then(Value::as_str)
+                        .and_then(|v| v.parse::<Uuid>().ok())
+                    {
+                        state
+                            .fanout
+                            .broadcast_channel(
+                                channel_id,
+                                WireFrame::channel(channel_id, "message", message.clone()),
+                            )
+                            .await;
+                    }
+                }
+                if data.get("status").and_then(Value::as_str) == Some("pending") {
+                    if let Some(channel_id) = data
+                        .get("channel_id")
+                        .and_then(Value::as_str)
+                        .and_then(|v| v.parse::<Uuid>().ok())
+                    {
+                        state
+                            .fanout
+                            .broadcast_channel(
+                                channel_id,
+                                WireFrame::channel(channel_id, "task_claim_created", data.clone()),
+                            )
+                            .await;
+                    }
+                }
+            }
+            // An ignored or failed decision does not create a chat message, so
+            // explicitly refresh the Activity ViewBoard for every MCP decision.
+            if let Some(channel_id) = frame
+                .get("params")
+                .and_then(|params| params.get("channel_id"))
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<Uuid>().ok())
+            {
+                state
+                    .fanout
+                    .broadcast_channel(
+                        channel_id,
+                        WireFrame::channel(
+                            channel_id,
+                            "board_signal",
+                            json!({ "channel_id": channel_id, "board": "activity" }),
+                        ),
+                    )
+                    .await;
+            }
+        }
         // A bot left → the member set changed, so re-broadcast the full presence.
         Some("channel.leave") => {
             if let Some(cid) = frame

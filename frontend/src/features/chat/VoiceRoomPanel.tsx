@@ -13,7 +13,8 @@ import {
   Mic,
   MicOff,
   PhoneOff,
-  Volume2,
+  Radio,
+  Users,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
@@ -58,6 +59,7 @@ export function VoiceRoomPanel({
   const [micEnabled, setMicEnabled] = useState(false);
   const [canPublish, setCanPublish] = useState(true);
   const [participantCount, setParticipantCount] = useState(0);
+  const [participantNames, setParticipantNames] = useState<string[]>([]);
   const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
   const [transcriptionStatus, setTranscriptionStatus] = useState<
     "off" | "starting" | "active" | "failed"
@@ -89,6 +91,14 @@ export function VoiceRoomPanel({
       .filter((segment) => !superseded.has(segment.segment_id))
       .slice(-4);
   }, [transcripts]);
+  const latestInterim = useMemo(
+    () =>
+      Array.from(interimSegments.values())
+        .filter((segment) => !finalizedSegmentIds.has(segment.segment_id))
+        .sort((a, b) => b.started_at_ms - a.started_at_ms)[0],
+    [finalizedSegmentIds, interimSegments],
+  );
+  const latestTranscript = visibleTranscripts.at(-1);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,8 +121,13 @@ export function VoiceRoomPanel({
     };
   }, [channelId]);
 
-  const refreshParticipantCount = useCallback((room: Room) => {
+  const refreshVoicePresence = useCallback((room: Room) => {
     setParticipantCount(room.remoteParticipants.size + 1);
+    setParticipantNames(
+      [room.localParticipant, ...room.remoteParticipants.values()]
+        .map((participant) => participant.name || participant.identity)
+        .filter((name): name is string => Boolean(name)),
+    );
   }, []);
 
   const disconnect = useCallback(async () => {
@@ -124,6 +139,7 @@ export function VoiceRoomPanel({
     setReconnecting(false);
     setMicEnabled(false);
     setParticipantCount(0);
+    setParticipantNames([]);
     setActiveSpeaker(null);
   }, []);
 
@@ -158,10 +174,10 @@ export function VoiceRoomPanel({
         for (const element of track.detach()) element.remove();
       });
       room.on(RoomEvent.ParticipantConnected, () =>
-        refreshParticipantCount(room),
+        refreshVoicePresence(room),
       );
       room.on(RoomEvent.ParticipantDisconnected, () =>
-        refreshParticipantCount(room),
+        refreshVoicePresence(room),
       );
       room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
         setActiveSpeaker(speakers[0]?.name || speakers[0]?.identity || null);
@@ -178,6 +194,7 @@ export function VoiceRoomPanel({
         setReconnecting(false);
         setMicEnabled(false);
         setParticipantCount(0);
+        setParticipantNames([]);
       });
       // Interim caption transport: the transcriber publishes every turn to the
       // `lk.transcription` topic via LiveKit data packets; we decode the
@@ -245,7 +262,7 @@ export function VoiceRoomPanel({
         // disclosure card so the user can consent and upgrade in place.
         setConsentRequired(true);
       }
-      refreshParticipantCount(room);
+      refreshVoicePresence(room);
       setConnected(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -254,7 +271,7 @@ export function VoiceRoomPanel({
     } finally {
       setJoining(false);
     }
-  }, [channelId, connected, disconnect, joining, refreshParticipantCount]);
+  }, [channelId, connected, disconnect, joining, refreshVoicePresence]);
 
   const toggleMic = useCallback(async () => {
     const room = roomRef.current;
@@ -326,37 +343,75 @@ export function VoiceRoomPanel({
     }
   }, [canManage, changingTranscription, channelId, transcriptionStatus]);
 
+  const speakingName =
+    activeSpeaker || latestInterim?.participant_identity || null;
+  const captionText = latestInterim?.text || latestTranscript?.text || null;
+
   return (
-    <div className="mx-4 mb-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 flex-shrink-0">
+    <section className="mx-4 mb-2 flex-shrink-0 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50">
       <div ref={audioRootRef} className="hidden" aria-hidden="true" />
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-300">
-          <Volume2 className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-zinc-100">
-            {connected ? "Voice connected" : "Voice channel"}
+      <div className="flex min-h-[64px] items-center gap-3 px-3 py-2.5">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-zinc-300">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                connected ? "bg-emerald-400" : "bg-zinc-600"
+              }`}
+            />
+            <span className="hidden sm:inline">
+              {connected ? "LIVE" : "VOICE"}
+            </span>
           </div>
-          <div className="truncate text-xs text-zinc-400">
-            {reconnecting
-              ? "Reconnecting…"
-              : connected
-                ? `${participantCount} participant${participantCount === 1 ? "" : "s"}${activeSpeaker ? ` · ${activeSpeaker} speaking` : ""}`
-                : "Join the room to talk with channel members"}
+          <div className="min-w-0 border-l border-zinc-800 pl-3">
+            <p className="truncate text-sm font-medium text-zinc-100">
+              {connected ? "Meeting in progress" : "Voice meeting ready"}
+            </p>
+            <p className="truncate text-xs text-zinc-500">
+              {reconnecting
+                ? "Reconnecting…"
+                : connected
+                  ? `${participantCount} participant${participantCount === 1 ? "" : "s"} in this channel`
+                  : "Join the channel meeting to talk with members"}
+            </p>
           </div>
+
+          {connected && participantNames.length > 0 && (
+            <div className="hidden min-w-0 items-center gap-1.5 lg:flex">
+              {participantNames.slice(0, 4).map((name) => {
+                const speaking = name === speakingName;
+                return (
+                  <div
+                    key={name}
+                    className={`flex max-w-32 items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
+                      speaking
+                        ? "border-indigo-500/60 bg-indigo-500/10 text-indigo-200"
+                        : "border-transparent bg-zinc-800/70 text-zinc-400"
+                    }`}
+                  >
+                    {speaking ? (
+                      <Radio className="h-3 w-3 shrink-0 animate-pulse" />
+                    ) : (
+                      <Users className="h-3 w-3 shrink-0 text-zinc-500" />
+                    )}
+                    <span className="truncate">{name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {!connected ? (
-          <Button disabled={joining} onClick={() => void join()}>
+          <Button disabled={joining} onClick={() => void join()} className="shrink-0">
             {joining ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Mic className="h-4 w-4" />
             )}
-            Join
+            Join voice
           </Button>
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
               onClick={() => void toggleMic()}
@@ -368,51 +423,58 @@ export function VoiceRoomPanel({
                     : "Unmute microphone"
                   : "Listen-only member"
               }
-              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 micEnabled
-                  ? "bg-zinc-800 text-zinc-100 hover:bg-zinc-700"
+                  ? "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
                   : "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25"
               }`}
             >
               {micEnabled ? (
-                <Mic className="h-4 w-4" />
+                <Mic className="h-3.5 w-3.5" />
               ) : (
-                <MicOff className="h-4 w-4" />
+                <MicOff className="h-3.5 w-3.5" />
               )}
+              <span className="hidden sm:inline">{micEnabled ? "Mute" : "Unmute"}</span>
             </button>
             <button
               type="button"
               onClick={() => void disconnect()}
               title="Leave voice"
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-600 text-white hover:bg-rose-500 transition-colors"
+              className="flex h-8 items-center gap-1.5 rounded-md border border-rose-500/40 px-2.5 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/10"
             >
-              <PhoneOff className="h-4 w-4" />
+              <PhoneOff className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Leave</span>
             </button>
           </div>
         )}
       </div>
-      <div className="mt-3 flex items-center justify-between border-t border-zinc-800 pt-3">
-        <div className="flex min-w-0 items-center gap-2 text-xs">
-          <span
-            className={`h-2 w-2 rounded-full ${
-              transcriptionStatus === "active"
-                ? "bg-rose-400 animate-pulse"
-                : transcriptionStatus === "starting"
-                  ? "bg-amber-400 animate-pulse"
-                  : transcriptionStatus === "failed"
-                    ? "bg-rose-700"
-                    : "bg-zinc-600"
+
+      <div className="flex min-h-8 items-center gap-2 border-t border-zinc-800/80 px-3 py-1.5 text-xs">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-zinc-500">
+          <Captions
+            className={`h-3.5 w-3.5 shrink-0 ${
+              transcriptionStatus === "active" ? "text-indigo-300" : ""
             }`}
           />
-          <span className="truncate text-zinc-400">
-            {transcriptionStatus === "active"
-              ? "Live transcription is on"
-              : transcriptionStatus === "starting"
-                ? "Starting transcription…"
-                : transcriptionStatus === "failed"
-                  ? "Transcription unavailable"
-                  : "Live transcription is off"}
-          </span>
+          {speakingName && captionText ? (
+            <p className="truncate" aria-live="polite">
+              <span className="font-medium text-indigo-300">{speakingName}</span>
+              <span className="mx-1 text-zinc-600">·</span>
+              <span className={latestInterim ? "italic text-zinc-400" : "text-zinc-500"}>
+                {captionText}
+              </span>
+            </p>
+          ) : (
+            <p className="truncate">
+              {transcriptionStatus === "active"
+                ? "Live captions are on"
+                : transcriptionStatus === "starting"
+                  ? "Starting live captions…"
+                  : transcriptionStatus === "failed"
+                    ? "Live captions are unavailable"
+                    : "Live captions are off"}
+            </p>
+          )}
         </div>
         {canManage && (
           <button
@@ -420,109 +482,47 @@ export function VoiceRoomPanel({
             disabled={!connected || changingTranscription}
             onClick={() => void toggleTranscription()}
             title={!connected ? "Join the room first" : undefined}
-            className={`ml-3 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-              transcriptionStatus === "active"
-                ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25"
-                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-            }`}
+            className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {changingTranscription ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Loader2 className="h-3 w-3 animate-spin" />
             ) : (
-              <Captions className="h-3.5 w-3.5" />
+              <Captions className="h-3 w-3" />
             )}
-            {transcriptionStatus === "active" ? "Stop" : "Start"}
+            {transcriptionStatus === "active" ? "Stop captions" : "Start captions"}
           </button>
         )}
       </div>
-      {/* Consent gating card: explicit-consent mode, not yet accepted. Surfaces
-          the disclosure BEFORE the mic can publish; accepting calls
-          grantConsent() and upgrades the existing connection in place.
-          `consentRequired` is set on a listen-only join (can_publish=false). */}
+
       {consentRequired && connected && (
-        <div className="mt-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 p-3">
-          <p className="text-xs font-medium text-indigo-200">
-            Live transcription in this room
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-indigo-500/20 bg-indigo-500/5 px-3 py-2 text-xs">
+          <p className="min-w-0 flex-1 text-zinc-300">
+            Live captions send final spoken text to this channel; audio is not recorded.
           </p>
-          <p className="mt-1 text-xs text-zinc-300">
-            When you speak, your audio is transcribed into the channel so bots
-            and members can read it. Audio is not recorded — only the final text
-            is kept. You can withdraw at any time.
-          </p>
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              disabled={consenting}
-              onClick={() => void grantConsent()}
-              className="flex items-center gap-1.5 rounded-md bg-indigo-500 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-400 disabled:opacity-60"
-            >
-              {consenting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Mic className="h-3.5 w-3.5" />
-              )}
-              Accept &amp; speak
-            </button>
-            <button
-              type="button"
-              disabled={consenting}
-              onClick={() => setConsentRequired(false)}
-              className="rounded-md px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-200"
-            >
-              Stay listen-only
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={consenting}
+            onClick={() => void grantConsent()}
+            className="inline-flex items-center gap-1 rounded bg-indigo-500 px-2 py-1 font-medium text-white hover:bg-indigo-400 disabled:opacity-60"
+          >
+            {consenting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Mic className="h-3 w-3" />}
+            Accept &amp; speak
+          </button>
+          <button
+            type="button"
+            disabled={consenting}
+            onClick={() => setConsentRequired(false)}
+            className="text-zinc-400 hover:text-zinc-200"
+          >
+            Listen only
+          </button>
         </div>
       )}
       {!canPublish && connected && !consentRequired && (
-        <p className="mt-2 text-xs text-zinc-500">
+        <p className="border-t border-zinc-800/80 px-3 py-1.5 text-xs text-zinc-500">
           You have listen-only access in this channel.
         </p>
       )}
-      {/* Interim (live) captions — ephemeral, in-place revisions. Rendered only
-          while a spoken turn is in progress; collapses into the final row below
-          when the gateway fanout delivers the durable segment. */}
-      {interimSegments.size > 0 && (
-        <div
-          className="mt-3 space-y-1 border-t border-zinc-800 pt-3"
-          aria-label="Live captions"
-          aria-live="polite"
-        >
-          {Array.from(interimSegments.values())
-            .filter((s) => !finalizedSegmentIds.has(s.segment_id))
-            .sort((a, b) => a.started_at_ms - b.started_at_ms)
-            .map((segment) => (
-              <div
-                key={segment.segment_id}
-                className="flex gap-2 text-xs leading-relaxed"
-              >
-                <span className="max-w-24 flex-shrink-0 truncate font-medium text-indigo-300/70">
-                  {segment.participant_identity || "Member"}
-                </span>
-                <span className="text-zinc-400 italic">{segment.text}</span>
-              </div>
-            ))}
-        </div>
-      )}
-      {visibleTranscripts.length > 0 && (
-        <div
-          className="mt-3 space-y-1.5 border-t border-zinc-800 pt-3"
-          aria-label="Latest final voice transcript"
-          aria-live="polite"
-        >
-          {visibleTranscripts.map((segment) => (
-            <div
-              key={segment.segment_id}
-              className="flex gap-2 text-xs leading-relaxed"
-            >
-              <span className="max-w-24 flex-shrink-0 truncate font-medium text-indigo-300">
-                {speakerNames[segment.user_id] || "Member"}
-              </span>
-              <span className="text-zinc-300">{segment.text}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    </section>
   );
 }
