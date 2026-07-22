@@ -813,6 +813,27 @@ async fn handle_data_frame(frame: &Value, state: &AppState, bot: &BotInfo, socke
                     let _ = ws_send(socket, &json!({"type":"task_claim_ack","v":BRIDGE_PROTOCOL_VERSION,"evaluation_id":evaluation_id,"ok":true,"data":result})).await;
                 }
                 Err(error) => {
+                    // A claim decision may have reached the model successfully but
+                    // still fail while writing the durable claim/confirmation.
+                    // Record that boundary explicitly: leaving it as `dispatched`
+                    // makes the UI look as if monitoring never ran and blocks
+                    // immediate retries until the lease expires.
+                    tracing::error!(
+                        %evaluation_id,
+                        bot_id = %bot.bot_id,
+                        error = %error,
+                        "task-claim completion failed"
+                    );
+                    if let Err(update_error) = sqlx::query(
+                        "UPDATE task_claim_evaluations SET status='failed', error=$2, completed_at=NOW() WHERE evaluation_id=$1 AND status='dispatched'",
+                    )
+                    .bind(evaluation_id.to_string())
+                    .bind(format!("claim completion failed: {error}"))
+                    .execute(&state.db)
+                    .await
+                    {
+                        tracing::error!(%evaluation_id, error = %update_error, "could not record task-claim completion failure");
+                    }
                     let _ = ws_send(socket, &json!({"type":"task_claim_ack","v":BRIDGE_PROTOCOL_VERSION,"evaluation_id":evaluation_id,"ok":false,"error":error.to_string()})).await;
                 }
             }

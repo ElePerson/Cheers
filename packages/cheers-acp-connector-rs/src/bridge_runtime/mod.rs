@@ -634,9 +634,10 @@ impl RuntimeContext {
                 ..
             } => {
                 let instructions = format!(
-                    "You are evaluating whether the following recent channel activity contains a concrete task that belongs to you.\nYour configured scope: {}\nMinimum confidence: {:.3}\nActivity sequence: {}..={}\nActivity JSON:\n{}\n\nDo not execute the task and do not call tools. Return exactly one JSON object and no prose. If no task belongs to you: {{\"decision\":\"ignore\"}}. If it does: {{\"decision\":\"claim\",\"summary\":\"short task summary\",\"proposed_action\":\"what you will do after approval\",\"confidence\":0.0,\"impact\":\"low|medium|high\"}}.",
+                    "You are the proactive task-claiming bot for a shared channel. Decide whether the recent activity contains a concrete task that belongs to you.\nYour configured scope: {}\nMinimum confidence: {:.3}\nEvaluation id: {}\nActivity sequence: {}..={}\nActivity JSON:\n{}\n\nClaim explicit matching requests to fix, implement, add, test, investigate, review, document, or submit work. Chinese signals such as 请认领, 修复, 实现, 添加测试, 排查, 审查, 文档, 提交 PR are explicit. A direct task does not require an @mention. Ignore greetings, questions without action, completed work, and work outside your scope. Do not execute work. You MUST call the Cheers MCP tool respond_to_task_claim_evaluation exactly once with channel_id, this evaluation_id, decision=claim or ignore; for claim include confidence between 0 and 1. Do not return a JSON decision or prose.",
                     if scope.trim().is_empty() { "Use your identity and capabilities." } else { scope.as_str() },
                     confidence_threshold,
+                    evaluation_id,
                     source_seq_from,
                     source_seq_to,
                     serde_json::to_string_pretty(&activity).unwrap_or_else(|_| "[]".to_string()),
@@ -1925,12 +1926,9 @@ impl RuntimeContext {
         }
         let session_lock = self.session_lock(&task.provider_session_key).await;
         let _guard = session_lock.lock().await;
-        let mut start_options = self.session_start_options(&task).await;
-        // Evaluation is read-only and receives its bounded activity inline. Do
-        // not expose Cheers MCP resources during this isolated decision turn.
-        if evaluation_id.is_some() {
-            start_options.mcp_servers = json!([]);
-        }
+        let start_options = self.session_start_options(&task).await;
+        // Evaluation turns retain Cheers MCP solely to record their decision
+        // through the gateway-owned task-claim resource.
         let acp_session_id = self.ensure_acp_session(&task, start_options).await?;
         let run = Arc::new(Mutex::new(ActiveRun {
             task_id: task.task_id.clone(),
@@ -2163,10 +2161,32 @@ impl RuntimeContext {
                 };
                 if let Ok(loaded) = load_result {
                     self.report_session_snapshot(&loaded.metadata).await;
-                    self.report_provider_session(&task.provider_session_key, &session_id)
-                        .await?;
+                    // Claim evaluations use an ACP-only session key, not a
+                    // CheersSession row. Only real channel/session work may
+                    // update gateway session state.
+                    if task.session_id.is_some() {
+                        self.report_provider_session(&task.provider_session_key, &session_id)
+                            .await?;
+                    }
                     return Ok(session_id);
                 }
+
+                // The ACP provider is authoritative for whether its session
+                // still exists. A failed load means this persisted pointer is
+                // stale (for example after the provider clears local history),
+                // so remove it before creating a replacement. Keeping it would
+                // make every later turn retry a known-dead session first.
+                tracing::warn!(
+                    account = %self.account_id,
+                    provider_session_key = %task.provider_session_key,
+                    provider_session_id = %session_id,
+                    "ACP session load failed; clearing stale local session mapping"
+                );
+                self.state
+                    .lock()
+                    .await
+                    .remove(&self.account_id, &task.provider_session_key)
+                    .await?;
             }
         }
         if !self.config.policy.sessions.create {
@@ -2188,8 +2208,14 @@ impl RuntimeContext {
                 &new_session.session_id,
             )
             .await?;
-        self.report_provider_session(&task.provider_session_key, &new_session.session_id)
-            .await?;
+        // A proactive claim evaluation has no gateway CheersSession to update.
+        // Reporting its ACP-only key made the gateway try to resolve a
+        // non-existent server session and obscured otherwise successful
+        // recovery with `session_update failed`.
+        if task.session_id.is_some() {
+            self.report_provider_session(&task.provider_session_key, &new_session.session_id)
+                .await?;
+        }
         Ok(new_session.session_id)
     }
 

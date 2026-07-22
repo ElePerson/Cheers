@@ -294,6 +294,43 @@ struct APIClient: Sendable {
         try await postJSON("/channels/\(channelId)/messages", body: body, as: MessageDto.self)
     }
 
+    // MARK: Voice
+
+    func joinVoice(channelId: String) async throws -> VoiceJoinResponse {
+        try await postJSON("/channels/\(channelId)/voice/join", body: [String: String](), as: VoiceJoinResponse.self)
+    }
+
+    func voiceState(channelId: String) async throws -> VoiceStateResponse {
+        try await getJSON("/channels/\(channelId)/voice/state", as: VoiceStateResponse.self)
+    }
+
+    func voiceTranscript(channelId: String, afterSeq: Int64 = 0) async throws -> [VoiceTranscriptSegment] {
+        try await getJSON("/channels/\(channelId)/voice/transcript", query: [
+            URLQueryItem(name: "after_seq", value: String(afterSeq)),
+            URLQueryItem(name: "limit", value: "100"),
+        ], as: [VoiceTranscriptSegment].self)
+    }
+
+    func grantVoiceConsent(channelId: String) async throws -> VoiceConsentResponse {
+        try await postJSON("/channels/\(channelId)/voice/consent", body: [String: String](), as: VoiceConsentResponse.self)
+    }
+
+    func setVoiceTranscription(channelId: String, enabled: Bool) async throws -> VoiceTranscriptionControlResponse {
+        try await postJSON(
+            "/channels/\(channelId)/voice/transcription/\(enabled ? "start" : "stop")",
+            body: [String: String](),
+            as: VoiceTranscriptionControlResponse.self
+        )
+    }
+
+    func resolveTaskClaim(channelId: String, claimId: String, decision: String) async throws {
+        _ = try await postJSON(
+            "/channels/\(channelId)/task-claims/\(claimId)/resolve",
+            body: ["decision": decision],
+            as: JSONValue.self
+        )
+    }
+
     // MARK: Files
 
     /// Raw file bytes (Bearer-authed). `download` serves the original; otherwise

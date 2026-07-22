@@ -130,6 +130,26 @@ pub async fn handle_read(db: &PgPool, principal: &Principal, params: &Value) -> 
             FROM voice_transcript_segments t
             WHERE t.channel_id = $1
               AND t.channel_seq > $2
+
+            UNION ALL
+
+            SELECT
+                'task_claim_evaluation'::text AS event_type,
+                e.source_seq_to AS channel_seq,
+                e.reserved_at AS created_at,
+                jsonb_build_object(
+                    'evaluation_id', e.evaluation_id,
+                    'channel_id', e.channel_id,
+                    'bot_id', e.bot_id,
+                    'source_seq_from', e.source_seq_from,
+                    'source_seq_to', e.source_seq_to,
+                    'status', e.status,
+                    'error', e.error,
+                    'created_at', e.reserved_at
+                ) AS payload
+            FROM task_claim_evaluations e
+            WHERE e.channel_id = $1
+              AND e.source_seq_to > $2
         ) events
         ORDER BY channel_seq ASC
         LIMIT $3

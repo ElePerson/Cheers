@@ -904,25 +904,28 @@ pub async fn add_channel_member(
             ));
         }
 
-        // Eagerly materialize the bot's PRIMARY session with its pinned (validated)
-        // workspace. Idempotent with the lazy first-message path; cwd is immutable.
-        if let Some((cwd, additional_dirs)) = primary_workspace {
-            let bot_uuid = Uuid::parse_str(&body.member_id)
-                .map_err(|_| AppError::BadRequest("member_id must be a bot uuid".into()))?;
-            let provider_account_id =
-                crate::domain::messages::resolve_provider_account_id_for_bot(&state.db, bot_uuid)
-                    .await
-                    .unwrap_or_else(|_| body.member_id.clone());
-            crate::domain::sessions::ensure_primary_session_workspace(
-                &state.db,
-                bot_uuid,
-                &provider_account_id,
-                &channel_id,
-                cwd.as_deref(),
-                &additional_dirs,
-            )
-            .await?;
-        }
+        // Eagerly materialize the bot's PRIMARY session with its pinned
+        // (validated) workspace. This must also run when no workspace was
+        // supplied: task-claim approval and ordinary channel dispatch both
+        // require a primary binding, even when the connector uses its default
+        // working directory. The operation is idempotent and preserves an
+        // existing session's immutable workspace metadata.
+        let bot_uuid = Uuid::parse_str(&body.member_id)
+            .map_err(|_| AppError::BadRequest("member_id must be a bot uuid".into()))?;
+        let provider_account_id =
+            crate::domain::messages::resolve_provider_account_id_for_bot(&state.db, bot_uuid)
+                .await
+                .unwrap_or_else(|_| body.member_id.clone());
+        let (cwd, additional_dirs) = primary_workspace.unwrap_or((None, Vec::new()));
+        crate::domain::sessions::ensure_primary_session_workspace(
+            &state.db,
+            bot_uuid,
+            &provider_account_id,
+            &channel_id,
+            cwd.as_deref(),
+            &additional_dirs,
+        )
+        .await?;
 
         // 成员集变了（尤其是拉入一个在线 bot）→ 重发全量 presence。
         if let Ok(cid) = Uuid::parse_str(&channel_id) {

@@ -71,57 +71,57 @@ export function TaskClaimsPanel({
   };
 
   return (
-    <div className="mx-4 mb-2 max-h-56 space-y-2 overflow-y-auto rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-indigo-300">
+    <div className="mx-4 mb-2 max-h-72 space-y-2 overflow-y-auto">
+      <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-300/80">
         Task claim requests · {claims.length}
       </p>
       {claims.map((c) => (
         <div
           key={c.claim_id}
-          className="rounded-lg border border-zinc-800 bg-zinc-900/90 p-3"
+          className="flex max-w-[92%] gap-2 rounded-2xl rounded-tl-md border border-indigo-500/30 bg-indigo-500/10 px-3 py-2.5 shadow-sm"
         >
-          <div className="flex items-start gap-2">
-            <Bot className="mt-0.5 h-4 w-4 text-indigo-400" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-zinc-100">
-                {c.bot_name}: {c.summary}
-              </p>
-              <p className="mt-1 text-xs text-zinc-400">{c.proposed_action}</p>
-              <p className="mt-1 text-[11px] text-zinc-500">
-                {Math.round(c.confidence * 100)}% confidence · {c.impact} impact
-              </p>
-            </div>
+          <Bot className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-medium text-indigo-300">{c.bot_name} wants to claim a task</p>
+            <p className="mt-0.5 text-sm font-medium text-zinc-100">{c.summary}</p>
+            <p className="mt-1 text-xs leading-relaxed text-zinc-400">{c.proposed_action}</p>
+            <p className="mt-1 text-[11px] text-zinc-500">
+              {Math.round(c.confidence * 100)}% confidence · {c.impact} impact
+            </p>
+            {canManage && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 px-2 text-xs"
+                  disabled={busy === c.claim_id}
+                  onClick={() => void cancel(c)}
+                >
+                  <X className="h-3 w-3" />
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 px-2 text-xs"
+                  disabled={busy === c.claim_id}
+                  onClick={() => void resolve(c, "reject")}
+                >
+                  <X className="h-3 w-3" />
+                  Reject
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  loading={busy === c.claim_id}
+                  onClick={() => void resolve(c, "accept")}
+                >
+                  <Check className="h-3 w-3" />
+                  Approve &amp; run
+                </Button>
+              </div>
+            )}
           </div>
-          {canManage && (
-            <div className="mt-2 flex justify-end gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={busy === c.claim_id}
-                onClick={() => void cancel(c)}
-              >
-                <X className="h-3.5 w-3.5" />
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={busy === c.claim_id}
-                onClick={() => void resolve(c, "reject")}
-              >
-                <X className="h-3.5 w-3.5" />
-                Reject
-              </Button>
-              <Button
-                size="sm"
-                loading={busy === c.claim_id}
-                onClick={() => void resolve(c, "accept")}
-              >
-                <Check className="h-3.5 w-3.5" />
-                Approve &amp; run
-              </Button>
-            </div>
-          )}
         </div>
       ))}
     </div>

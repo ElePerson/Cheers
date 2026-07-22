@@ -9,6 +9,7 @@ import { FileGrid } from "./fileView";
 import { MessageContextChips } from "./context/ContextPickBar";
 import { PathOpenContext, ResolveRefContext } from "./workspaceLink";
 import { PermissionCard } from "./PermissionCard";
+import { TaskClaimConfirmationCard } from "./TaskClaimConfirmationCard";
 import { BotTracePanel } from "./BotTracePanel";
 import { stopTurn } from "./stopTurn";
 import type { Message } from "@/types";
@@ -322,6 +323,13 @@ export const MessageItem = memo(function MessageItem({
         <div className="flex-1 min-w-0">
           <ReplyQuote message={message} repliedTo={repliedTo} nameOf={nameOf} />
           <MessageBody message={message} channelId={channelId} isBot={isBot} />
+          {message.msg_type === "task_claim_confirmation" && (
+            <TaskClaimConfirmationCard
+              message={message}
+              channelId={channelId}
+              currentUserId={currentUserId}
+            />
+          )}
           {message._status && (
             <SendStatus message={message} onRetry={actions?.onRetry} />
           )}
@@ -398,6 +406,13 @@ export const MessageItem = memo(function MessageItem({
         {/* Body */}
         <ReplyQuote message={message} repliedTo={repliedTo} nameOf={nameOf} />
         <MessageBody message={message} channelId={channelId} isBot={isBot} />
+        {message.msg_type === "task_claim_confirmation" && (
+          <TaskClaimConfirmationCard
+            message={message}
+            channelId={channelId}
+            currentUserId={currentUserId}
+          />
+        )}
         {message._status && (
           <SendStatus message={message} onRetry={actions?.onRetry} />
         )}

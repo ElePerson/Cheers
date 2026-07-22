@@ -11,8 +11,8 @@
     {
       "name": "frontend-cluster",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd frontend && VITE_API_PROXY_TARGET=http://localhost:30080 VITE_WS_PROXY_TARGET=ws://localhost:30080 npm run dev -- --port 5175 --strictPort"],
-      "port": 5175,
+      "runtimeArgs": ["-c", "cd frontend && VITE_API_PROXY_TARGET=http://localhost:30080 VITE_WS_PROXY_TARGET=ws://localhost:30080 npm run dev -- --port 5174 --strictPort"],
+      "port": 5174,
       "autoPort": false
     },
     {

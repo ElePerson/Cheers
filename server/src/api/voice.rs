@@ -318,14 +318,18 @@ pub async fn join(
     // the disclosure. We record `consent_version` at first join so later
     // policy-version bumps can force re-consent.
     let config = VoiceConfig::load(&state.db, &channel_id).await?;
-    let existing_consent: Option<String> = sqlx::query_scalar(
+    // A participant row exists after a listen-only join, but its consent is
+    // deliberately NULL until the disclosure is accepted. Decode both "no
+    // participant row" and "participant row with NULL consent" safely.
+    let existing_consent: Option<String> = sqlx::query_scalar::<_, Option<String>>(
         "SELECT consent_version FROM voice_participant_sessions
                             WHERE user_id = $1 AND voice_session_id = $2",
     )
     .bind(&claims.sub)
     .bind(&voice_session_id)
     .fetch_optional(&mut *tx)
-    .await?;
+    .await?
+    .flatten();
     let has_consent = existing_consent.as_deref() == Some(CONSENT_VERSION);
     sqlx::query(
         "INSERT INTO voice_participant_sessions
@@ -463,9 +467,13 @@ pub async fn start_transcription(
             "channel owner or admin is required to start transcription".into(),
         ));
     }
-    let (url, api_key, api_secret) = state
+    let (_url, api_key, api_secret) = state
         .config
         .livekit()
+        .ok_or_else(|| AppError::ServiceUnavailable("real-time voice is not configured".into()))?;
+    let api_url = state
+        .config
+        .livekit_api_url()
         .ok_or_else(|| AppError::ServiceUnavailable("real-time voice is not configured".into()))?;
 
     let mut tx = state.db.begin().await?;
@@ -512,7 +520,7 @@ pub async fn start_transcription(
         "started_at": started_at.to_rfc3339(),
     })
     .to_string();
-    let api = LiveKitApi::with_api_key(&livekit_api_host(url)?, api_key, api_secret);
+    let api = LiveKitApi::with_api_key(&livekit_api_host(api_url)?, api_key, api_secret);
     let dispatch = api
         .agent_dispatch()
         .create_dispatch(CreateAgentDispatchRequest {
@@ -574,9 +582,13 @@ pub async fn stop_transcription(
             "channel owner or admin is required to stop transcription".into(),
         ));
     }
-    let (url, api_key, api_secret) = state
+    let (_url, api_key, api_secret) = state
         .config
         .livekit()
+        .ok_or_else(|| AppError::ServiceUnavailable("real-time voice is not configured".into()))?;
+    let api_url = state
+        .config
+        .livekit_api_url()
         .ok_or_else(|| AppError::ServiceUnavailable("real-time voice is not configured".into()))?;
     let row = sqlx::query(
         "SELECT voice_session_id, provider_room_id, transcriber_dispatch_id
@@ -597,7 +609,7 @@ pub async fn stop_transcription(
                 "transcription is still starting; try again shortly".into(),
             ));
         }
-        let api = LiveKitApi::with_api_key(&livekit_api_host(url)?, api_key, api_secret);
+        let api = LiveKitApi::with_api_key(&livekit_api_host(api_url)?, api_key, api_secret);
         api.agent_dispatch()
             .delete_dispatch(dispatch_id, provider_room_id)
             .await
