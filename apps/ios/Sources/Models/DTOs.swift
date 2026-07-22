@@ -142,6 +142,9 @@ struct ChannelDto: Decodable, Identifiable, Hashable {
     let name: String
     /// serde: struct field `channel_type` is renamed to "type".
     let channelType: String
+    /// `text` (default) or `voice`. Voice channels retain the normal message
+    /// timeline and composer, with a LiveKit meeting strip above them.
+    let kind: String?
     let purpose: String?
     let autoAssist: Bool?
     let allowMemberInvites: Bool?
@@ -152,6 +155,7 @@ struct ChannelDto: Decodable, Identifiable, Hashable {
 
     var id: String { channelId }
     var isDM: Bool { channelType == "dm" }
+    var isVoice: Bool { kind == "voice" }
     var displayName: String {
         if isDM, let peerName, !peerName.isEmpty { return peerName }
         return name
@@ -162,12 +166,92 @@ struct ChannelDto: Decodable, Identifiable, Hashable {
         case workspaceId = "workspace_id"
         case name
         case channelType = "type"
+        case kind
         case purpose
         case autoAssist = "auto_assist"
         case allowMemberInvites = "allow_member_invites"
         case allowBotAdds = "allow_bot_adds"
         case unreadCount = "unread_count"
         case peerName = "peer_name"
+    }
+}
+
+// MARK: - Voice (server/src/api/voice.rs)
+
+struct VoiceJoinResponse: Decodable {
+    let url: String
+    let token: String
+    let roomName: String
+    let voiceSessionId: String
+    let participantIdentity: String
+    let canPublish: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case url, token
+        case roomName = "room_name"
+        case voiceSessionId = "voice_session_id"
+        case participantIdentity = "participant_identity"
+        case canPublish = "can_publish"
+    }
+}
+
+struct VoiceSessionDto: Decodable {
+    let voiceSessionId: String
+    let status: String
+    let transcriptionStatus: String
+    enum CodingKeys: String, CodingKey {
+        case voiceSessionId = "voice_session_id"
+        case status
+        case transcriptionStatus = "transcription_status"
+    }
+}
+
+struct VoiceStateResponse: Decodable {
+    let enabled: Bool
+    let channelKind: String
+    let session: VoiceSessionDto?
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case channelKind = "channel_kind"
+        case session
+    }
+}
+
+struct VoiceConsentResponse: Decodable {
+    let consented: Bool
+    let publishToken: String?
+    let canPublish: Bool
+    enum CodingKeys: String, CodingKey {
+        case consented
+        case publishToken = "publish_token"
+        case canPublish = "can_publish"
+    }
+}
+
+struct VoiceTranscriptionControlResponse: Decodable {
+    let voiceSessionId: String
+    let transcriptionStatus: String
+    enum CodingKeys: String, CodingKey {
+        case voiceSessionId = "voice_session_id"
+        case transcriptionStatus = "transcription_status"
+    }
+}
+
+struct VoiceTranscriptSegment: Decodable, Identifiable, Hashable {
+    let segmentId: String
+    let channelId: String
+    let channelSeq: Int64
+    let userId: String
+    let text: String
+    let finalizedAt: String
+    var id: String { segmentId }
+    enum CodingKeys: String, CodingKey {
+        case segmentId = "segment_id"
+        case channelId = "channel_id"
+        case channelSeq = "channel_seq"
+        case userId = "user_id"
+        case text
+        case finalizedAt = "finalized_at"
     }
 }
 

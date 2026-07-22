@@ -43,6 +43,7 @@ struct ChatView: View {
     @State private var previewFile: MessageFileRef?
     @State private var showSessionSheet = false
     @State private var showModelSheet = false
+    @State private var voice: VoiceRoomModel
     /// Whether the message list is parked at the bottom (drives auto-follow).
     @State private var atBottom = true
     private let listModel: ConversationListModel?
@@ -51,12 +52,19 @@ struct ChatView: View {
     /// switches — creating a fresh ChatModel here would cold-reload every entry.
     init(model: ChatModel, listModel: ConversationListModel? = nil) {
         _model = State(initialValue: model)
+        _voice = State(initialValue: VoiceRoomModel(channelId: model.channel.channelId))
         self.listModel = listModel
     }
 
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
+            if model.channel.isVoice {
+                VoiceMeetingStrip(
+                    voice: voice,
+                    canManageTranscription: app.session?.role == "admin" || app.session?.role == "system_admin"
+                )
+            }
             messageScroll
             if let reply = model.replyTo {
                 replyBar(reply)
@@ -97,6 +105,10 @@ struct ChatView: View {
         }
         .task {
             model.attach(app)
+            if model.channel.isVoice {
+                voice.attach(app)
+                await voice.refresh()
+            }
             listModel?.openChannelId = model.channel.channelId
             listModel?.markRead(channelId: model.channel.channelId)
             await model.loadInitial()
@@ -107,6 +119,7 @@ struct ChatView: View {
             }
             listModel?.markRead(channelId: model.channel.channelId)
             model.detach()
+            voice.detach()
         }
         .sheet(item: $panel) { panel in
             Group {
@@ -432,19 +445,25 @@ struct ChatView: View {
                 SystemMessageView(message: message)
             }
         case .bubble(let message, let isOwn, let showName, let showAvatar, let isLast):
-            MessageBubbleView(
-                message: message,
-                isOwn: isOwn,
-                showSenderName: showName,
-                showAvatar: showAvatar,
-                isLastInGroup: isLast,
-                repliedTo: message.replyToMsgId.flatMap { id in
-                    model.messages.first { $0.msgId == id }
-                },
-                onReply: { model.replyTo = message },
-                onForward: { forwardMessage = message },
-                onTapFile: { file in previewFile = file }
-            )
+            VStack(alignment: isOwn ? .trailing : .leading, spacing: 0) {
+                MessageBubbleView(
+                    message: message,
+                    isOwn: isOwn,
+                    showSenderName: showName,
+                    showAvatar: showAvatar,
+                    isLastInGroup: isLast,
+                    repliedTo: message.replyToMsgId.flatMap { id in
+                        model.messages.first { $0.msgId == id }
+                    },
+                    onReply: { model.replyTo = message },
+                    onForward: { forwardMessage = message },
+                    onTapFile: { file in previewFile = file }
+                )
+                if message.msgType == "task_claim_confirmation" {
+                    TaskClaimConfirmationFooter(message: message, channelId: model.channel.channelId)
+                        .padding(.leading, 58).padding(.top, 2)
+                }
+            }
         }
     }
 }
