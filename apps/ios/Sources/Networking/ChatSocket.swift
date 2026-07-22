@@ -34,6 +34,10 @@ struct PresencePayload: Decodable {
     }
 }
 
+private struct VoiceTranscriptPayload: Decodable {
+    let data: VoiceTranscriptSegment
+}
+
 /// Events surfaced to the app layer, always on the main actor.
 enum SocketEvent {
     case connected
@@ -44,6 +48,7 @@ enum SocketEvent {
     case messageDone(channelId: String, MessageDto)
     case messageDeleted(channelId: String, msgId: String)
     case presence(channelId: String, PresencePayload)
+    case voiceTranscript(channelId: String, VoiceTranscriptSegment)
     /// A data-free "this board changed" tick; consumers re-pull through their own
     /// authz'd resource read. `board` ∈ plan/cost/commands/files/workspace…
     case boardSignal(channelId: String, board: String)
@@ -385,6 +390,11 @@ final class ChatSocket: NSObject {
             if let channelId = head.channelId,
                let payload = try? JSONDecoder().decode(DataEnvelope<PresencePayload>.self, from: data) {
                 onEvent?(.presence(channelId: channelId, payload.data))
+            }
+        case "voice_transcript_final":
+            if let channelId = head.channelId,
+               let payload = try? JSONDecoder().decode(VoiceTranscriptPayload.self, from: data) {
+                onEvent?(.voiceTranscript(channelId: channelId, payload.data))
             }
         case "resource_res":
             if let frame = try? JSONDecoder().decode(ResourceResFrame.self, from: data),

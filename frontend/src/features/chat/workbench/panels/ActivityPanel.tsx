@@ -12,6 +12,7 @@
 // (messages ∪ operations) + REST listChannelMembers. All content is inert text.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  AlertCircle,
   Activity,
   ArrowRight,
   ArrowUpRight,
@@ -172,6 +173,7 @@ interface MutedItem {
 }
 type DetailRow =
   | { type: "event"; n: NormEvent }
+  | { type: "claim"; n: NormEvent }
   | { type: "muted"; items: MutedItem[]; seq: number };
 
 /** Fold consecutive non-message events (writes/ops + approvals) into ONE muted
@@ -181,6 +183,13 @@ type DetailRow =
 function detailRows(ep: Episode): DetailRow[] {
   const rows: DetailRow[] = [];
   for (const n of ep.events) {
+    // Claims are operational outcomes, but unlike routine file writes they need
+    // their own readable row — especially failures that otherwise have no chat
+    // message and would be hidden inside the generic muted summary.
+    if (n.opType?.startsWith("task_claim_")) {
+      rows.push({ type: "claim", n });
+      continue;
+    }
     if (n.kind === "write" || n.kind === "op" || n.kind === "approval") {
       const kind: MutedItem["kind"] = n.kind === "approval" ? "approval" : "write";
       const last = rows[rows.length - 1];
@@ -294,6 +303,26 @@ function EpisodeDetail({
       {summary && <div className="pl-[26px] pb-1 text-[10px] text-zinc-400">{summary}</div>}
       <div className="ml-[7px] border-l-2 border-zinc-800 pl-3">
         {rows.map((row, i) => {
+          if (row.type === "claim") {
+            const failed = row.n.opType === "task_claim_failed";
+            return (
+              <div
+                key={`claim-${row.n.seq}-${i}`}
+                className={cn(
+                  "flex items-start gap-1.5 rounded px-1 py-1 text-[11px]",
+                  failed ? "bg-red-950/30 text-red-200" : "text-zinc-400"
+                )}
+              >
+                {failed ? (
+                  <AlertCircle className="mt-0.5 h-3 w-3 flex-shrink-0 text-red-400" />
+                ) : (
+                  <Activity className="mt-0.5 h-3 w-3 flex-shrink-0 text-indigo-300" />
+                )}
+                <span className="min-w-0 flex-1">{row.n.excerpt}</span>
+                <span className="flex-shrink-0 text-[10px] text-zinc-500">{fmtTime(row.n.ts)}</span>
+              </div>
+            );
+          }
           if (row.type === "muted") {
             const Icon = row.items.some((it) => it.kind === "write") ? Pencil : ShieldCheck;
             return (

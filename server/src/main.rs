@@ -169,6 +169,32 @@ async fn main() -> anyhow::Result<()> {
         config.conversion_poll_interval_secs,
     );
 
+    // Opt-in proactive task claiming. Policies default to `off`; PostgreSQL
+    // persists rate limits and cursors so restarts never replay claimed ranges.
+    // Feature-gated: TASK_CLAIMS_ENABLED=true to activate the scheduler. The
+    // REST/resource endpoints stay mounted so clients can persist policy, but
+    // without the scheduler no evaluations run behind the flag.
+    if state.config.task_claims_enabled {
+        gateway::task_claim_scheduler::spawn(state.clone());
+    } else {
+        tracing::info!("task-claim scheduler disabled (TASK_CLAIMS_ENABLED != true)");
+    }
+
+    // Claim-expiry sweeper: pending/executing claims with `expires_at <= NOW()`
+    // transition to `failed` so a stale claim never blocks a channel forever.
+    let sweep_state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            match server::api::task_claims::sweep_expired_claims(&sweep_state.db).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(expired = n, "task-claim expiry sweep"),
+                Err(e) => tracing::warn!(err = %e, "task-claim expiry sweep failed"),
+            }
+        }
+    });
+
     // Scheduled bot self-status refresh (audit item 6). The connector was
     // historically meant to run this loop but ships no implementation, so the
     // gateway owns it. Best-effort; never panics (per-tick/per-bot errors logged).

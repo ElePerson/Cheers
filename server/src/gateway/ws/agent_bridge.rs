@@ -786,6 +786,59 @@ async fn handle_data_frame(frame: &Value, state: &AppState, bot: &BotInfo, socke
             }
         }
 
+        "claim_evaluation_result" => {
+            let evaluation_id = frame
+                .get("evaluation_id")
+                .and_then(Value::as_str)
+                .and_then(|v| v.parse::<Uuid>().ok());
+            let Some(evaluation_id) = evaluation_id else {
+                let _ = ws_send(
+                    socket,
+                    &bridge_error("INVALID_FRAME", "missing evaluation_id"),
+                )
+                .await;
+                return;
+            };
+            match crate::gateway::task_claim_scheduler::complete(
+                &state.db,
+                state,
+                bot.bot_id,
+                evaluation_id,
+                frame.get("content").and_then(Value::as_str),
+                frame.get("error").and_then(Value::as_str),
+            )
+            .await
+            {
+                Ok(result) => {
+                    let _ = ws_send(socket, &json!({"type":"task_claim_ack","v":BRIDGE_PROTOCOL_VERSION,"evaluation_id":evaluation_id,"ok":true,"data":result})).await;
+                }
+                Err(error) => {
+                    // A claim decision may have reached the model successfully but
+                    // still fail while writing the durable claim/confirmation.
+                    // Record that boundary explicitly: leaving it as `dispatched`
+                    // makes the UI look as if monitoring never ran and blocks
+                    // immediate retries until the lease expires.
+                    tracing::error!(
+                        %evaluation_id,
+                        bot_id = %bot.bot_id,
+                        error = %error,
+                        "task-claim completion failed"
+                    );
+                    if let Err(update_error) = sqlx::query(
+                        "UPDATE task_claim_evaluations SET status='failed', error=$2, completed_at=NOW() WHERE evaluation_id=$1 AND status='dispatched'",
+                    )
+                    .bind(evaluation_id.to_string())
+                    .bind(format!("claim completion failed: {error}"))
+                    .execute(&state.db)
+                    .await
+                    {
+                        tracing::error!(%evaluation_id, error = %update_error, "could not record task-claim completion failure");
+                    }
+                    let _ = ws_send(socket, &json!({"type":"task_claim_ack","v":BRIDGE_PROTOCOL_VERSION,"evaluation_id":evaluation_id,"ok":false,"error":error.to_string()})).await;
+                }
+            }
+        }
+
         // ── resource 访问 ──────────────────────────────────────────────────
         "resource_req" => {
             // `workspace.read` is a REMOTE-workspace pull (unified context model, P3):
@@ -1291,6 +1344,19 @@ async fn handle_terminal_frame(
     .await
     {
         Ok(()) => {
+            if let Some(mid) = msg_id {
+                if let Ok(Some(row)) = sqlx::query(
+                    "UPDATE task_claim_requests SET status='completed',updated_at=NOW() WHERE execution_msg_id=$1 AND status='executing' RETURNING claim_id,channel_id",
+                )
+                .bind(mid.to_string())
+                .fetch_optional(&state.db)
+                .await
+                {
+                    if let Ok(channel_id) = row.try_get::<String, _>("channel_id").unwrap_or_default().parse::<Uuid>() {
+                        state.fanout.broadcast_channel(channel_id, WireFrame::channel(channel_id, "task_claim_updated", json!({"claim_id":row.try_get::<String,_>("claim_id").unwrap_or_default(),"status":"completed","execution_msg_id":mid}))).await;
+                    }
+                }
+            }
             // A finalized turn may have @mentioned humans (mention_ids on the
             // done frame) — same out-of-app nudge as the send/post_message paths.
             if let Some(mid) = msg_id {

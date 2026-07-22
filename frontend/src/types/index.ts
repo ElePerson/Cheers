@@ -25,6 +25,8 @@ export interface Channel {
   channel_id: string;
   name: string;
   type: string;
+  /** Interaction kind, independent from public/private/DM access semantics. */
+  kind?: "text" | "voice";
   workspace_id?: string;
   purpose?: string | null;
   auto_assist?: boolean;
@@ -39,6 +41,55 @@ export interface Channel {
   /** False for public channels the caller sees as a workspace member but hasn't
    * joined yet (Slack model) — render a join prompt instead of the composer. */
   is_member?: boolean;
+}
+
+export interface VoicePresenceParticipant {
+  user_id: string;
+  display_name: string;
+  avatar_url?: string | null;
+  mic_published: boolean;
+}
+
+export interface VoicePresenceSnapshot {
+  channel_id: string;
+  voice_session_id?: string | null;
+  status?: string | null;
+  participants: VoicePresenceParticipant[];
+}
+
+/// Durable, persisted final transcript segment (gateway → PG → WS fanout).
+export interface VoiceTranscriptSegment {
+  segment_id: string;
+  voice_session_id: string;
+  channel_id: string;
+  participant_session_id: string;
+  user_id: string;
+  provider_segment_id: string;
+  provider_event_id: string;
+  track_id: string;
+  channel_seq: number;
+  text: string;
+  started_at_ms: number;
+  ended_at_ms: number;
+  language?: string | null;
+  confidence?: number | null;
+  supersedes_segment_id?: string | null;
+  finalized_at: string;
+  created_at: string;
+}
+
+/// Ephemeral UI-only interim caption. Never persisted, never consumes
+/// channel_seq, never triggers claims. Keyed by segment_id + revision; revisions
+/// replace in place for the same spoken turn.
+export interface VoiceInterimSegment {
+  segment_id: string;
+  participant_identity: string;
+  track_id: string;
+  text: string;
+  revision: number;
+  started_at_ms: number;
+  ended_at_ms: number;
+  language?: string | null;
 }
 
 export interface DM {
@@ -154,7 +205,12 @@ export interface Message {
   context_bundle?: {
     origin?: string;
     from?: { type?: string; id?: string } | null;
-    items?: Array<{ verb: string; label: string; kind: string; params?: unknown }>;
+    items?: Array<{
+      verb: string;
+      label: string;
+      kind: string;
+      params?: unknown;
+    }>;
   } | null;
   _streaming?: boolean;
   /** Latest agent progress (trace) title shown while streaming. */
@@ -229,6 +285,11 @@ export interface BotItem {
   status_auto_update?: boolean;
   status_update_prompt?: string | null;
   status_update_interval_minutes?: number | null;
+  external_processor?: boolean;
+  processor_name?: string | null;
+  processor_privacy_url?: string | null;
+  processor_data_use?: string | null;
+  processor_policy_version?: string;
 }
 
 export interface WsEvent {

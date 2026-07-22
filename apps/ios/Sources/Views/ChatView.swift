@@ -43,6 +43,9 @@ struct ChatView: View {
     @State private var previewFile: MessageFileRef?
     @State private var showSessionSheet = false
     @State private var showModelSheet = false
+    @State private var voice: VoiceRoomModel
+    @State private var reportTarget: MessageDto?
+    @State private var blockTarget: MessageDto?
     /// Whether the message list is parked at the bottom (drives auto-follow).
     @State private var atBottom = true
     private let listModel: ConversationListModel?
@@ -51,12 +54,19 @@ struct ChatView: View {
     /// switches — creating a fresh ChatModel here would cold-reload every entry.
     init(model: ChatModel, listModel: ConversationListModel? = nil) {
         _model = State(initialValue: model)
+        _voice = State(initialValue: VoiceRoomModel(channelId: model.channel.channelId))
         self.listModel = listModel
     }
 
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
+            if model.channel.isVoice {
+                VoiceMeetingStrip(
+                    voice: voice,
+                    canManageTranscription: app.session?.role == "admin" || app.session?.role == "system_admin"
+                )
+            }
             messageScroll
             if let reply = model.replyTo {
                 replyBar(reply)
@@ -97,6 +107,10 @@ struct ChatView: View {
         }
         .task {
             model.attach(app)
+            if model.channel.isVoice {
+                voice.attach(app)
+                await voice.refresh()
+            }
             listModel?.openChannelId = model.channel.channelId
             listModel?.markRead(channelId: model.channel.channelId)
             await model.loadInitial()
@@ -107,6 +121,7 @@ struct ChatView: View {
             }
             listModel?.markRead(channelId: model.channel.channelId)
             model.detach()
+            voice.detach()
         }
         .sheet(item: $panel) { panel in
             Group {
@@ -140,6 +155,34 @@ struct ChatView: View {
             ModelSettingsSheet(channelId: model.channel.channelId, bots: model.botMembers)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: Binding(
+            get: { !model.pendingAIConsent.isEmpty },
+            set: { if !$0 { model.pendingAIConsent = [] } }
+        )) {
+            AIConsentSheet(
+                disclosures: model.pendingAIConsent,
+                onCancel: { model.pendingAIConsent = [] },
+                onAgree: { Task { await model.grantPendingAIConsentAndRetry() } }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .confirmationDialog("Why are you reporting this message?", isPresented: Binding(
+            get: { reportTarget != nil }, set: { if !$0 { reportTarget = nil } }
+        ), titleVisibility: .visible) {
+            ForEach(["harassment", "spam", "illegal", "privacy", "other"], id: \.self) { reason in
+                Button(reason.capitalized) { submitReport(reason: reason) }
+            }
+            Button("Cancel", role: .cancel) { reportTarget = nil }
+        }
+        .confirmationDialog("Block this user?", isPresented: Binding(
+            get: { blockTarget != nil }, set: { if !$0 { blockTarget = nil } }
+        ), titleVisibility: .visible) {
+            Button("Block", role: .destructive) { blockUser() }
+            Button("Cancel", role: .cancel) { blockTarget = nil }
+        } message: {
+            Text("Blocking removes any friendship and prevents direct messages in either direction.")
         }
     }
 
@@ -432,19 +475,81 @@ struct ChatView: View {
                 SystemMessageView(message: message)
             }
         case .bubble(let message, let isOwn, let showName, let showAvatar, let isLast):
-            MessageBubbleView(
-                message: message,
-                isOwn: isOwn,
-                showSenderName: showName,
-                showAvatar: showAvatar,
-                isLastInGroup: isLast,
-                repliedTo: message.replyToMsgId.flatMap { id in
-                    model.messages.first { $0.msgId == id }
-                },
-                onReply: { model.replyTo = message },
-                onForward: { forwardMessage = message },
-                onTapFile: { file in previewFile = file }
-            )
+            VStack(alignment: isOwn ? .trailing : .leading, spacing: 0) {
+                MessageBubbleView(
+                    message: message,
+                    isOwn: isOwn,
+                    showSenderName: showName,
+                    showAvatar: showAvatar,
+                    isLastInGroup: isLast,
+                    repliedTo: message.replyToMsgId.flatMap { id in
+                        model.messages.first { $0.msgId == id }
+                    },
+                    onReply: { model.replyTo = message },
+                    onForward: { forwardMessage = message },
+                    onTapFile: { file in previewFile = file },
+                    onReport: { reportTarget = message },
+                    onBlock: { blockTarget = message }
+                )
+                if message.msgType == "task_claim_confirmation" {
+                    TaskClaimConfirmationFooter(message: message, channelId: model.channel.channelId)
+                        .padding(.leading, 58).padding(.top, 2)
+                }
+            }
+        }
+    }
+
+    private func submitReport(reason: String) {
+        guard let target = reportTarget, let api = app.api else { return }
+        reportTarget = nil
+        Task {
+            do {
+                try await api.report(targetType: "message", targetId: target.msgId, channelId: model.channel.channelId, reason: reason, details: nil)
+                model.errorMessage = "Report submitted. Thank you for helping keep Cheers safe."
+            } catch { model.errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription }
+        }
+    }
+
+    private func blockUser() {
+        guard let target = blockTarget, let userId = target.senderId, let api = app.api else { return }
+        blockTarget = nil
+        Task {
+            do {
+                try await api.blockUser(userId)
+                model.errorMessage = "User blocked."
+            } catch { model.errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription }
+        }
+    }
+}
+
+private struct AIConsentSheet: View {
+    let disclosures: [AIDataDisclosure]
+    let onCancel: () -> Void
+    let onAgree: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Your message is about to be sent to the external AI services below. This permission applies to this channel and can be revoked in Settings.")
+                        .foregroundStyle(Theme.textBody)
+                }
+                ForEach(disclosures) { item in
+                    Section(item.botName) {
+                        LabeledContent("Provider", value: item.providerName ?? "External service")
+                        if let use = item.dataUse { Text(use).foregroundStyle(Theme.textSecondary) }
+                        if let raw = item.privacyURL, let url = URL(string: raw) {
+                            Link("Provider privacy policy", destination: url)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("External AI Data Sharing")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Not now", action: onCancel) }
+                ToolbarItem(placement: .confirmationAction) { Button("Agree & Send", action: onAgree) }
+            }
         }
     }
 }

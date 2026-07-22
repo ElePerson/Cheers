@@ -98,6 +98,7 @@ struct LoginResponse: Codable {
     let accessToken: String
     let tokenType: String
     let userId: String
+    let username: String
     let displayName: String?
     let role: String
 
@@ -105,13 +106,186 @@ struct LoginResponse: Codable {
         case accessToken = "access_token"
         case tokenType = "token_type"
         case userId = "user_id"
+        case username
         case displayName = "display_name"
         case role
     }
 }
 
+struct AuthCapabilities: Decodable {
+    let passwordLogin: Bool
+    let signInWithApple: Bool
+    let appleClientId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case passwordLogin = "password_login"
+        case signInWithApple = "sign_in_with_apple"
+        case appleClientId = "apple_client_id"
+    }
+}
+
+struct AppleIdentityStatus: Decodable {
+    let appleLinked: Bool
+    let hasPassword: Bool
+    enum CodingKeys: String, CodingKey {
+        case appleLinked = "apple_linked"
+        case hasPassword = "has_password"
+    }
+}
+
+struct AppleChallenge: Decodable {
+    let challengeId: String
+    let nonce: String
+    let expiresAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case challengeId = "challenge_id"
+        case nonce
+        case expiresAt = "expires_at"
+    }
+}
+
+struct AppleAuthorizationPayload: Encodable {
+    let challengeId: String
+    let identityToken: String
+    let authorizationCode: String
+    let givenName: String?
+    let familyName: String?
+    let inviteToken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case challengeId = "challenge_id"
+        case identityToken = "identity_token"
+        case authorizationCode = "authorization_code"
+        case givenName = "given_name"
+        case familyName = "family_name"
+        case inviteToken = "invite_token"
+    }
+}
+
+struct AIDataDisclosure: Codable, Identifiable {
+    let botId: String
+    let botName: String
+    let providerName: String?
+    let privacyURL: String?
+    let dataUse: String?
+    let policyVersion: String
+    let consented: Bool?
+    var id: String { botId + ":" + policyVersion }
+
+    enum CodingKeys: String, CodingKey {
+        case botId = "bot_id"
+        case botName = "bot_name"
+        case providerName = "provider_name"
+        case privacyURL = "privacy_url"
+        case dataUse = "data_use"
+        case policyVersion = "policy_version"
+        case consented
+    }
+}
+
+struct AIConsentRequiredResponse: Decodable {
+    let code: String
+    let disclosures: [AIDataDisclosure]
+}
+
+struct StoredAIConsent: Decodable, Identifiable {
+    let channelId: String
+    let channelName: String
+    let botId: String
+    let botName: String
+    let providerName: String?
+    let privacyURL: String?
+    let dataUse: String?
+    let policyVersion: String
+    var id: String { channelId + ":" + botId }
+
+    enum CodingKeys: String, CodingKey {
+        case channelId = "channel_id"
+        case channelName = "channel_name"
+        case botId = "bot_id"
+        case botName = "bot_name"
+        case providerName = "provider_name"
+        case privacyURL = "privacy_url"
+        case dataUse = "data_use"
+        case policyVersion = "policy_version"
+    }
+}
+
+struct BlockedUserDto: Decodable, Identifiable {
+    let userId: String
+    let username: String
+    let displayName: String?
+    let avatarURL: String?
+    var id: String { userId }
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case displayName = "display_name"
+        case avatarURL = "avatar_url"
+    }
+}
+
 struct OkResponse: Decodable {
-    let ok: Bool
+    let ok: Bool?
+}
+
+struct EmptyRequest: Encodable {}
+
+struct DeleteAccountRequest: Encodable {
+    let confirmation: String
+    let currentPassword: String?
+    let apple: AppleAuthorizationPayload?
+
+    enum CodingKeys: String, CodingKey {
+        case confirmation
+        case currentPassword = "current_password"
+        case apple
+    }
+}
+
+struct SetPasswordRequest: Encodable {
+    let newPassword: String
+    let apple: AppleAuthorizationPayload
+
+    enum CodingKeys: String, CodingKey {
+        case newPassword = "new_password"
+        case apple
+    }
+}
+
+struct CreateReportRequest: Encodable {
+    let targetType: String
+    let targetId: String
+    let channelId: String?
+    let reason: String
+    let details: String?
+
+    enum CodingKeys: String, CodingKey {
+        case targetType = "target_type"
+        case targetId = "target_id"
+        case channelId = "channel_id"
+        case reason, details
+    }
+}
+
+struct ChangePasswordRequest: Encodable {
+    let currentPassword: String
+    let newPassword: String
+
+    enum CodingKeys: String, CodingKey {
+        case currentPassword = "current_password"
+        case newPassword = "new_password"
+    }
+}
+
+struct ChangePasswordResponse: Decodable {
+    let accessToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+    }
 }
 
 // MARK: - Workspaces (server/src/api/workspaces.rs)
@@ -142,6 +316,9 @@ struct ChannelDto: Decodable, Identifiable, Hashable {
     let name: String
     /// serde: struct field `channel_type` is renamed to "type".
     let channelType: String
+    /// `text` (default) or `voice`. Voice channels retain the normal message
+    /// timeline and composer, with a LiveKit meeting strip above them.
+    let kind: String?
     let purpose: String?
     let autoAssist: Bool?
     let allowMemberInvites: Bool?
@@ -152,6 +329,7 @@ struct ChannelDto: Decodable, Identifiable, Hashable {
 
     var id: String { channelId }
     var isDM: Bool { channelType == "dm" }
+    var isVoice: Bool { kind == "voice" }
     var displayName: String {
         if isDM, let peerName, !peerName.isEmpty { return peerName }
         return name
@@ -162,12 +340,92 @@ struct ChannelDto: Decodable, Identifiable, Hashable {
         case workspaceId = "workspace_id"
         case name
         case channelType = "type"
+        case kind
         case purpose
         case autoAssist = "auto_assist"
         case allowMemberInvites = "allow_member_invites"
         case allowBotAdds = "allow_bot_adds"
         case unreadCount = "unread_count"
         case peerName = "peer_name"
+    }
+}
+
+// MARK: - Voice (server/src/api/voice.rs)
+
+struct VoiceJoinResponse: Decodable {
+    let url: String
+    let token: String
+    let roomName: String
+    let voiceSessionId: String
+    let participantIdentity: String
+    let canPublish: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case url, token
+        case roomName = "room_name"
+        case voiceSessionId = "voice_session_id"
+        case participantIdentity = "participant_identity"
+        case canPublish = "can_publish"
+    }
+}
+
+struct VoiceSessionDto: Decodable {
+    let voiceSessionId: String
+    let status: String
+    let transcriptionStatus: String
+    enum CodingKeys: String, CodingKey {
+        case voiceSessionId = "voice_session_id"
+        case status
+        case transcriptionStatus = "transcription_status"
+    }
+}
+
+struct VoiceStateResponse: Decodable {
+    let enabled: Bool
+    let channelKind: String
+    let session: VoiceSessionDto?
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case channelKind = "channel_kind"
+        case session
+    }
+}
+
+struct VoiceConsentResponse: Decodable {
+    let consented: Bool
+    let publishToken: String?
+    let canPublish: Bool
+    enum CodingKeys: String, CodingKey {
+        case consented
+        case publishToken = "publish_token"
+        case canPublish = "can_publish"
+    }
+}
+
+struct VoiceTranscriptionControlResponse: Decodable {
+    let voiceSessionId: String
+    let transcriptionStatus: String
+    enum CodingKeys: String, CodingKey {
+        case voiceSessionId = "voice_session_id"
+        case transcriptionStatus = "transcription_status"
+    }
+}
+
+struct VoiceTranscriptSegment: Decodable, Identifiable, Hashable {
+    let segmentId: String
+    let channelId: String
+    let channelSeq: Int64
+    let userId: String
+    let text: String
+    let finalizedAt: String
+    var id: String { segmentId }
+    enum CodingKeys: String, CodingKey {
+        case segmentId = "segment_id"
+        case channelId = "channel_id"
+        case channelSeq = "channel_seq"
+        case userId = "user_id"
+        case text
+        case finalizedAt = "finalized_at"
     }
 }
 

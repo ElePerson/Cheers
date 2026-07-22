@@ -33,6 +33,25 @@ pub struct JwtKeys {
     pub decoding: DecodingKey,
 }
 
+#[derive(Clone)]
+pub struct AppleAuthConfig {
+    pub team_id: String,
+    pub key_id: String,
+    pub client_id: String,
+    pub private_key_pem: String,
+}
+
+impl std::fmt::Debug for AppleAuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppleAuthConfig")
+            .field("team_id", &self.team_id)
+            .field("key_id", &self.key_id)
+            .field("client_id", &self.client_id)
+            .field("private_key_pem", &"<redacted>")
+            .finish()
+    }
+}
+
 impl std::fmt::Debug for JwtKeys {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("JwtKeys(<redacted>)")
@@ -88,6 +107,11 @@ pub struct Config {
     /// private key — set this to survive JWT key rotation without re-entering secrets.
     pub secret_store_key: Option<String>,
 
+    /// Sign in with Apple is enabled only when all four values are present.
+    /// Self-hosted gateways therefore remain password-only by default and never
+    /// need access to the official app's Apple private key.
+    pub apple_auth: Option<AppleAuthConfig>,
+
     // 邮件（Brevo 事务性邮件 HTTP API；不配置则验证码回退打印到日志）
     /// Brevo (ex-Sendinblue) API key for the transactional email endpoint
     /// (`BREVO_API_KEY`, `xkeysib-…`). Unset → codes are logged (dev delivery).
@@ -135,6 +159,24 @@ pub struct Config {
     pub approval_card_ttl_secs: u64,
     /// 审批卡扫描间隔秒数（默认 120；设为 0 则只在启动时扫一次）。
     pub approval_sweep_interval_secs: u64,
+
+    // LiveKit real-time voice (optional; all three values are required together).
+    /// Browser-reachable LiveKit WebSocket URL, e.g. `wss://voice.example.com`.
+    pub livekit_url: Option<String>,
+    /// Optional private LiveKit URL used for server-to-server API calls. This
+    /// lets local Docker deployments return `ws://localhost:7880` to browsers
+    /// while containers reach the same SFU through `ws://livekit:7880`.
+    pub livekit_internal_url: Option<String>,
+    /// LiveKit API key used as the issuer (`iss`) of participant access tokens.
+    pub livekit_api_key: Option<String>,
+    /// LiveKit API secret used only server-side to sign HS256 access tokens.
+    pub livekit_api_secret: Option<String>,
+    /// Independent bearer secret accepted only from the transcription worker.
+    pub voice_transcriber_token: Option<String>,
+    /// Kill-switch for proactive task claiming (design §11). When false the
+    /// scheduler is not spawned and monitoring writes are accepted but never
+    /// evaluated — ship-safe default for a first release behind a flag.
+    pub task_claims_enabled: bool,
 }
 
 impl Config {
@@ -159,6 +201,30 @@ impl Config {
                     panic!("JWT_PUBLIC_KEY is missing or not a valid RSA public-key PEM ({e}) — see docs/help/deployment.md")
                 },
             ),
+        };
+
+        let apple_values = (
+            optional("APPLE_TEAM_ID"),
+            optional("APPLE_KEY_ID"),
+            optional("APPLE_CLIENT_ID"),
+            optional("APPLE_PRIVATE_KEY_P8"),
+        );
+        let apple_auth = match apple_values {
+            (Some(team_id), Some(key_id), Some(client_id), Some(private_key_pem)) => {
+                Some(AppleAuthConfig {
+                    team_id,
+                    key_id,
+                    client_id,
+                    private_key_pem,
+                })
+            }
+            (None, None, None, None) => None,
+            _ => {
+                tracing::warn!(
+                    "partial APPLE_* configuration ignored; Sign in with Apple disabled"
+                );
+                None
+            }
         };
 
         Self {
@@ -207,6 +273,7 @@ impl Config {
             secret_store_key: env::var("SECRET_STORE_KEY")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
+            apple_auth,
 
             brevo_api_key: env::var("BREVO_API_KEY")
                 .ok()
@@ -248,7 +315,46 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(120),
+
+            livekit_url: env::var("LIVEKIT_URL")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            livekit_internal_url: env::var("LIVEKIT_INTERNAL_URL")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            livekit_api_key: env::var("LIVEKIT_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            livekit_api_secret: env::var("LIVEKIT_API_SECRET")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            voice_transcriber_token: env::var("VOICE_TRANSCRIBER_TOKEN")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            task_claims_enabled: env::var("TASK_CLAIMS_ENABLED")
+                .ok()
+                .map(|v| v.trim().eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
         }
+    }
+
+    /// Return a complete LiveKit configuration or `None` when voice is disabled.
+    /// A partial configuration is rejected at use time with a safe 503 rather than
+    /// accidentally exposing a half-working voice button.
+    pub fn livekit(&self) -> Option<(&str, &str, &str)> {
+        Some((
+            self.livekit_url.as_deref()?,
+            self.livekit_api_key.as_deref()?,
+            self.livekit_api_secret.as_deref()?,
+        ))
+    }
+
+    /// URL for Gateway-to-LiveKit API traffic. The public browser URL remains
+    /// the fallback so existing single-address deployments need no change.
+    pub fn livekit_api_url(&self) -> Option<&str> {
+        self.livekit_internal_url
+            .as_deref()
+            .or(self.livekit_url.as_deref())
     }
 
     /// Browser origins allowed for both CORS and the WebSocket `Origin` check.
@@ -276,6 +382,10 @@ fn require(key: &str) -> String {
         Ok(v) if !v.trim().is_empty() => v,
         _ => panic!("required env var {key} is missing or empty — see docs/help/deployment.md"),
     }
+}
+
+fn optional(key: &str) -> Option<String> {
+    env::var(key).ok().filter(|value| !value.trim().is_empty())
 }
 
 /// Parse a boolean env flag. Only `1/true/yes/on` (case-insensitive) enable it;

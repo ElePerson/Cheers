@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, User, Bot, Blocks, Users, LogOut, KeyRound, AudioLines, Bell, Plug } from "lucide-react";
+import { ArrowLeft, User, Bot, Blocks, Users, LogOut, KeyRound, AudioLines, Bell, Plug, ShieldAlert } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore, useIsAdmin } from "@/stores/authStore";
 import { changePassword, logout as logoutApi } from "@/api/auth";
 import { disablePush, enablePush, getPushStatus, type PushStatus } from "@/lib/push";
 import { getServerBase, isTauri, setServerBase } from "@/lib/serverConfig";
-import { getAutostart, setAutostart } from "@/lib/desktop";
+import {
+  getAutostart,
+  setAutostart,
+  checkAppUpdate,
+  installAppUpdate,
+  type AppUpdate,
+} from "@/lib/desktop";
 import { ConnectorManager } from "@/features/desktop/ConnectorManager";
 import { getMe, updateMe } from "@/api/users";
 import { uploadUserAvatar } from "@/api/avatars";
@@ -20,6 +26,7 @@ import { CopyButton } from "@/features/bots/BotDetailPanel";
 import { WorkbenchManager } from "@/features/workbench/WorkbenchManager";
 import { AdminUsers } from "./AdminUsers";
 import { AdminSttSettings } from "./AdminSttSettings";
+import { AdminReports } from "./AdminReports";
 
 type SectionId =
   | "profile"
@@ -28,6 +35,7 @@ type SectionId =
   | "workbench"
   | "members"
   | "speech"
+  | "reports"
   | "account";
 
 const NAV: {
@@ -44,6 +52,7 @@ const NAV: {
   { id: "workbench", label: "Workbench", icon: Blocks, adminOnly: true },
   { id: "members", label: "Members", icon: Users, adminOnly: true },
   { id: "speech", label: "Speech-to-text", icon: AudioLines, adminOnly: true },
+  { id: "reports", label: "Safety reports", icon: ShieldAlert, adminOnly: true },
   { id: "account", label: "Account", icon: LogOut },
 ];
 
@@ -135,6 +144,89 @@ function LaunchAtLoginCard() {
   );
 }
 
+/** Desktop shell only: check the signed release feed and install in place.
+ * Checks once on mount so a stale build surfaces without the user going
+ * looking; the install itself is always an explicit click. */
+function AppUpdateCard() {
+  const [update, setUpdate] = useState<AppUpdate | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [installing, setInstalling] = useState(false);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let alive = true;
+    void checkAppUpdate()
+      .then((u) => alive && setUpdate(u))
+      .catch(() => {
+        // Offline or a feed hiccup — the card just shows "up to date"; the
+        // manual Check button is the retry.
+      })
+      .finally(() => alive && setChecking(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (!isTauri()) return null;
+
+  async function check() {
+    setChecking(true);
+    try {
+      const u = await checkAppUpdate();
+      setUpdate(u);
+      if (!u) toast.success("Cheers is up to date");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't check for updates");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function install() {
+    setInstalling(true);
+    try {
+      await installAppUpdate();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Update failed");
+      setInstalling(false);
+    }
+  }
+
+  return (
+    <div className="bg-zinc-900 rounded-2xl p-6 mt-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-zinc-200">App updates</p>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            {update
+              ? `Version ${update.version} is available — installing restarts Cheers.`
+              : "Cheers checks for a new version each time you open Settings."}
+          </p>
+        </div>
+        {update ? (
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={installing}
+            onClick={() => void install()}
+          >
+            {installing ? "Installing…" : "Update & restart"}
+          </Button>
+        ) : (
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={checking}
+            onClick={() => void check()}
+          >
+            {checking ? "Checking…" : "Check now"}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Web Push toggle: approval requests and @mentions as OS notifications, so
  * a pending permission card reaches the user away from the tab. Hidden when
  * the deployment has no VAPID key, and when the browser can't do push. */
@@ -217,8 +309,8 @@ function ChangePasswordCard({ onRotated }: { onRotated: (token: string) => void 
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (next.length < 8) {
-      toast.error("New password must be at least 8 characters");
+    if (next.length < 12) {
+      toast.error("New password must be at least 12 characters");
       return;
     }
     if (next !== confirm) {
@@ -573,6 +665,7 @@ export default function SettingsPage() {
           {/* Admin-only; each self-gates (renders null for non-admins). */}
           {section === "workbench" && <WorkbenchManager />}
           {section === "members" && <AdminUsers />}
+          {section === "reports" && <AdminReports />}
           {section === "speech" && <AdminSttSettings />}
 
           {section === "account" && (
@@ -586,6 +679,8 @@ export default function SettingsPage() {
               <ServerCard />
 
               <LaunchAtLoginCard />
+
+              <AppUpdateCard />
 
               <PushNotificationsCard />
 

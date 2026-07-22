@@ -9,7 +9,9 @@ pub mod members;
 pub mod messages;
 pub mod plan;
 pub mod sessions;
+pub mod task_claims;
 pub mod usage;
+pub mod voice;
 
 use serde_json::Value;
 use sqlx::{PgPool, Row};
@@ -88,6 +90,10 @@ pub async fn dispatch(db: &PgPool, principal: Principal, frame: &Value) -> Value
 
         // ── mesh step 6：新增读操作 ───────────────────────────────────────
         "channel.activity.read" => activity::handle_read(db, &principal, &params).await,
+        "channel.task_claims.list" => task_claims::handle_list(db, &principal, &params).await,
+        "channel.voice.transcript" | "channel.voice.transcript.by-seq" => {
+            voice::handle_transcript(db, &principal, &params).await
+        }
         "channel.messages.index" => activity::handle_index(db, &principal, &params).await,
         "channel.messages.by-seq" => messages::handle_by_seq(db, &principal, &params).await,
         "channel.messages.search" => messages::handle_search(db, &principal, &params).await,
@@ -102,6 +108,9 @@ pub async fn dispatch(db: &PgPool, principal: Principal, frame: &Value) -> Value
 
         // ── 写操作（频道成员 role 可写）────────────────────────────────
         "channel.messages.create" => messages::handle_create(db, &principal, &params).await,
+        "channel.task_claims.evaluate" => {
+            task_claims::handle_evaluate(db, &principal, &params).await
+        }
         // Agent writes its OWN status card (set_status tool); live broadcast is
         // emitted at the WS boundary (agent_bridge), which holds the fanout.
         "bot.status.write" => bot_status::handle_write(db, &principal, &params).await,

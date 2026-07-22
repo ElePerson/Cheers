@@ -24,6 +24,9 @@ pub enum AppError {
     #[error("conflict: {0}")]
     Conflict(String),
 
+    #[error("precondition required: {0}")]
+    PreconditionRequired(String),
+
     #[error("payload too large: {0}")]
     PayloadTooLarge(String),
 
@@ -32,6 +35,9 @@ pub enum AppError {
 
     #[error("internal error: {0}")]
     Internal(String),
+
+    #[error("service unavailable: {0}")]
+    ServiceUnavailable(String),
 
     #[error("too many requests")]
     TooManyRequests { retry_after_secs: u64 },
@@ -45,6 +51,7 @@ impl AppError {
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::PreconditionRequired(_) => StatusCode::PRECONDITION_REQUIRED,
             Self::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
             Self::Db(e) => {
                 // 唯一约束冲突 → 409
@@ -56,6 +63,7 @@ impl AppError {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
         }
     }
@@ -73,7 +81,7 @@ impl IntoResponse for AppError {
         // rebase and retry. When it does, that object IS the response body; every
         // other Conflict (a plain string) falls through to the generic `{ "detail" }`
         // shape below. 4xx bodies are caller-facing, so this is safe to expose.
-        if let Self::Conflict(payload) = &self {
+        if let Self::Conflict(payload) | Self::PreconditionRequired(payload) = &self {
             if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(payload) {
                 return (status, Json(Value::Object(map))).into_response();
             }
