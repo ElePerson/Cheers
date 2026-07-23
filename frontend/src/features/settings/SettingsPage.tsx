@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, User, Bot, Blocks, Users, LogOut, KeyRound, AudioLines, Bell, Plug, ShieldAlert } from "lucide-react";
+import { ArrowLeft, User, Bot, Blocks, Users, LogOut, KeyRound, AudioLines, Bell, Plug, ShieldAlert, Shield } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore, useIsAdmin } from "@/stores/authStore";
 import { changePassword, logout as logoutApi } from "@/api/auth";
@@ -26,6 +26,7 @@ import { CopyButton } from "@/features/bots/BotDetailPanel";
 import { WorkbenchManager } from "@/features/workbench/WorkbenchManager";
 import { AdminUsers } from "./AdminUsers";
 import { AdminSttSettings } from "./AdminSttSettings";
+import { AdminSecuritySettings } from "./AdminSecuritySettings";
 import { AdminReports } from "./AdminReports";
 
 type SectionId =
@@ -36,6 +37,7 @@ type SectionId =
   | "members"
   | "speech"
   | "reports"
+  | "security"
   | "account";
 
 const NAV: {
@@ -53,6 +55,7 @@ const NAV: {
   { id: "members", label: "Members", icon: Users, adminOnly: true },
   { id: "speech", label: "Speech-to-text", icon: AudioLines, adminOnly: true },
   { id: "reports", label: "Safety reports", icon: ShieldAlert, adminOnly: true },
+  { id: "security", label: "Security", icon: Shield, adminOnly: true },
   { id: "account", label: "Account", icon: LogOut },
 ];
 
@@ -666,6 +669,7 @@ export default function SettingsPage() {
           {section === "workbench" && <WorkbenchManager />}
           {section === "members" && <AdminUsers />}
           {section === "reports" && <AdminReports />}
+          {section === "security" && <AdminSecuritySettings />}
           {section === "speech" && <AdminSttSettings />}
 
           {section === "account" && (
