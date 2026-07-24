@@ -264,9 +264,9 @@ export interface BotItem {
   avatar_url?: string;
   scope?: "private" | "friend" | "everyone";
   binding_type?: string;
-  /** Which ACP agent this bot was registered for ("claude" | "codex" |
-   *  "opencode" | "generic"). Set at creation and returned by GET /bots — the
-   *  connector setup UI must read it rather than re-defaulting, or it renders a
+  /** Which ACP agent this bot was registered for (legacy short name or ACP
+   *  registry id). Set at creation and returned by GET /bots — the desktop
+   *  connector setup must read it rather than re-defaulting, or it renders a
    *  config for the wrong agent. */
   bridge_provider?: string;
   /** Live: a connector bridge is bound right now (from the registry). */

@@ -6,9 +6,17 @@
 //! and the hand-written examples; this is the single place the gateway produces
 //! that file so the manual / script / agent modes can never drift apart.
 //!
+//! Agent presets: Claude / Codex / OpenCode stay finely tuned here. Every other
+//! id is resolved from the live ACP registry's **npx** distribution (see
+//! [`crate::domain::acp_registry`]) so new registry agents need no gateway
+//! release to get a usable config. Unknown / unreachable ids fall back to a
+//! clearly-marked placeholder (`needs_edit`).
+//!
 //! The token is NEVER inlined here. The config points at a `bot_token_file`
 //! sidecar (mode 3 manual + mode 2 script write the plaintext there with 0600),
 //! keeping the secret out of the (potentially copied / committed) config body.
+
+use crate::domain::acp_registry::{self, NpxLaunch};
 
 /// WS sub-paths the connector dials on the gateway's agent-bridge.
 const CONTROL_PATH: &str = "/ws/agent-bridge/control";
@@ -28,98 +36,138 @@ pub enum TokenRef {
     Env(String),
 }
 
-/// A built-in agent profile: which ACP adapter binary to spawn and the minimal
-/// env it needs. Unknown agent types fall back to a clearly-marked placeholder
-/// the user must edit (`needs_edit`).
+/// A built-in or registry-derived agent profile: which ACP adapter binary to
+/// spawn and the minimal env it needs. Unknown agent types fall back to a
+/// clearly-marked placeholder the user must edit (`needs_edit`).
 struct AgentPreset {
     /// adapter.command — the stdio ACP agent binary.
-    command: &'static str,
+    command: String,
     /// adapter.args — argv passed to `command`. Non-empty when the agent's ACP
     /// mode is a subcommand of its main binary rather than a dedicated adapter.
-    args: &'static [&'static str],
+    args: Vec<String>,
     /// policy.env.allow — only these are copied from the connector env into the
     /// child (env.inherit stays false, the safe default).
-    env_allow: &'static [&'static str],
+    env_allow: Vec<String>,
     /// adapter.permission_mode (session/set_mode stopgap); None omits the key.
-    permission_mode: Option<&'static str>,
+    permission_mode: Option<String>,
     /// policy.permission.allowed_modes — opaque ACP modeIds the platform may select
-    /// at runtime (L0 set-mode envelope). Agent-SPECIFIC, so it lives here, not in
-    /// the shared template or the connector. Empty = any mode the agent advertises.
-    /// (Omitting an agent's bypass mode is how we keep bypass off by default.)
-    allowed_modes: &'static [&'static str],
-    /// policy.config.allowed_config_options — opaque ACP config option ids the
-    /// platform may select at runtime. Empty means no generic config option can
-    /// be changed from Cheers; this is separate from `allowed_modes`.
-    allowed_config_options: &'static [&'static str],
+    /// at runtime (L0 set-mode envelope). Agent-SPECIFIC. Empty = any mode the
+    /// agent advertises.
+    allowed_modes: Vec<String>,
+    /// policy.config.allowed_config_options — opaque ACP config option ids.
+    allowed_config_options: Vec<String>,
     /// True when `command` is a placeholder the user must replace before it runs.
     needs_edit: bool,
 }
 
-fn preset_for(agent_type: &str) -> AgentPreset {
-    match agent_type.trim().to_ascii_lowercase().as_str() {
-        "claude" => AgentPreset {
-            command: "claude-agent-acp",
-            args: &[],
-            env_allow: &[
-                "HOME",
-                "PATH",
-                "ANTHROPIC_API_KEY",
-                "CLAUDE_CODE_OAUTH_TOKEN",
-            ],
-            // "default" = Claude's "prompts for dangerous operations" mode, which
-            // routes un-pre-approved tools through ACP request_permission → an
-            // in-channel approval card. ("plan" was wrong: it means "no tool
-            // execution", not "ask per tool" — see BOT_CONFIG_GOVERNANCE.md §3.)
-            // This is only the DEFAULT; the live value is meant to be platform-set
-            // (L1/L2) and clamped by an L0 gate — that plumbing is still TODO.
-            permission_mode: Some("default"),
-            // Claude's advertised modes minus "bypassPermissions" → the platform
-            // can switch posture but can't opt into bypass by default.
-            allowed_modes: &["default", "plan", "acceptEdits", "dontAsk", "auto"],
-            allowed_config_options: &["model", "reasoning_effort", "thinking_mode"],
-            needs_edit: false,
-        },
-        "codex" => AgentPreset {
-            command: "codex-acp",
-            args: &[],
-            env_allow: &["HOME", "PATH", "OPENAI_API_KEY"],
-            permission_mode: None,
-            // We don't presume codex's modeIds; empty = any mode it advertises.
-            allowed_modes: &[],
-            allowed_config_options: &["model", "reasoning_effort", "approval_policy", "sandbox"],
-            needs_edit: false,
-        },
-        "opencode" => AgentPreset {
-            // OpenCode ships ACP as a subcommand of its main binary (`opencode
-            // acp`) — there is no separate `opencode-acp` adapter. Emitting one
-            // rendered a config the desktop app could never resolve, which
-            // stranded the bot: the gateway had already minted (and thereby
-            // revoked) its token by the time the client failed.
-            command: "opencode",
-            args: &["acp"],
-            env_allow: &["HOME", "PATH"],
-            permission_mode: None,
-            allowed_modes: &[],
-            allowed_config_options: &["model"],
-            needs_edit: false,
-        },
-        _ => AgentPreset {
-            command: "/path/to/your-acp-agent",
-            args: &[],
-            env_allow: &["HOME", "PATH"],
-            permission_mode: None,
-            allowed_modes: &[],
-            allowed_config_options: &[],
-            needs_edit: true,
-        },
+fn strings(xs: &[&str]) -> Vec<String> {
+    xs.iter().map(|s| (*s).to_string()).collect()
+}
+
+fn claude_preset() -> AgentPreset {
+    AgentPreset {
+        command: "claude-agent-acp".into(),
+        args: vec![],
+        env_allow: strings(&[
+            "HOME",
+            "PATH",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ]),
+        // "default" = Claude's "prompts for dangerous operations" mode, which
+        // routes un-pre-approved tools through ACP request_permission → an
+        // in-channel approval card.
+        permission_mode: Some("default".into()),
+        // Claude's advertised modes minus "bypassPermissions".
+        allowed_modes: strings(&["default", "plan", "acceptEdits", "dontAsk", "auto"]),
+        allowed_config_options: strings(&["model", "reasoning_effort", "thinking_mode"]),
+        needs_edit: false,
     }
+}
+
+fn codex_preset() -> AgentPreset {
+    AgentPreset {
+        command: "codex-acp".into(),
+        args: vec![],
+        env_allow: strings(&["HOME", "PATH", "OPENAI_API_KEY"]),
+        permission_mode: None,
+        allowed_modes: vec![],
+        allowed_config_options: strings(&[
+            "model",
+            "reasoning_effort",
+            "approval_policy",
+            "sandbox",
+        ]),
+        needs_edit: false,
+    }
+}
+
+fn opencode_preset() -> AgentPreset {
+    // OpenCode ships ACP as a subcommand of its main binary (`opencode acp`) —
+    // there is no separate `opencode-acp` adapter (and the registry lists it as
+    // binary-only, not npx).
+    AgentPreset {
+        command: "opencode".into(),
+        args: vec!["acp".into()],
+        env_allow: strings(&["HOME", "PATH"]),
+        permission_mode: None,
+        allowed_modes: vec![],
+        allowed_config_options: strings(&["model"]),
+        needs_edit: false,
+    }
+}
+
+fn generic_preset() -> AgentPreset {
+    AgentPreset {
+        command: "/path/to/your-acp-agent".into(),
+        args: vec![],
+        env_allow: strings(&["HOME", "PATH"]),
+        permission_mode: None,
+        allowed_modes: vec![],
+        allowed_config_options: vec![],
+        needs_edit: true,
+    }
+}
+
+fn preset_from_npx(launch: &NpxLaunch) -> AgentPreset {
+    let mut env_allow = strings(&["HOME", "PATH"]);
+    for k in &launch.env_keys {
+        if !env_allow.iter().any(|e| e == k) {
+            env_allow.push(k.clone());
+        }
+    }
+    AgentPreset {
+        command: acp_registry::infer_bin_name(&launch.package),
+        args: launch.args.clone(),
+        env_allow,
+        permission_mode: None,
+        allowed_modes: vec![],
+        allowed_config_options: strings(&["model"]),
+        needs_edit: false,
+    }
+}
+
+fn preset_for(agent_type: &str) -> AgentPreset {
+    let id = acp_registry::canonicalize_agent_id(agent_type);
+    match id.as_str() {
+        // Fine-tuned builtins (also cover registry ids claude-acp / codex-acp).
+        "claude" | "claude-acp" => return claude_preset(),
+        "codex" | "codex-acp" => return codex_preset(),
+        "opencode" => return opencode_preset(),
+        "generic" => return generic_preset(),
+        _ => {}
+    }
+    if let Some(launch) = acp_registry::npx_launch_for(&id) {
+        return preset_from_npx(&launch);
+    }
+    generic_preset()
 }
 
 /// Posture envelope for an agent type: `(preset default mode, L0 allowed_modes)`.
 /// The owner posture API/UI uses this to validate a requested mode and populate
 /// the dropdown — it mirrors the same per-agent `preset_for` source of truth that
 /// renders the connector TOML, so platform and connector agree on selectable modes.
-pub fn posture_preset(agent_type: &str) -> (Option<&'static str>, &'static [&'static str]) {
+pub fn posture_preset(agent_type: &str) -> (Option<String>, Vec<String>) {
     let p = preset_for(agent_type);
     (p.permission_mode, p.allowed_modes)
 }
@@ -286,7 +334,7 @@ pub fn render_toml(params: &RenderParams) -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
-    let permission_mode_line = match preset.permission_mode {
+    let permission_mode_line = match &preset.permission_mode {
         Some(mode) => format!("\npermission_mode = {}", toml_str(mode)),
         None => String::new(),
     };
@@ -416,7 +464,7 @@ request_timeout_ms = 30000
         control = toml_str(&control),
         data = toml_str(&data),
         token_line = token_line,
-        command = toml_str(preset.command),
+        command = toml_str(&preset.command),
         args = args,
         permission_mode_line = permission_mode_line,
         env_allow = env_allow,
@@ -597,5 +645,33 @@ mod tests {
         });
         assert!(toml.contains("PLACEHOLDER"));
         assert!(toml.contains("/path/to/your-acp-agent"));
+    }
+
+    #[test]
+    fn renders_registry_npx_agent_with_args() {
+        crate::domain::acp_registry::seed_cache_for_test(
+            r#"{
+              "agents": [{
+                "id": "gemini",
+                "name": "Gemini CLI",
+                "version": "0.52.0",
+                "distribution": {
+                  "npx": {
+                    "package": "@google/gemini-cli@0.52.0",
+                    "args": ["--acp"]
+                  }
+                }
+              }]
+            }"#,
+        );
+        let toml = render_toml(&RenderParams {
+            account_id: "gem",
+            agent_type: "gemini",
+            public_base: "ws://localhost:30080",
+            token_ref: TokenRef::File("secrets/gem.token".into()),
+        });
+        assert!(toml.contains("command = \"gemini\""));
+        assert!(toml.contains(r#"args    = ["--acp"]"#));
+        assert!(!toml.contains("PLACEHOLDER"));
     }
 }

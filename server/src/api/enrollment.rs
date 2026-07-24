@@ -65,19 +65,31 @@ fn resolve_public_base(state: &AppState) -> (String, bool) {
     }
 }
 
-/// Normalize an agent_type input to one of the known presets (or "generic").
+/// Normalize an agent_type input: legacy short names, registry ids, or generic.
 fn normalize_agent_type(raw: Option<&str>) -> String {
-    match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
-        Some("claude") => "claude".into(),
-        Some("codex") => "codex".into(),
-        Some("opencode") => "opencode".into(),
+    let Some(s) = raw
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+    else {
+        return "generic".into();
+    };
+    match s.as_str() {
+        "claude" | "codex" | "opencode" | "generic" => s,
+        // ACP registry ids: lowercase letter, then [a-z0-9-]
+        id if is_registry_agent_id(id) => id.to_string(),
         _ => "generic".into(),
     }
 }
 
+fn is_registry_agent_id(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some('a'..='z'))
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 #[derive(Deserialize)]
 pub struct MintRequest {
-    /// claude | codex | opencode | generic (drives the rendered adapter.command).
+    /// claude | codex | opencode | generic | ACP registry id (drives adapter.command).
     #[serde(default)]
     pub agent_type: Option<String>,
 }
@@ -572,4 +584,63 @@ pub async fn connector_discovery(
             "No CHEERS_CONNECTOR_PUBLIC_BASE set — using a localhost fallback that may require `kubectl port-forward svc/cheers-gateway 8000:8000` (or set it to the frontend NodePort ws://localhost:30080)."
         },
     })))
+}
+
+/// GET /api/v1/acp/agents — authed catalog of ACP agents Cheers can quick-setup.
+/// Prefer npx-distributed entries from the live registry; always includes the
+/// fine-tuned builtins (claude / codex / opencode) even if the registry is down.
+pub async fn list_acp_agents(
+    Extension(_claims): Extension<Claims>,
+) -> Result<Json<Value>, AppError> {
+    // Off the async runtime: registry fetch is blocking + cached.
+    let agents = tokio::task::spawn_blocking(build_agent_catalog)
+        .await
+        .unwrap_or_else(|_| build_agent_catalog());
+    Ok(Json(json!({ "agents": agents })))
+}
+
+fn build_agent_catalog() -> Vec<Value> {
+    use crate::domain::acp_registry;
+    let mut out = Vec::new();
+    // Builtins first (stable short ids used by existing bots).
+    for (id, name, kind) in [
+        ("claude", "Claude", "builtin"),
+        ("codex", "Codex", "builtin"),
+        ("opencode", "OpenCode", "builtin"),
+    ] {
+        out.push(json!({
+            "id": id,
+            "name": name,
+            "source": kind,
+            "installable": true,
+        }));
+    }
+    let mut seen: std::collections::HashSet<String> =
+        ["claude", "codex", "opencode", "claude-acp", "codex-acp"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+
+    for launch in acp_registry::list_npx_agents() {
+        if seen.contains(&launch.id) {
+            continue;
+        }
+        seen.insert(launch.id.clone());
+        out.push(json!({
+            "id": launch.id,
+            "name": launch.name,
+            "version": launch.version,
+            "package": launch.package,
+            "args": launch.args,
+            "source": "registry-npx",
+            "installable": true,
+        }));
+    }
+    out.push(json!({
+        "id": "generic",
+        "name": "Something else",
+        "source": "builtin",
+        "installable": false,
+    }));
+    out
 }

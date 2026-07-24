@@ -85,12 +85,9 @@ function fmtMem(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
-const AGENT_TYPES: readonly AgentType[] = ["claude", "codex", "opencode", "generic"];
-
-/** Narrow a bot's stored `bridge_provider` (a free-form string server-side) to
- *  an agent type this UI can act on. */
+/** Non-empty bridge_provider / agent id (legacy short name or registry id). */
 function isAgentType(v: string | undefined): v is AgentType {
-  return !!v && (AGENT_TYPES as readonly string[]).includes(v);
+  return !!v && v.trim().length > 0;
 }
 
 /** Is this agent's ACP adapter resolvable on the login PATH right now?
@@ -191,7 +188,7 @@ export function ConnectorManager() {
   const [health, setHealth] = useState<Record<string, ConnectorHealth>>({});
   const [roots, setRoots] = useState<ConnectorRoots | null>(null);
   const [openers, setOpeners] = useState<Opener[]>([]);
-  const [deleteConfigToo, setDeleteConfigToo] = useState(false);
+  const [keepConfig, setKeepConfig] = useState(false);
   // Card highlighted while a Finder folder is dragged over it (drag-to-grant).
   const [dragOverName, setDragOverName] = useState<string | null>(null);
   // Onboarding: create-or-pick a bot, then the gateway mint→redeem flow.
@@ -673,7 +670,7 @@ export function ConnectorManager() {
                   danger
                   disabled={busy === inst.name}
                   onClick={() => {
-                    setDeleteConfigToo(false);
+                    setKeepConfig(false);
                     setModal({ kind: "delete", inst });
                   }}
                 />
@@ -884,21 +881,24 @@ export function ConnectorManager() {
         <Dialog title="Remove connector" onClose={() => setModal(null)} maxWidth="max-w-md">
           <p className="text-sm text-zinc-300">
             Remove the local connector <b>{modal.inst.name}</b> (stops it and
-            deletes its state + logs). This does <b>not</b> delete the bot on the
-            server — do that from the web Bots settings.
+            deletes its state, logs, and config). This does <b>not</b> delete the
+            bot on the server — do that from the web Bots settings.
           </p>
           <label className="flex items-center gap-2 mt-3 text-xs text-zinc-400 cursor-pointer w-fit">
             <input
               type="checkbox"
-              checked={deleteConfigToo}
-              onChange={(e) => setDeleteConfigToo(e.target.checked)}
+              checked={keepConfig}
+              onChange={(e) => setKeepConfig(e.target.checked)}
             />
-            Also delete its config file
+            Keep a backup of the config as{" "}
+            <code className="bg-zinc-800 rounded px-1">.toml.kept</code> (won&apos;t
+            show in the list)
           </label>
           <div className="flex gap-2 mt-4">
             <Button
               variant="danger"
               size="sm"
+              className="bg-red-950/70 hover:bg-red-900/80 text-red-300"
               disabled={busy === modal.inst.name}
               onClick={() =>
                 void act(
@@ -906,7 +906,7 @@ export function ConnectorManager() {
                   () =>
                     invokeDesktop("connector_delete", {
                       name: modal.inst.name,
-                      deleteConfig: deleteConfigToo,
+                      deleteConfig: !keepConfig,
                     }),
                   "Connector removed"
                 ).then((ok) => ok && setModal(null))
@@ -1107,13 +1107,9 @@ function OnboardForm(props: {
         <AgentPicker
           value={p.agentType}
           onPick={(key) => {
-            // The picker offers claude/codex/opencode/gemini/custom; onboarding
-            // needs one of the server's agent types (custom → generic).
-            const t: AgentType =
-              key === "claude" || key === "codex" || key === "opencode"
-                ? key
-                : "generic";
-            p.setAgentType(t);
+            // Picker keys are Cheers agent ids (claude/codex/opencode/registry-id)
+            // or "custom" → generic placeholder config.
+            p.setAgentType(key === "custom" ? "generic" : key);
           }}
         />
       </Field>

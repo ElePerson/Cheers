@@ -9,6 +9,7 @@
 
 mod approval;
 mod audit;
+mod acp_registry;
 mod changes;
 mod connector;
 mod deeplink;
