@@ -12,7 +12,14 @@ const STORAGE_KEY = "cheers.server_base";
 
 /** Running inside the Tauri desktop shell? */
 export function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  if (typeof window === "undefined") return false;
+  const w = window as Window & {
+    isTauri?: boolean;
+    __TAURI_INTERNALS__?: unknown;
+    __TAURI__?: unknown;
+  };
+  // Prefer the official Tauri 2 flag; keep internals/global fallbacks for older shells.
+  return w.isTauri === true || "__TAURI_INTERNALS__" in w || "__TAURI__" in w;
 }
 
 /** The configured gateway origin (e.g. "https://www.tocheers.com"), or null

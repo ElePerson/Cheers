@@ -15,6 +15,7 @@ import {
   Link2,
   Trash2,
   ExternalLink,
+  Info,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore, useIsAdmin } from "@/stores/authStore";
@@ -55,6 +56,7 @@ type SectionId =
   | "profile"
   | "bots"
   | "connector"
+  | "about"
   | "workbench"
   | "members"
   | "speech"
@@ -72,6 +74,7 @@ const NAV: {
   { id: "profile", label: "Profile", icon: User },
   { id: "bots", label: "Bots", icon: Bot },
   { id: "connector", label: "Connector", icon: Plug, desktopOnly: true },
+  { id: "about", label: "About", icon: Info, desktopOnly: true },
   { id: "workbench", label: "Workbench", icon: Blocks, adminOnly: true },
   { id: "members", label: "Members", icon: Users, adminOnly: true },
   { id: "speech", label: "Speech-to-text", icon: AudioLines, adminOnly: true },
@@ -174,10 +177,15 @@ function AppUpdateCard() {
   const [update, setUpdate] = useState<AppUpdate | null>(null);
   const [checking, setChecking] = useState(true);
   const [installing, setInstalling] = useState(false);
+  const [currentVersion, setCurrentVersion] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isTauri()) return;
     let alive = true;
+    void import("@tauri-apps/api/app")
+      .then((m) => m.getVersion())
+      .then((v) => alive && setCurrentVersion(v))
+      .catch(() => {});
     void checkAppUpdate()
       .then((u) => alive && setUpdate(u))
       .catch(() => {
@@ -221,9 +229,10 @@ function AppUpdateCard() {
         <div className="min-w-0">
           <p className="text-sm font-medium text-zinc-200">App updates</p>
           <p className="text-xs text-zinc-400 mt-0.5">
+            {currentVersion ? `Installed ${currentVersion}. ` : null}
             {update
               ? `Version ${update.version} is available — installing restarts Cheers.`
-              : "Cheers checks for a new version each time you open Settings."}
+              : "Check GitHub for a newer signed desktop build."}
           </p>
         </div>
         {update ? (
@@ -242,7 +251,7 @@ function AppUpdateCard() {
             disabled={checking}
             onClick={() => void check()}
           >
-            {checking ? "Checking…" : "Check now"}
+            {checking ? "Checking…" : "Check for updates"}
           </Button>
         )}
       </div>
@@ -891,6 +900,17 @@ export default function SettingsPage() {
 
           {section === "connector" && <ConnectorManager />}
 
+          {section === "about" && (
+            <section>
+              <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-4">
+                About
+              </h2>
+              <AppUpdateCard />
+              <ServerCard />
+              <LaunchAtLoginCard />
+            </section>
+          )}
+
           {/* Admin-only; each self-gates (renders null for non-admins). */}
           {section === "workbench" && <WorkbenchManager />}
           {section === "members" && <AdminUsers />}
@@ -911,10 +931,8 @@ export default function SettingsPage() {
 
               <ExternalIdentitiesCard />
 
-              <ServerCard />
-
-              <LaunchAtLoginCard />
-
+              {/* Desktop shell: also linked from About — keep a copy here so
+                  Account remains a one-stop for signed-in session controls. */}
               <AppUpdateCard />
 
               <PushNotificationsCard />
