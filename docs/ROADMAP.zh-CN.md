@@ -144,9 +144,28 @@ F0 底座 → F1 人工 picker → F2 bot handoff → F3 建议式上下文。
 
 ## 近期计划(资源占用考虑/安全性问题/关键断点->行动建议->工作量)
 
+### 下一优先事项（2026 H2）
+
+Passkey / iOS Friends / 桌面自动更新之后的产品重点：
+
+1. **iOS App 加固**（原生 `apps/ios` 已在用，不再「排在 PWA 之后再说」）——跟踪 [#318](https://github.com/ElePerson/Cheers/issues/318)
+   - [ ] **界面** — spacing-first / HIG 对齐、本地化缺口、密列表与装饰分割线清理。
+   - [ ] **Tracing** — 登录、推送、实时重连、审批深链的端到端关联，方便定位移动端回归。
+   - [ ] **Policy & security** — App Store / 隐私披露、远程操作文案、AI 同意面、会话/信任设备与 Web/桌面行为对齐。
+2. **macOS 桌面 — 安全与政策打磨**——跟踪 [#319](https://github.com/ElePerson/Cheers/issues/319)
+   - [ ] 与 Web 同步政策面（隐私、支持、远程操作、账号删除）进 Tauri / About / Settings。
+   - [ ] 加固更新器与签名体验（Gatekeeper 说明、可信 feed、Settings → About → Check for updates）。
+   - [ ] Connector/daemon 安全默认（最小权限、远程操作警示清晰）。
+3. **插件 / Workbench 机制 — 集成测试与优化**——跟踪 [#320](https://github.com/ElePerson/Cheers/issues/320)
+   - [ ] 官方插件 + 模板安装的集成测试矩阵（加载、fs 桥、存盘重载、权限拒绝）。
+   - [ ] 性能与可靠性（冷启动、大看板、失败恢复）。
+   - [ ] 第三方作者插件契约文档，示例在 CI 保持绿灯。
+
 ### UI
 
 - [ ] UI hover 状态统一
+- [ ] 将“优先用间距分组”的规则同步到原生 iOS 界面；移除仅为视觉呈现的分割线，
+      仅在高密度数据行中保留必要的行规则。
 - [ ] 中英文遗漏修复
 - [ ] 默认选项优化
 
@@ -160,8 +179,8 @@ F0 底座 → F1 人工 picker → F2 bot handoff → F3 建议式上下文。
 ### Feature
 
 - [ ] 钉钉集成
-- [ ] iOS App
-- [ ] Android App
+- [x] iOS App（v1 已交付）—— **下一步**：界面 / tracing / policy & security（见上一优先事项）
+- [ ] Android App（在 iOS 加固后再评估）
 
 ---
 
