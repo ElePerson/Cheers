@@ -1,9 +1,7 @@
-//! ACP Registry client for the desktop shell (npx + uvx agent catalog).
+//! ACP Registry client for the desktop shell (npx + uvx + binary catalog).
 //!
 //! Same JSON as the gateway (`cdn.agentclientprotocol.com/.../registry.json`).
-//! Desktop uses it to detect/install agents; the gateway uses it to render
-//! connector TOML. Keep the parse helpers in sync with
-//! `server/src/domain/acp_registry.rs`.
+//! Keep in sync with `server/src/domain/acp_registry.rs`.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -25,13 +23,37 @@ pub enum DistKind {
 pub struct PackageLaunch {
     pub id: String,
     pub name: String,
-    #[allow(dead_code)] // kept for UI / update checks later
+    #[allow(dead_code)]
     pub version: String,
     pub package: String,
     pub args: Vec<String>,
-    #[allow(dead_code)] // gateway mirrors this into env_allow
+    #[allow(dead_code)]
     pub env_keys: Vec<String>,
     pub kind: DistKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct BinaryTarget {
+    pub archive: String,
+    pub cmd: String,
+    pub args: Vec<String>,
+    #[allow(dead_code)]
+    pub env_keys: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BinaryLaunch {
+    pub id: String,
+    pub name: String,
+    #[allow(dead_code)]
+    pub version: String,
+    pub targets: HashMap<String, BinaryTarget>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ParsedRegistry {
+    pub packages: HashMap<String, PackageLaunch>,
+    pub binaries: HashMap<String, BinaryLaunch>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -56,6 +78,8 @@ struct Distribution {
     npx: Option<PackageDist>,
     #[serde(default)]
     uvx: Option<PackageDist>,
+    #[serde(default)]
+    binary: Option<HashMap<String, BinaryDist>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -67,10 +91,21 @@ struct PackageDist {
     env: HashMap<String, String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Deserialize)]
+struct BinaryDist {
+    archive: String,
+    cmd: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: HashMap<String, String>,
+}
+
+#[derive(Debug, Default, Clone)]
 struct RegistryCache {
     fetched_at: Option<Instant>,
-    by_id: HashMap<String, PackageLaunch>,
+    packages: HashMap<String, PackageLaunch>,
+    binaries: HashMap<String, BinaryLaunch>,
 }
 
 static CACHE: LazyLock<Mutex<RegistryCache>> =
@@ -109,6 +144,14 @@ pub fn infer_bin_name(package_spec: &str) -> String {
     }
 }
 
+pub fn bin_name_from_cmd(cmd: &str) -> String {
+    let trimmed = cmd.trim().trim_start_matches("./").replace('\\', "/");
+    let base = trimmed.rsplit('/').next().unwrap_or(&trimmed);
+    base.trim_end_matches(".cmd")
+        .trim_end_matches(".exe")
+        .to_string()
+}
+
 pub fn adapter_command_for(launch: &PackageLaunch) -> String {
     match launch.kind {
         DistKind::Npx => infer_bin_name(&launch.package),
@@ -127,7 +170,6 @@ pub fn adapter_args_for(launch: &PackageLaunch) -> Vec<String> {
     }
 }
 
-/// Cheers UI key for a registry agent. Builtins keep short ids for existing bots.
 pub fn cheers_key_for(registry_id: &str) -> String {
     match registry_id {
         "claude-acp" => "claude".into(),
@@ -136,37 +178,101 @@ pub fn cheers_key_for(registry_id: &str) -> String {
     }
 }
 
-pub fn parse_registry_json(raw: &str) -> Result<HashMap<String, PackageLaunch>, String> {
-    let file: RegistryFile =
-        serde_json::from_str(raw).map_err(|e| format!("registry json: {e}"))?;
-    let mut out = HashMap::new();
-    for agent in file.agents {
-        let (kind, dist) = match (agent.distribution.npx, agent.distribution.uvx) {
-            (Some(npx), _) => (DistKind::Npx, npx),
-            (None, Some(uvx)) => (DistKind::Uvx, uvx),
-            (None, None) => continue,
-        };
-        if dist.package.trim().is_empty() {
-            continue;
-        }
-        let env_keys: Vec<String> = dist.env.keys().cloned().collect();
-        out.insert(
-            agent.id.clone(),
-            PackageLaunch {
-                id: agent.id,
-                name: agent.name,
-                version: agent.version,
-                package: dist.package,
-                args: dist.args,
-                env_keys,
-                kind,
-            },
-        );
+pub fn host_platform() -> &'static str {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        "darwin-aarch64"
     }
-    Ok(out)
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        "darwin-x86_64"
+    }
+    #[cfg(not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+    )))]
+    {
+        "unknown"
+    }
 }
 
-fn fetch_registry_blocking() -> Result<HashMap<String, PackageLaunch>, String> {
+pub fn binary_target_for_host(launch: &BinaryLaunch) -> Option<&BinaryTarget> {
+    launch.targets.get(host_platform())
+}
+
+pub fn parse_registry_json(raw: &str) -> Result<ParsedRegistry, String> {
+    let file: RegistryFile =
+        serde_json::from_str(raw).map_err(|e| format!("registry json: {e}"))?;
+    let mut packages = HashMap::new();
+    let mut binaries = HashMap::new();
+    for agent in file.agents {
+        if let Some(npx) = agent.distribution.npx {
+            if !npx.package.trim().is_empty() {
+                packages.insert(
+                    agent.id.clone(),
+                    PackageLaunch {
+                        id: agent.id.clone(),
+                        name: agent.name.clone(),
+                        version: agent.version.clone(),
+                        package: npx.package,
+                        args: npx.args,
+                        env_keys: npx.env.keys().cloned().collect(),
+                        kind: DistKind::Npx,
+                    },
+                );
+                continue;
+            }
+        }
+        if let Some(uvx) = agent.distribution.uvx {
+            if !uvx.package.trim().is_empty() {
+                packages.insert(
+                    agent.id.clone(),
+                    PackageLaunch {
+                        id: agent.id.clone(),
+                        name: agent.name.clone(),
+                        version: agent.version.clone(),
+                        package: uvx.package,
+                        args: uvx.args,
+                        env_keys: uvx.env.keys().cloned().collect(),
+                        kind: DistKind::Uvx,
+                    },
+                );
+                continue;
+            }
+        }
+        if let Some(raw_targets) = agent.distribution.binary {
+            let mut targets = HashMap::new();
+            for (platform, dist) in raw_targets {
+                if dist.archive.trim().is_empty() || dist.cmd.trim().is_empty() {
+                    continue;
+                }
+                targets.insert(
+                    platform,
+                    BinaryTarget {
+                        archive: dist.archive,
+                        cmd: dist.cmd,
+                        args: dist.args,
+                        env_keys: dist.env.keys().cloned().collect(),
+                    },
+                );
+            }
+            if !targets.is_empty() {
+                binaries.insert(
+                    agent.id.clone(),
+                    BinaryLaunch {
+                        id: agent.id,
+                        name: agent.name,
+                        version: agent.version,
+                        targets,
+                    },
+                );
+            }
+        }
+    }
+    Ok(ParsedRegistry { packages, binaries })
+}
+
+fn fetch_registry_blocking() -> Result<ParsedRegistry, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(FETCH_TIMEOUT)
         .user_agent(concat!("cheers-desktop/", env!("CARGO_PKG_VERSION")))
@@ -180,28 +286,39 @@ fn fetch_registry_blocking() -> Result<HashMap<String, PackageLaunch>, String> {
     parse_registry_json(&body)
 }
 
-fn cache_get() -> HashMap<String, PackageLaunch> {
+fn cache_snapshot() -> RegistryCache {
     let mut guard = match CACHE.lock() {
         Ok(g) => g,
         Err(p) => p.into_inner(),
     };
     if let Some(at) = guard.fetched_at {
-        if at.elapsed() < CACHE_TTL && !guard.by_id.is_empty() {
-            return guard.by_id.clone();
+        if at.elapsed() < CACHE_TTL && (!guard.packages.is_empty() || !guard.binaries.is_empty()) {
+            return guard.clone();
         }
     }
     match fetch_registry_blocking() {
-        Ok(map) => {
+        Ok(parsed) => {
             guard.fetched_at = Some(Instant::now());
-            guard.by_id = map.clone();
-            map
+            guard.packages = parsed.packages;
+            guard.binaries = parsed.binaries;
+            guard.clone()
         }
-        Err(_) => guard.by_id.clone(),
+        Err(_) => guard.clone(),
     }
 }
 
 pub fn list_package_agents() -> Vec<PackageLaunch> {
-    let mut list: Vec<_> = cache_get().into_values().collect();
+    let mut list: Vec<_> = cache_snapshot().packages.into_values().collect();
+    list.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
+    });
+    list
+}
+
+pub fn list_binary_agents() -> Vec<BinaryLaunch> {
+    let mut list: Vec<_> = cache_snapshot().binaries.into_values().collect();
     list.sort_by(|a, b| {
         a.name
             .to_ascii_lowercase()
@@ -211,13 +328,17 @@ pub fn list_package_agents() -> Vec<PackageLaunch> {
 }
 
 pub fn package_launch_by_cheers_key(key: &str) -> Option<PackageLaunch> {
-    let map = cache_get();
+    let map = cache_snapshot().packages;
     let registry_id = match key {
         "claude" => "claude-acp",
         "codex" => "codex-acp",
         other => other,
     };
     map.get(registry_id).cloned()
+}
+
+pub fn binary_launch_by_cheers_key(key: &str) -> Option<BinaryLaunch> {
+    cache_snapshot().binaries.get(key).cloned()
 }
 
 #[cfg(test)]
@@ -230,23 +351,22 @@ mod tests {
             package_name_unversioned("@google/gemini-cli@0.52.0"),
             "@google/gemini-cli"
         );
-        assert_eq!(
-            package_name_unversioned("fast-agent-acp==0.9.22"),
-            "fast-agent-acp"
-        );
         assert_eq!(infer_bin_name("@google/gemini-cli@0.52.0"), "gemini");
+        assert_eq!(
+            bin_name_from_cmd("./dist-package/cursor-agent"),
+            "cursor-agent"
+        );
         assert_eq!(cheers_key_for("claude-acp"), "claude");
     }
 
     #[test]
-    fn parses_npx_and_uvx() {
-        let map = parse_registry_json(
+    fn parses_npx_uvx_and_binary() {
+        let parsed = parse_registry_json(
             r#"{
               "agents": [
                 {
                   "id": "gemini",
                   "name": "Gemini CLI",
-                  "version": "0.52.0",
                   "distribution": {
                     "npx": {
                       "package": "@google/gemini-cli@0.52.0",
@@ -267,16 +387,22 @@ mod tests {
                 {
                   "id": "cursor",
                   "name": "Cursor",
-                  "distribution": { "binary": {} }
+                  "distribution": {
+                    "binary": {
+                      "darwin-aarch64": {
+                        "archive": "https://example.com/c.tgz",
+                        "cmd": "./dist-package/cursor-agent",
+                        "args": ["acp"]
+                      }
+                    }
+                  }
                 }
               ]
             }"#,
         )
         .unwrap();
-        assert_eq!(map.len(), 2);
-        assert_eq!(map["gemini"].args, vec!["--acp"]);
-        assert_eq!(map["fast-agent"].kind, DistKind::Uvx);
-        assert_eq!(adapter_command_for(&map["fast-agent"]), "uvx");
-        assert!(!map.contains_key("cursor"));
+        assert_eq!(parsed.packages.len(), 2);
+        assert_eq!(parsed.binaries.len(), 1);
+        assert!(parsed.binaries.contains_key("cursor"));
     }
 }

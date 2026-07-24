@@ -16,7 +16,7 @@
 //! sidecar (mode 3 manual + mode 2 script write the plaintext there with 0600),
 //! keeping the secret out of the (potentially copied / committed) config body.
 
-use crate::domain::acp_registry::{self, PackageLaunch};
+use crate::domain::acp_registry::{self, BinaryLaunch, PackageLaunch};
 
 /// WS sub-paths the connector dials on the gateway's agent-bridge.
 const CONTROL_PATH: &str = "/ws/agent-bridge/control";
@@ -142,7 +142,35 @@ fn preset_from_package(launch: &PackageLaunch) -> AgentPreset {
         env_allow,
         permission_mode: None,
         allowed_modes: vec![],
-        // uvx needs a working uv toolchain on PATH; npx agents just need PATH.
+        allowed_config_options: strings(&["model"]),
+        needs_edit: false,
+    }
+}
+
+fn preset_from_binary(launch: &BinaryLaunch) -> AgentPreset {
+    let Some(target) = acp_registry::representative_binary_target(launch) else {
+        return generic_preset();
+    };
+    let mut env_allow = strings(&["HOME", "PATH"]);
+    for k in &target.env_keys {
+        if !env_allow.iter().any(|e| e == k) {
+            env_allow.push(k.clone());
+        }
+    }
+    // Cursor Agent CLI needs its auth env when not already logged in.
+    if launch.id == "cursor" {
+        for k in ["CURSOR_API_KEY", "CURSOR_API_ENDPOINT"] {
+            if !env_allow.iter().any(|e| e == k) {
+                env_allow.push(k.into());
+            }
+        }
+    }
+    AgentPreset {
+        command: acp_registry::bin_name_from_cmd(&target.cmd),
+        args: target.args.clone(),
+        env_allow,
+        permission_mode: None,
+        allowed_modes: vec![],
         allowed_config_options: strings(&["model"]),
         needs_edit: false,
     }
@@ -160,6 +188,9 @@ fn preset_for(agent_type: &str) -> AgentPreset {
     }
     if let Some(launch) = acp_registry::package_launch_for(&id) {
         return preset_from_package(&launch);
+    }
+    if let Some(launch) = acp_registry::binary_launch_for(&id) {
+        return preset_from_binary(&launch);
     }
     generic_preset()
 }
@@ -650,6 +681,7 @@ mod tests {
 
     #[test]
     fn renders_registry_npx_agent_with_args() {
+        let _lock = crate::domain::acp_registry::test_registry_lock();
         crate::domain::acp_registry::seed_cache_for_test(
             r#"{
               "agents": [{
@@ -678,6 +710,7 @@ mod tests {
 
     #[test]
     fn renders_registry_uvx_agent_via_uvx_launcher() {
+        let _lock = crate::domain::acp_registry::test_registry_lock();
         crate::domain::acp_registry::seed_cache_for_test(
             r#"{
               "agents": [{
@@ -701,6 +734,39 @@ mod tests {
         });
         assert!(toml.contains("command = \"uvx\""));
         assert!(toml.contains(r#"args    = ["fast-agent-acp==0.9.22", "-x"]"#));
+        assert!(!toml.contains("PLACEHOLDER"));
+    }
+
+    #[test]
+    fn renders_registry_binary_cursor() {
+        let _lock = crate::domain::acp_registry::test_registry_lock();
+        crate::domain::acp_registry::seed_cache_for_test(
+            r#"{
+              "agents": [{
+                "id": "cursor",
+                "name": "Cursor",
+                "version": "1.0.0",
+                "distribution": {
+                  "binary": {
+                    "darwin-aarch64": {
+                      "archive": "https://example.com/cursor.tgz",
+                      "cmd": "./dist-package/cursor-agent",
+                      "args": ["acp"]
+                    }
+                  }
+                }
+              }]
+            }"#,
+        );
+        let toml = render_toml(&RenderParams {
+            account_id: "cur",
+            agent_type: "cursor",
+            public_base: "ws://localhost:30080",
+            token_ref: TokenRef::File("secrets/cur.token".into()),
+        });
+        assert!(toml.contains("command = \"cursor-agent\""));
+        assert!(toml.contains(r#"args    = ["acp"]"#));
+        assert!(toml.contains("\"CURSOR_API_KEY\""));
         assert!(!toml.contains("PLACEHOLDER"));
     }
 }

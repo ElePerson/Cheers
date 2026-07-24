@@ -48,6 +48,16 @@ const AGENT_ICONS: AgentIcon[] = [
     ],
   },
   {
+    match: /cursor/i,
+    title: "Cursor",
+    bg: "#141414",
+    fg: "#FFFFFF",
+    paths: [
+      // Simplified Cursor mark (triangle wedge).
+      "M4 4 L20 12 L4 20 L8 12 Z",
+    ],
+  },
+  {
     match: /copilot/i,
     title: "Copilot",
     bg: "#24292F",

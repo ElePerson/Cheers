@@ -495,15 +495,16 @@ pub struct DetectedAgent {
     pub installable: bool,
 }
 
-/// Which ACP agents are available: every **npx/uvx** entry from the live
+/// Which ACP agents are available: every **npx/uvx/binary** entry from the live
 /// registry, plus OpenCode (binary/npm). Login-PATH lookup marks what's already
-/// installed (for uvx agents: whether `uvx` itself is on PATH).
+/// installed (for uvx agents: whether `uvx` itself is on PATH; for binary:
+/// PATH or `~/.cheers/agents/<id>/`).
 #[tauri::command]
 pub fn detect_agents() -> Vec<DetectedAgent> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    // OpenCode first (not npx in the registry).
+    // OpenCode first (also binary in the registry — keep the npm install path).
     {
         let (key, label, cmd, install) = BUILTIN_OPENCODE;
         let path = resolve_on_login_path(cmd);
@@ -551,12 +552,46 @@ pub fn detect_agents() -> Vec<DetectedAgent> {
         });
     }
 
-    // Stable order: builtins-ish first (claude/codex/opencode), then A–Z.
+    for launch in crate::acp_registry::list_binary_agents() {
+        let key = crate::acp_registry::cheers_key_for(&launch.id);
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        let Some(target) = crate::acp_registry::binary_target_for_host(&launch) else {
+            // No archive for this Mac arch — still list it so the UI can explain.
+            out.push(DetectedAgent {
+                key,
+                label: launch.name,
+                command: String::new(),
+                args: vec![],
+                installed: false,
+                path: None,
+                installable: false,
+            });
+            continue;
+        };
+        let cmd = crate::acp_registry::bin_name_from_cmd(&target.cmd);
+        let args = target.args.clone();
+        let path = resolve_on_login_path(&cmd)
+            .or_else(|| resolve_cheers_agent_bin(&launch.id, &target.cmd));
+        out.push(DetectedAgent {
+            key,
+            label: launch.name,
+            command: cmd,
+            args,
+            installed: path.is_some(),
+            path: path.map(|p| p.to_string_lossy().into_owned()),
+            installable: true,
+        });
+    }
+
+    // Stable order: builtins-ish first, Cursor next, then A–Z.
     out.sort_by(|a, b| {
         let rank = |k: &str| match k {
             "claude" => 0,
             "codex" => 1,
             "opencode" => 2,
+            "cursor" => 3,
             _ => 10,
         };
         rank(&a.key).cmp(&rank(&b.key)).then_with(|| {
@@ -568,37 +603,43 @@ pub fn detect_agents() -> Vec<DetectedAgent> {
     out
 }
 
-/// One-click install of a registry/builtin agent (npm or uv). Long-running → blocking thread.
+/// One-click install of a registry/builtin agent (npm, uv, or binary archive).
 #[tauri::command]
 pub async fn install_agent(key: String) -> Result<String, String> {
     if key == "opencode" {
         return run_login_shell_install(BUILTIN_OPENCODE.3.to_string()).await;
     }
-    let launch = crate::acp_registry::package_launch_by_cheers_key(&key)
-        .ok_or_else(|| format!("unknown agent '{key}'"))?;
-    match launch.kind {
-        crate::acp_registry::DistKind::Npx => {
-            if !is_safe_npm_spec(&launch.package) {
-                return Err(format!(
-                    "refusing unsafe npm package spec: {}",
-                    launch.package
-                ));
+    if let Some(launch) = crate::acp_registry::package_launch_by_cheers_key(&key) {
+        return match launch.kind {
+            crate::acp_registry::DistKind::Npx => {
+                if !is_safe_npm_spec(&launch.package) {
+                    return Err(format!(
+                        "refusing unsafe npm package spec: {}",
+                        launch.package
+                    ));
+                }
+                run_login_shell_install(format!("npm install -g {}", launch.package)).await
             }
-            run_login_shell_install(format!("npm install -g {}", launch.package)).await
-        }
-        crate::acp_registry::DistKind::Uvx => {
-            if !is_safe_uv_spec(&launch.package) {
-                return Err(format!(
-                    "refusing unsafe uv package spec: {}",
-                    launch.package
-                ));
+            crate::acp_registry::DistKind::Uvx => {
+                if !is_safe_uv_spec(&launch.package) {
+                    return Err(format!(
+                        "refusing unsafe uv package spec: {}",
+                        launch.package
+                    ));
+                }
+                let package = launch.package.clone();
+                tauri::async_runtime::spawn_blocking(move || install_uvx_agent(&package))
+                    .await
+                    .map_err(|e| e.to_string())?
             }
-            let package = launch.package.clone();
-            tauri::async_runtime::spawn_blocking(move || install_uvx_agent(&package))
-                .await
-                .map_err(|e| e.to_string())?
-        }
+        };
     }
+    if let Some(launch) = crate::acp_registry::binary_launch_by_cheers_key(&key) {
+        return tauri::async_runtime::spawn_blocking(move || install_binary_agent(&launch))
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Err(format!("unknown agent '{key}'"))
 }
 
 async fn run_login_shell_install(install_cmd: String) -> Result<String, String> {
@@ -651,6 +692,133 @@ fn install_uvx_agent(package: &str) -> Result<String, String> {
                 .into(),
         );
     }
+    Ok("installed".to_string())
+}
+
+/// `~/.cheers/agents/<id>/` — extracted registry binary agents live here.
+fn cheers_agents_dir() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("no home directory")?;
+    let dir = home.join(".cheers/agents");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Absolute path to an extracted registry binary, if present and executable.
+fn resolve_cheers_agent_bin(agent_id: &str, cmd: &str) -> Option<PathBuf> {
+    let safe = safe_name(agent_id);
+    let rel = cmd.trim().trim_start_matches("./").replace('\\', "/");
+    if rel.is_empty() || rel.contains("..") {
+        return None;
+    }
+    let candidate = cheers_agents_dir().ok()?.join(&safe).join(rel);
+    if candidate.is_file() {
+        candidate.canonicalize().ok().or(Some(candidate))
+    } else {
+        None
+    }
+}
+
+fn is_safe_https_archive_url(url: &str) -> bool {
+    let Ok(u) = url::Url::parse(url.trim()) else {
+        return false;
+    };
+    if u.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = u.host_str() else {
+        return false;
+    };
+    // Registry archives are first-party CDN / GitHub / vendor downloads.
+    host == "cdn.agentclientprotocol.com"
+        || host.ends_with(".cursor.com")
+        || host == "downloads.cursor.com"
+        || host == "github.com"
+        || host == "objects.githubusercontent.com"
+        || host.ends_with(".githubusercontent.com")
+        || host.ends_with(".github.com")
+}
+
+/// Download + extract a registry binary agent into `~/.cheers/agents/<id>/`.
+fn install_binary_agent(launch: &crate::acp_registry::BinaryLaunch) -> Result<String, String> {
+    let target = crate::acp_registry::binary_target_for_host(launch).ok_or_else(|| {
+        format!(
+            "no binary for platform {}",
+            crate::acp_registry::host_platform()
+        )
+    })?;
+    if !is_safe_https_archive_url(&target.archive) {
+        return Err(format!("refusing archive URL host: {}", target.archive));
+    }
+    let dest = cheers_agents_dir()?.join(safe_name(&launch.id));
+    if dest.exists() {
+        fs::remove_dir_all(&dest).map_err(|e| format!("clear old install: {e}"))?;
+    }
+    fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+
+    let archive_name = if target.archive.contains(".zip") {
+        "agent.zip"
+    } else {
+        "agent.tar.gz"
+    };
+    let archive_path = dest.join(archive_name);
+    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    // Quote URL for the shell; host already allowlisted.
+    let download = format!(
+        "curl -fsSL --retry 3 -o '{}' '{}'",
+        archive_path.display(),
+        target.archive.replace('\'', "'\\''")
+    );
+    let out = std::process::Command::new(&shell)
+        .args(["-lic", &download])
+        .output()
+        .map_err(|e| format!("download failed to start: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!(
+            "download failed — {}",
+            err.trim().lines().last().unwrap_or("see terminal")
+        ));
+    }
+
+    let extract = if archive_name.ends_with(".zip") {
+        format!(
+            "ditto -x -k '{}' '{}'",
+            archive_path.display(),
+            dest.display()
+        )
+    } else {
+        format!(
+            "tar -xzf '{}' -C '{}'",
+            archive_path.display(),
+            dest.display()
+        )
+    };
+    let out = std::process::Command::new(&shell)
+        .args(["-lic", &extract])
+        .output()
+        .map_err(|e| format!("extract failed to start: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!(
+            "extract failed — {}",
+            err.trim().lines().last().unwrap_or("see terminal")
+        ));
+    }
+    let _ = fs::remove_file(&archive_path);
+
+    let bin = resolve_cheers_agent_bin(&launch.id, &target.cmd).ok_or_else(|| {
+        format!(
+            "archive extracted but '{}' was not found under {}",
+            target.cmd,
+            dest.display()
+        )
+    })?;
+    let _ = std::process::Command::new("chmod")
+        .args(["+x", &bin.to_string_lossy()])
+        .status();
+    let _ = std::process::Command::new("xattr")
+        .args(["-cr", &dest.to_string_lossy()])
+        .status();
     Ok("installed".to_string())
 }
 

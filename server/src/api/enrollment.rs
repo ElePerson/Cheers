@@ -636,6 +636,24 @@ fn build_agent_catalog() -> Vec<Value> {
             "installable": true,
         }));
     }
+    for launch in acp_registry::list_binary_agents() {
+        if seen.contains(&launch.id) {
+            continue;
+        }
+        seen.insert(launch.id.clone());
+        let (cmd, args) = acp_registry::representative_binary_target(&launch)
+            .map(|t| (acp_registry::bin_name_from_cmd(&t.cmd), t.args.clone()))
+            .unwrap_or_default();
+        out.push(json!({
+            "id": launch.id,
+            "name": launch.name,
+            "version": launch.version,
+            "command": cmd,
+            "args": args,
+            "source": "registry-binary",
+            "installable": true,
+        }));
+    }
     out.push(json!({
         "id": "generic",
         "name": "Something else",
