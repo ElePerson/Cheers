@@ -34,7 +34,7 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 cheers-bridge-protocol = { path = "bridge-protocol" }
 clap = { version = "4", features = ["derive"] }
-ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
+ed25519-dalek = { version = "3", features = ["pkcs8", "pem"] }
 futures-util = "0.3"
 libc = "0.2"
 mime_guess = "2"
