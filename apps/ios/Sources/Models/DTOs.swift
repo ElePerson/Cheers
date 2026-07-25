@@ -1393,12 +1393,13 @@ struct AuditEvent: Decodable, Identifiable {
         case createdAt = "created_at"
     }
 
-    /// What was actually approved, dug out of `detail.tool`. `detail.title` is a
-    /// hardcoded "ACP permission request" server-side and must never be used.
+    /// Prefer connector `command`, then server-normalized `summary`, then body.
+    /// Gateway fills `tool.summary` / `command` / `locations` for all agents (#332).
     var subject: String? {
         guard let tool = detail?["tool"] else { return nil }
         let raw = tool["raw_input"]
         let candidates: [String?] = [
+            tool["summary"]?.stringValue,
             tool["command"]?.stringValue,
             raw?["command"]?.stringValue,
             raw?["file_path"]?.stringValue,
@@ -1644,4 +1645,40 @@ struct FsFile: Decodable {
     enum CodingKeys: String, CodingKey {
         case path, content, version
     }
+}
+
+// MARK: - Durable agent-trace timeline (docs/arch/TRACE_PERSISTENCE.md)
+
+/// One persisted step of a bot turn (`message_traces`), including interleaved
+/// approval lifecycle rows (`kind == "approval"`).
+struct TraceEntryDto: Codable, Identifiable, Hashable {
+    var id: String
+    var msgId: String
+    var traceSeq: Int
+    var kind: String
+    var phase: String
+    var status: String?
+    var title: String?
+    var message: String?
+    var requestId: String?
+    var approvalKind: String?
+    var decision: String?
+    var optionId: String?
+    var actorId: String?
+    var createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, phase, status, title, message, decision
+        case msgId = "msg_id"
+        case traceSeq = "trace_seq"
+        case requestId = "request_id"
+        case approvalKind = "approval_kind"
+        case optionId = "option_id"
+        case actorId = "actor_id"
+        case createdAt = "created_at"
+    }
+}
+
+struct MessageTraceResponse: Decodable {
+    var events: [TraceEntryDto]
 }

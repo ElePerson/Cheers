@@ -10,10 +10,10 @@ struct FriendsView: View {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .friends: return "Friends"
-            case .requests: return "Requests"
-            case .add: return "Add"
-            case .blocked: return "Blocked"
+            case .friends: return String(localized: "Friends")
+            case .requests: return String(localized: "Requests")
+            case .add: return String(localized: "Add")
+            case .blocked: return String(localized: "Blocked")
             }
         }
     }
@@ -33,13 +33,17 @@ struct FriendsView: View {
         VStack(spacing: 0) {
             Picker("Tab", selection: $tab) {
                 ForEach(Tab.allCases) { t in
-                    Text(t == .requests && !incoming.isEmpty ? "Requests (\(incoming.count))" : t.title)
-                        .tag(t)
+                    Text(
+                        t == .requests && !incoming.isEmpty
+                            ? String(localized: "Requests (\(incoming.count))")
+                            : t.title
+                    )
+                    .tag(t)
                 }
             }
             .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, Theme.space4)
+            .padding(.vertical, Theme.space2)
 
             if let errorText {
                 Text(errorText)
@@ -78,14 +82,14 @@ struct FriendsView: View {
                     .foregroundStyle(Theme.textSecondary)
             } else {
                 ForEach(friends) { friend in
-                    HStack(spacing: 12) {
+                    HStack(spacing: Theme.space3) {
                         AvatarView(
                             seedId: friend.friendId,
                             name: friend.displayName ?? friend.username,
-                            size: 36,
+                            size: Theme.avatarList,
                             monochrome: true
                         )
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: Theme.space1) {
                             Text(friend.displayName ?? friend.username)
                                 .font(.system(size: 15, weight: .medium))
                             Text("@\(friend.username)")
@@ -97,10 +101,21 @@ struct FriendsView: View {
                             Task { await openDM(userId: friend.friendId) }
                         } label: {
                             Image(systemName: "bubble.left")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(Theme.textSecondary)
+                                .frame(width: Theme.hitMin, height: Theme.hitMin)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.borderless)
+                        .accessibilityLabel(String(localized: "Open direct message"))
                         .disabled(isBusy)
                     }
+                    .listRowInsets(EdgeInsets(
+                        top: Theme.rowVertical,
+                        leading: Theme.space4,
+                        bottom: Theme.rowVertical,
+                        trailing: Theme.space2
+                    ))
                     .swipeActions {
                         Button(role: .destructive) {
                             Task { await remove(friendId: friend.friendId) }
@@ -253,7 +268,7 @@ struct FriendsView: View {
             let results = try await api.searchUsers(query: q)
             searchHit = results.first
             if results.isEmpty {
-                errorText = "No user found for that ID."
+                errorText = String(localized: "No user found for that ID.")
             }
         } catch {
             errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription

@@ -747,6 +747,22 @@ struct APIClient: Sendable {
             as: AuthAckResponse.self
         )
     }
+
+    /// Durable per-turn agent trace (incl. interleaved approvals). Used by the
+    /// lazy "Agent steps" reveal — never fetch until the user expands.
+    func fetchMessageTrace(
+        channelId: String,
+        msgId: String,
+        limit: Int = 500
+    ) async throws -> [TraceEntryDto] {
+        let encoded = msgId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? msgId
+        let response = try await getJSON(
+            "/channels/\(channelId)/messages/\(encoded)/trace",
+            query: [URLQueryItem(name: "limit", value: String(limit))],
+            as: MessageTraceResponse.self
+        )
+        return response.events
+    }
 }
 
 struct ResolvePermissionRequest: Encodable {

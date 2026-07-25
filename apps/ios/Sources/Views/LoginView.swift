@@ -133,13 +133,13 @@ struct LoginView: View {
                         .font(.system(size: 14, weight: .medium))
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
+                .frame(minHeight: Theme.hitMin)
                 .background(canSubmit ? Theme.accent : Theme.accent.opacity(0.5))
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .disabled(!canSubmit || isBusy)
-            .padding(.top, 4)
+            .padding(.top, Theme.space1)
 
             Button {
                 focusedField = nil
@@ -148,18 +148,19 @@ struct LoginView: View {
                 Text("Forgot password?")
                     .font(.system(size: 13, weight: .medium))
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .frame(minHeight: 36)
+                    .frame(minHeight: Theme.hitMin)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.accentHover)
             .disabled(isBusy)
 
-            HStack {
-                Rectangle().fill(Theme.border).frame(height: 1)
-                Text("or").font(.system(size: 12)).foregroundStyle(Theme.textMuted)
-                Rectangle().fill(Theme.border).frame(height: 1)
-            }
-            .padding(.vertical, 2)
+            // Spacing-first grouping between password auth and OAuth — no decorative hairlines.
+            Text("or")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textMuted)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.space2)
 
             if googleEnabled {
                 Button(action: submitGoogle) {
@@ -281,7 +282,7 @@ struct LoginView: View {
                         .font(.system(size: 14, weight: .medium))
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
+                .frame(minHeight: Theme.hitMin)
                 .background(canSubmitFactor ? Theme.accent : Theme.accent.opacity(0.5))
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

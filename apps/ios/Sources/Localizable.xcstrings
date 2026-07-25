@@ -1,0 +1,501 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Accept" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接受" } }
+      }
+    },
+    "Add" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "添加" } }
+      }
+    },
+    "All conversations" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全部会话" } }
+      }
+    },
+    "Apple sign-in isn't configured on this server." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此服务器未配置通过 Apple 登录。" } }
+      }
+    },
+    "Approval request (resolved)" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "审批请求（已处理）" } }
+      }
+    },
+    "Approval request — respond from the web app" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "审批请求 — 请在网页端处理" } }
+      }
+    },
+    "Agent sign-in (resolved)" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "智能体登录（已处理）" } }
+      }
+    },
+    "Agent sign-in required" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要智能体登录" } }
+      }
+    },
+    "Back to sign in" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "返回登录" } }
+      }
+    },
+    "Block" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "拉黑" } }
+      }
+    },
+    "Block user" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "拉黑用户" } }
+      }
+    },
+    "Blocked" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已拉黑" } }
+      }
+    },
+    "BOT" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "BOT" } }
+      }
+    },
+    "Bot" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "机器人" } }
+      }
+    },
+    "Cancel" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消" } }
+      }
+    },
+    "Channel files" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "频道文件" } }
+      }
+    },
+    "Channel settings" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "频道设置" } }
+      }
+    },
+    "Channels" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "频道" } }
+      }
+    },
+    "Continue with Google" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用 Google 继续" } }
+      }
+    },
+    "Copy text" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制文字" } }
+      }
+    },
+    "Decline" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "拒绝" } }
+      }
+    },
+    "Direct messages" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "私信" } }
+      }
+    },
+    "Fleet" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "机群" } }
+      }
+    },
+    "Forgot password?" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "忘记密码？" } }
+      }
+    },
+    "Forward" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "转发" } }
+      }
+    },
+    "Friends" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "好友" } }
+      }
+    },
+    "Incoming" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "收到的请求" } }
+      }
+    },
+    "Jump to latest messages" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "跳到最新消息" } }
+      }
+    },
+    "Look up" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查找" } }
+      }
+    },
+    "Members" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "成员" } }
+      }
+    },
+    "Message" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "消息" } }
+      }
+    },
+    "Message %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "发消息给 %@" } }
+      }
+    },
+    "Message #%@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "发消息到 #%@" } }
+      }
+    },
+    "Name" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "名称" } }
+      }
+    },
+    "New to Cheers? Create an account" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有账号？创建账户" } }
+      }
+    },
+    "New workspace" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新建工作区" } }
+      }
+    },
+    "No blocked users." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无已拉黑用户。" } }
+      }
+    },
+    "No friends yet. Use Add to find people by user ID." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有好友。打开「添加」并用用户 ID 查找。" } }
+      }
+    },
+    "No user found for that ID." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "找不到该用户 ID。" } }
+      }
+    },
+    "None" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无" } }
+      }
+    },
+    "Notifications" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "通知" } }
+      }
+    },
+    "Open direct message" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开私信" } }
+      }
+    },
+    "or" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "或" } }
+      }
+    },
+    "Outgoing" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "发出的请求" } }
+      }
+    },
+    "Password" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码" } }
+      }
+    },
+    "Personal" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "个人" } }
+      }
+    },
+    "Privacy Policy" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐私政策" } }
+      }
+    },
+    "Remove" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除" } }
+      }
+    },
+    "Reply" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "回复" } }
+      }
+    },
+    "Report message" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "举报消息" } }
+      }
+    },
+    "Requests" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请求" } }
+      }
+    },
+    "Requests (%lld)" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请求（%lld）" } }
+      }
+    },
+    "Result" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "结果" } }
+      }
+    },
+    "Return to latest messages" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "回到最新消息" } }
+      }
+    },
+    "Search matches an exact user ID only (same as the web Friends Add tab)." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "仅支持精确用户 ID 查找（与网页端好友「添加」一致）。" } }
+      }
+    },
+    "Send friend request" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "发送好友请求" } }
+      }
+    },
+    "Server" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器" } }
+      }
+    },
+    "Sign in" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录" } }
+      }
+    },
+    "Sign in to your workspace" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录你的工作区" } }
+      }
+    },
+    "Signing in…" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在登录…" } }
+      }
+    },
+    "Support" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "支持" } }
+      }
+    },
+    "Today" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "今天" } }
+      }
+    },
+    "Two-factor verification" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "两步验证" } }
+      }
+    },
+    "Unblock" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消拉黑" } }
+      }
+    },
+    "Unknown" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知" } }
+      }
+    },
+    "Use Passkey" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用通行密钥" } }
+      }
+    },
+    "User ID (UUID)" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户 ID（UUID）" } }
+      }
+    },
+    "Username" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户名" } }
+      }
+    },
+    "Username or email" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户名或邮箱" } }
+      }
+    },
+    "Verification code" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "验证码" } }
+      }
+    },
+    "Verify" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "验证" } }
+      }
+    },
+    "Verifying…" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在验证…" } }
+      }
+    },
+    "ViewBoard" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "ViewBoard" } }
+      }
+    },
+    "Waiting for Passkey…" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "等待通行密钥…" } }
+      }
+    },
+    "Workbench" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "工作台" } }
+      }
+    },
+    "Workspace files" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "工作区文件" } }
+      }
+    },
+    "Yesterday" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "昨天" } }
+      }
+    },
+    "Agent steps" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "智能体步骤" } }
+      }
+    },
+    "Agent steps · %lld" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "智能体步骤 · %lld" } }
+      }
+    },
+    "Show agent steps" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示智能体步骤" } }
+      }
+    },
+    "Hide agent steps" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐藏智能体步骤" } }
+      }
+    },
+    "No steps recorded." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有记录步骤。" } }
+      }
+    },
+    "Failed to load steps." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "加载步骤失败。" } }
+      }
+    },
+    "Retry" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重试" } }
+      }
+    },
+    "Approved" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已批准" } }
+      }
+    },
+    "Denied" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已拒绝" } }
+      }
+    },
+    "Expired" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已过期" } }
+      }
+    },
+    "Rejected" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已驳回" } }
+      }
+    },
+    "Auto-allowed" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动允许" } }
+      }
+    },
+    "Approval" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "审批" } }
+      }
+    },
+    "Tool" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "工具" } }
+      }
+    },
+    "Plan" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "计划" } }
+      }
+    },
+    "Done" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "完成" } }
+      }
+    },
+    "Start" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开始" } }
+      }
+    },
+    "Failed" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "失败" } }
+      }
+    },
+    "Event" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件" } }
+      }
+    },
+    "Pending" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "等待中" } }
+      }
+    },
+    "In progress" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "进行中" } }
+      }
+    },
+    "Completed" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已完成" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}
