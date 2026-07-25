@@ -113,16 +113,22 @@ export function PermissionCard({
   const [diffError, setDiffError] = useState<string | null>(null);
 
   const tool = data.tool ?? null;
-  // Prefer the connector's normalized command (e.g. "/bin/zsh -lc \"…\"") over
-  // the raw, often-escaped toolCall.rawInput.command before falling back.
+  // Prefer connector/gateway-normalized command, then summary (#332), then
+  // raw_input / title fallbacks for older cards that predate server extract.
   const command =
     (tool?.command?.trim() ? tool.command : null) ??
+    (tool?.summary?.trim() ? tool.summary : null) ??
     previewRawInput(tool?.raw_input) ??
     tool?.title ??
     tool?.name ??
     data.body ??
     null;
-  const title = data.title || "Approval needed";
+  const title =
+    (tool?.title && tool.title.trim() && tool.title !== "ACP permission request"
+      ? tool.title
+      : null) ??
+    (data.title && data.title !== "ACP permission request" ? data.title : null) ??
+    "Approval needed";
   const subtitle = `${message.sender_name || "The agent"} is requesting permission.`;
   const impact = data.body && data.body !== command ? data.body : null;
 

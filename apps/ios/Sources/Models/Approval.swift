@@ -57,17 +57,27 @@ struct PermissionRequest {
             return nil
         }
         self.requestId = requestId
-        self.title = data["title"]?.stringValue ?? "Approval needed"
         self.resolved = data["resolved"]?.boolValue == true
         self.resolvedKind = data["resolved_kind"]?.stringValue
         self.chosenKind = data["chosen_kind"]?.stringValue
 
         let tool = data["tool"]
-        // Prefer the connector's normalized command over the raw tool input.
-        self.command = tool?.firstString("command") ?? data.firstString("body")
+        // Prefer connector/server-normalized command, then summary (#332).
+        self.command = tool?.firstString("command")
+            ?? tool?.firstString("summary")
+            ?? data.firstString("body")
         self.diff = tool?.firstString("diff")
         let body = data.firstString("body")
-        self.impact = (body != nil && body != (tool?.firstString("command"))) ? body : nil
+        let cmd = self.command
+        self.impact = (body != nil && body != cmd) ? body : nil
+        // Prefer a concrete tool title over connector boilerplate.
+        if let toolTitle = tool?.firstString("title"), !toolTitle.isEmpty {
+            self.title = toolTitle
+        } else if let t = data["title"]?.stringValue, !t.isEmpty {
+            self.title = t
+        } else {
+            self.title = "Approval needed"
+        }
 
         var parsed: [PermissionOption] = []
         if let raw = data["options"]?.arrayValue {

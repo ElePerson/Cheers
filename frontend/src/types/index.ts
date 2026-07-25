@@ -157,10 +157,13 @@ export interface PermissionContentData {
     diff?: string | null;
     // Normalized by the connector from the agent's _meta (e.g. codex's
     // `_meta.codex.params.command`/`cwd`) — cleaner than raw_input.command.
+    // Gateway also fills gaps from raw_input / locations (see tool_request.rs).
     command?: string | null;
     cwd?: string | null;
     status?: string | null;
     tool_call_id?: string | null;
+    /** Server-filled one-line "what is being approved" for all agents (#332). */
+    summary?: string | null;
   } | null;
   options?: PermissionOption[];
   bot_owner_id?: string;

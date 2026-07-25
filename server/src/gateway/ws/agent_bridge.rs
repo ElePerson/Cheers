@@ -1519,20 +1519,15 @@ async fn handle_permission_request_frame(
     // pending card and routes the answer to RESPOND-authorized users (see
     // docs/arch/ACP_EVENT_TAXONOMY.md). No per-tool-kind auto-answer here.
     let msg_id = Uuid::new_v4();
-    let title = frame
-        .get("title")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Approval needed");
-    let body = frame
-        .get("body")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("The agent requested approval.");
-    let content = if title == "Approval needed" {
-        body.to_string()
+    // Canonical multi-agent extraction: fill command / locations / summary so
+    // Web, iOS, Audit, and push all see the same concrete payload (#332).
+    let (title, body, tool) = crate::domain::tool_request::normalize_permission_payload(
+        frame.get("title").and_then(Value::as_str),
+        frame.get("body").and_then(Value::as_str),
+        frame.get("tool"),
+    );
+    let content = if title == "Approval needed" || title == body {
+        body.clone()
     } else {
         format!("{title}\n\n{body}")
     };
@@ -1546,7 +1541,7 @@ async fn handle_permission_request_frame(
         "provider_session_id": frame.get("provider_session_id").cloned().unwrap_or(Value::Null),
         "title": title,
         "body": body,
-        "tool": frame.get("tool").cloned().unwrap_or(Value::Null),
+        "tool": tool,
         "options": frame.get("options").cloned().unwrap_or_else(|| json!([])),
         "resolved": false,
         "bot_owner_id": bot.owner_id.clone(),
@@ -1609,7 +1604,7 @@ async fn handle_permission_request_frame(
                     .display_name
                     .clone()
                     .unwrap_or_else(|| bot.username.clone()),
-                title: title.to_string(),
+                title: title.clone(),
                 approve_option_id,
                 reject_option_id,
             },
@@ -1633,7 +1628,8 @@ async fn handle_permission_request_frame(
             msg_id: Some(msg_id),
             detail: Some(json!({
                 "title": title,
-                "tool": frame.get("tool").cloned().unwrap_or(Value::Null),
+                "body": body,
+                "tool": tool,
             })),
             ..Default::default()
         },
@@ -1661,9 +1657,9 @@ async fn handle_permission_request_frame(
             kind: "approval",
             phase: "approval".to_string(),
             status: Some("pending".to_string()),
-            title: Some(title.to_string()),
-            message: Some(body.to_string()),
-            data: Some(json!({ "tool": frame.get("tool").cloned().unwrap_or(Value::Null) })),
+            title: Some(title.clone()),
+            message: Some(body.clone()),
+            data: Some(json!({ "tool": tool })),
             request_id: frame
                 .get("request_id")
                 .and_then(Value::as_str)
@@ -1755,10 +1751,7 @@ async fn handle_permission_request_frame(
                     "request_id".into(),
                     frame.get("request_id").cloned().unwrap_or(Value::Null),
                 );
-                obj.insert(
-                    "tool".into(),
-                    frame.get("tool").cloned().unwrap_or(Value::Null),
-                );
+                obj.insert("tool".into(), tool.clone());
                 obj.insert(
                     "options".into(),
                     frame.get("options").cloned().unwrap_or_else(|| json!([])),

@@ -1393,12 +1393,13 @@ struct AuditEvent: Decodable, Identifiable {
         case createdAt = "created_at"
     }
 
-    /// What was actually approved, dug out of `detail.tool`. `detail.title` is a
-    /// hardcoded "ACP permission request" server-side and must never be used.
+    /// Prefer connector `command`, then server-normalized `summary`, then body.
+    /// Gateway fills `tool.summary` / `command` / `locations` for all agents (#332).
     var subject: String? {
         guard let tool = detail?["tool"] else { return nil }
         let raw = tool["raw_input"]
         let candidates: [String?] = [
+            tool["summary"]?.stringValue,
             tool["command"]?.stringValue,
             raw?["command"]?.stringValue,
             raw?["file_path"]?.stringValue,
