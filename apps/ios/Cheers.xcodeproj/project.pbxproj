@@ -52,6 +52,7 @@
 		CE0000000000000000000414 /* TaskClaimConfirmationFooter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000415 /* TaskClaimConfirmationFooter.swift */; };
 		CE0000000000000000000416 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000418 /* LiveKit */; };
 		CE0000000000000000000230 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000128 /* PrivacyInfo.xcprivacy */; };
+		CE0000000000000000000450 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000451 /* Localizable.xcstrings */; };
 		CE0000000000000000000430 /* TwoFactorSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000422 /* TwoFactorSettingsView.swift */; };
 		CE0000000000000000000431 /* NewWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000423 /* NewWorkspaceSheet.swift */; };
 		CE0000000000000000000432 /* BotDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000424 /* BotDetailView.swift */; };
@@ -60,6 +61,7 @@
 		CE0000000000000000000435 /* ForgotPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000427 /* ForgotPasswordView.swift */; };
 		CE0000000000000000000436 /* FriendsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000428 /* FriendsView.swift */; };
 		CE0000000000000000000437 /* GoogleOAuthSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000429 /* GoogleOAuthSession.swift */; };
+		CE0000000000000000000452 /* BotTracePanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000453 /* BotTracePanelView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -106,6 +108,8 @@
 		CE0000000000000000000111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		CE0000000000000000000127 /* Cheers.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cheers.entitlements; sourceTree = "<group>"; };
 		CE0000000000000000000128 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		CE0000000000000000000451 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		CE0000000000000000000453 /* BotTracePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotTracePanelView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000402 /* Cheers.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cheers.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE0000000000000000000411 /* VoiceRoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRoomModel.swift; sourceTree = "<group>"; };
 		CE0000000000000000000413 /* VoiceMeetingStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceMeetingStrip.swift; sourceTree = "<group>"; };
@@ -155,6 +159,7 @@
 				CE0000000000000000000111 /* Info.plist */,
 				CE0000000000000000000127 /* Cheers.entitlements */,
 				CE0000000000000000000128 /* PrivacyInfo.xcprivacy */,
+				CE0000000000000000000451 /* Localizable.xcstrings */,
 				CE0000000000000000000120 /* Assets.xcassets */,
 				CE0000000000000000000304 /* Support */,
 				CE0000000000000000000305 /* Models */,
@@ -241,6 +246,7 @@
 				CE0000000000000000000426 /* PasskeySettingsView.swift */,
 				CE0000000000000000000423 /* NewWorkspaceSheet.swift */,
 				CE000000000000000000011D /* ApprovalCardView.swift */,
+				CE0000000000000000000453 /* BotTracePanelView.swift */,
 				CE0000000000000000000441 /* AuthRequiredCardView.swift */,
 				CE000000000000000000011E /* ApprovalSheetView.swift */,
 				CE0000000000000000000413 /* VoiceMeetingStrip.swift */,
@@ -294,6 +300,7 @@
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
 			);
 			mainGroup = CE0000000000000000000301;
 			productRefGroup = CE0000000000000000000302 /* Products */;
@@ -315,6 +322,7 @@
 			files = (
 				CE000000000000000000021F /* Assets.xcassets in Resources */,
 				CE0000000000000000000230 /* PrivacyInfo.xcprivacy in Resources */,
+				CE0000000000000000000450 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -369,6 +377,7 @@
 				CE0000000000000000000433 /* PasskeyController.swift in Sources */,
 				CE0000000000000000000437 /* GoogleOAuthSession.swift in Sources */,
 				CE000000000000000000021C /* ApprovalCardView.swift in Sources */,
+				CE0000000000000000000452 /* BotTracePanelView.swift in Sources */,
 				CE0000000000000000000440 /* AuthRequiredCardView.swift in Sources */,
 				CE000000000000000000021D /* ApprovalSheetView.swift in Sources */,
 				CE000000000000000000021E /* PushRouter.swift in Sources */,

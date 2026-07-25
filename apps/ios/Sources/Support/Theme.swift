@@ -33,6 +33,24 @@ extension Color {
 }
 
 enum Theme {
+    // MARK: Spacing (spacing-first grouping; HIG hit floor)
+    /// 4pt — tight intra-row gaps (name / subtitle stacks).
+    static let space1: CGFloat = 4
+    /// 8pt — default control padding / compact section gaps.
+    static let space2: CGFloat = 8
+    /// 12pt — row gutters / field padding.
+    static let space3: CGFloat = 12
+    /// 16pt — screen horizontal inset / section padding.
+    static let space4: CGFloat = 16
+    /// 24pt — card / form block padding.
+    static let space5: CGFloat = 24
+    /// HIG minimum interactive hit target (pt).
+    static let hitMin: CGFloat = 44
+    /// Comfortable list-row vertical inset (beyond default List insets).
+    static let rowVertical: CGFloat = 10
+    /// Avatar size for primary list rows (friends / conversations).
+    static let avatarList: CGFloat = 40
+
     // Backgrounds
     static let bgApp = Color.cheers(light: 0xFAFAFA, dark: 0x09090B)          // zinc-50 / zinc-950
     static let bgSurface = Color.cheers(light: 0xFFFFFF, dark: 0x18181B)      // white / zinc-900
@@ -157,8 +175,8 @@ enum TimeFormat {
     static func dayLabel(_ date: Date?) -> String {
         guard let date else { return "" }
         let cal = Calendar.current
-        if cal.isDateInToday(date) { return "Today" }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
+        if cal.isDateInToday(date) { return String(localized: "Today") }
+        if cal.isDateInYesterday(date) { return String(localized: "Yesterday") }
         return fullDayFormatter.string(from: date)
     }
 
@@ -168,7 +186,7 @@ enum TimeFormat {
         guard let date else { return "" }
         let cal = Calendar.current
         if cal.isDateInToday(date) { return time(date) }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
+        if cal.isDateInYesterday(date) { return String(localized: "Yesterday") }
         return shortDayFormatter.string(from: date)
     }
 

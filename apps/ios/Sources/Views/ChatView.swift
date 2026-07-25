@@ -263,8 +263,8 @@ struct ChatView: View {
 
     private var composerPlaceholder: String {
         model.channel.isDM
-            ? "Message \(model.channel.displayName)"
-            : "Message #\(model.channel.name)"
+            ? String(localized: "Message \(model.channel.displayName)")
+            : String(localized: "Message #\(model.channel.name)")
     }
 
     private var header: some View {
@@ -323,6 +323,8 @@ struct ChatView: View {
                 .frame(width: 36, height: 36)
                 .background(Theme.bgRaised)
                 .clipShape(Circle())
+                .frame(width: Theme.hitMin, height: Theme.hitMin)
+                .contentShape(Rectangle())
         }
     }
 
@@ -392,7 +394,10 @@ struct ChatView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.textMuted)
+                    .frame(width: Theme.hitMin, height: Theme.hitMin)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -731,6 +736,14 @@ private struct ChatTimelineRow: View {
                     onReport: { onReport(message) },
                     onBlock: { onBlock(message) }
                 )
+                // Lazy durable timeline — toggle only; fetch on first expand.
+                if message.isBot, message.isPartial != true {
+                    BotTracePanelView(channelId: channelId, msgId: message.msgId)
+                        .padding(.leading, showAvatar || isOwn ? 48 : 48)
+                        .padding(.trailing, 12)
+                        .padding(.top, 2)
+                        .padding(.bottom, 4)
+                }
                 if message.msgType == "task_claim_confirmation" {
                     TaskClaimConfirmationFooter(message: message, channelId: channelId)
                         .padding(.leading, 58)

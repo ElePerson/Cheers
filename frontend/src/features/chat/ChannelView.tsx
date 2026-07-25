@@ -10,6 +10,7 @@ import {
 import {
   ArrowLeft,
   Hash,
+  MessageSquare,
   Users,
   Loader2,
   PanelRight,
@@ -326,13 +327,26 @@ export function ChannelView({
   const loadingRef = useRef(false);
   const pendingCatchUpRef = useRef(false);
   const catchUpInFlightRef = useRef(false);
+  // A catch-up requested while one is already in flight used to be silently
+  // dropped with no retry — if that request was healing the only gap covering
+  // a message (e.g. a resubscribe racing a reconnect), the message could stay
+  // permanently missing even though it persisted server-side (#330). Coalesce
+  // instead: remember the latest overlapping request and run exactly one more
+  // pass (with the freshest cursor) right after the in-flight one finishes.
+  const catchUpPendingRef = useRef(false);
+  const catchUpPendingSinceRef = useRef<number | undefined>(undefined);
 
   // Reconnect/refresh self-heal: pull everything past our last seq and merge.
   // `sinceSeq` overrides the ref when the caller just seeded state (the ref
   // effect above only updates after that commit).
   const catchUp = useCallback(
     async (sinceSeq?: number) => {
-      if (!channel || catchUpInFlightRef.current) return;
+      if (!channel) return;
+      if (catchUpInFlightRef.current) {
+        catchUpPendingRef.current = true;
+        catchUpPendingSinceRef.current = sinceSeq;
+        return;
+      }
       const cid = channel.channel_id;
       catchUpInFlightRef.current = true;
       try {
@@ -347,6 +361,12 @@ export function ChannelView({
         /* best-effort; the live stream still delivers new frames */
       } finally {
         catchUpInFlightRef.current = false;
+        if (catchUpPendingRef.current) {
+          catchUpPendingRef.current = false;
+          const rerunSince = catchUpPendingSinceRef.current;
+          catchUpPendingSinceRef.current = undefined;
+          void catchUp(rerunSince);
+        }
       }
     },
     [channel],
@@ -1576,6 +1596,12 @@ export function ChannelView({
   }
 
   const anyWorkOpen = vbOpen || wbOpen || wsOpen || filesOpen;
+  // DM channels are nameless on the wire (`channels.name` is '') — label them by
+  // the other participant, same fallback chain as Sidebar/ForwardDialog/QuickPanel.
+  const isDm = channel.type === "dm";
+  const channelTitle = isDm
+    ? channel.peer_name || channel.name || "Direct Message"
+    : channel.name;
 
   return (
     <ProfileCardProvider members={memberById}>
@@ -1599,9 +1625,13 @@ export function ChannelView({
               <ArrowLeft className="w-5 h-5" />
             </button>
           )}
-          <Hash className="w-4 h-4 text-zinc-500 flex-shrink-0 max-md:hidden" />
+          {isDm ? (
+            <MessageSquare className="w-4 h-4 text-zinc-500 flex-shrink-0 max-md:hidden" />
+          ) : (
+            <Hash className="w-4 h-4 text-zinc-500 flex-shrink-0 max-md:hidden" />
+          )}
           <span className="font-semibold text-zinc-100 text-sm truncate min-w-0 max-md:pl-1">
-            {channel.name}
+            {channelTitle}
           </span>
           {channel.purpose && (
             <div className="hidden md:flex items-center gap-3 pl-1 min-w-0">

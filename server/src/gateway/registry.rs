@@ -1,10 +1,21 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
+
+/// Bound on how long `dispatch_task`/`send_data` wait for room in a bot's
+/// bounded control/data queue before giving up (#330: a `try_send`-on-first-
+/// attempt policy silently dropped prompts whenever a burst of rapid sends —
+/// or unrelated cancel/claim frames sharing the same queue — left it momentarily
+/// full, even though it drains in milliseconds under normal operation). This
+/// keeps a hard cap so a truly stuck/dead connection still reports offline
+/// promptly instead of hanging the caller (which, for `dispatch_task`, is the
+/// same request that just persisted and is about to return the user's message).
+const QUEUE_SEND_TIMEOUT: Duration = Duration::from_millis(500);
 
 // ── Trait 定义（可替换实现的接口）────────────────────────────────────────────
 
@@ -185,20 +196,28 @@ impl BotRegistry for InProcessBotLocator {
 #[async_trait]
 impl BotLocator for InProcessBotLocator {
     async fn dispatch_task(&self, bot_id: Uuid, task: Value) -> bool {
-        if let Some(session) = self.sessions.get(&bot_id) {
-            session.control_tx.try_send(task).is_ok()
-        } else {
-            false
-        }
+        // Clone the sender and drop the DashMap guard before awaiting: holding a
+        // shard guard across `.await` would block unrelated bind/unbind calls for
+        // other bots on the same shard for the full wait.
+        let Some(tx) = self.sessions.get(&bot_id).map(|s| s.control_tx.clone()) else {
+            return false;
+        };
+        tokio::time::timeout(QUEUE_SEND_TIMEOUT, tx.send(task))
+            .await
+            .is_ok_and(|r| r.is_ok())
     }
 
     async fn send_data(&self, bot_id: Uuid, frame: Value) -> bool {
-        if let Some(session) = self.sessions.get(&bot_id) {
-            if let Some((_, ref tx)) = session.data_tx {
-                return tx.try_send(frame).is_ok();
-            }
-        }
-        false
+        let Some(tx) = self
+            .sessions
+            .get(&bot_id)
+            .and_then(|s| s.data_tx.as_ref().map(|(_, tx)| tx.clone()))
+        else {
+            return false;
+        };
+        tokio::time::timeout(QUEUE_SEND_TIMEOUT, tx.send(frame))
+            .await
+            .is_ok_and(|r| r.is_ok())
     }
 
     async fn is_online(&self, bot_id: Uuid) -> bool {

@@ -20,10 +20,10 @@ struct ConversationRowView: View {
     let row: ConversationRow
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Theme.space3) {
             ChannelAvatarView(channel: row.channel, size: 46)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: Theme.space1) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(row.channel.displayName)
                         .font(.system(size: 15, weight: .semibold))
@@ -39,7 +39,7 @@ struct ConversationRowView: View {
                             .clipShape(Capsule())
                             .lineLimit(1)
                     }
-                    Spacer(minLength: 8)
+                    Spacer(minLength: Theme.space2)
                     Text(TimeFormat.listStamp(row.lastActivity))
                         .font(.system(size: 12).monospacedDigit())
                         .foregroundStyle(Theme.textFaint)
@@ -50,7 +50,7 @@ struct ConversationRowView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textMuted)
                         .lineLimit(1)
-                    Spacer(minLength: 8)
+                    Spacer(minLength: Theme.space2)
                     if row.unreadCount > 0 {
                         Text(row.unreadCount > 99 ? "99+" : String(row.unreadCount))
                             .font(.system(size: 11, weight: .bold))
@@ -64,7 +64,8 @@ struct ConversationRowView: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, Theme.rowVertical)
+        .frame(minHeight: Theme.hitMin)
     }
 
     private var previewLine: String {
