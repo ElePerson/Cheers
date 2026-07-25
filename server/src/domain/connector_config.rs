@@ -89,7 +89,7 @@ fn codex_preset() -> AgentPreset {
     AgentPreset {
         command: "codex-acp".into(),
         args: vec![],
-        env_allow: strings(&["HOME", "PATH", "OPENAI_API_KEY"]),
+        env_allow: strings(&["HOME", "PATH", "OPENAI_API_KEY", "CODEX_API_KEY"]),
         permission_mode: None,
         allowed_modes: vec![],
         allowed_config_options: strings(&[
@@ -599,6 +599,7 @@ mod tests {
         assert!(toml.contains("bot_token_file        = \"secrets/codex.token\""));
         assert!(toml.contains("command = \"codex-acp\""));
         assert!(toml.contains("\"OPENAI_API_KEY\""));
+        assert!(toml.contains("\"CODEX_API_KEY\""));
         assert!(toml.contains("[accounts.codex.policy.config]"));
         assert!(toml.contains(r#"allowed_config_options = ["model", "reasoning_effort", "approval_policy", "sandbox"]"#));
         // codex has no permission_mode override.
