@@ -16,6 +16,7 @@ import { stopTurn } from "./stopTurn";
 import type { Message } from "@/types";
 import { useProfileCard } from "./ProfileHovercard";
 import { FloatingLayer } from "@/components/ui/floating-layer";
+import { useHoverIntent } from "@/hooks/useHoverIntent";
 
 /** Per-message action callbacks. Identity must be STABLE across selection
  *  changes — selection state travels as the scalar `selectMode`/`selected`
@@ -281,7 +282,10 @@ export const MessageItem = memo(function MessageItem({
   const showActions = actions && !active && !selectMode && !message._status;
   const selectable = Boolean(actions && selectMode);
   const rowRef = useRef<HTMLDivElement>(null);
-  const [actionsVisible, setActionsVisible] = useState(false);
+  // Delayed hide (not instant setState-on-leave) so the bar survives the gap
+  // between the row and the floating toolbar while the cursor crosses it —
+  // see useHoverIntent.
+  const { visible: actionsVisible, show: showActionBar, hide: hideActionBar } = useHoverIntent();
 
   // Click the sender's avatar/name → open their profile card (bio/status). In
   // select mode the row-click owns the interaction, so skip it there.
@@ -326,9 +330,9 @@ export const MessageItem = memo(function MessageItem({
         )}
         {...rowSelectProps}
         ref={rowRef}
-        onMouseEnter={() => setActionsVisible(true)}
-        onMouseLeave={() => setActionsVisible(false)}
-        onFocusCapture={() => setActionsVisible(true)}
+        onMouseEnter={showActionBar}
+        onMouseLeave={hideActionBar}
+        onFocusCapture={showActionBar}
       >
         {selectable && <SelectBox selected={selected} />}
         <div className="w-9 flex-shrink-0 flex items-center justify-end pt-1">
@@ -357,7 +361,7 @@ export const MessageItem = memo(function MessageItem({
             />
           )}
         </div>
-        {showActions && <ActionBar message={message} actions={actions} anchorRef={rowRef} visible={actionsVisible} onEnter={() => setActionsVisible(true)} onLeave={() => setActionsVisible(false)} />}
+        {showActions && <ActionBar message={message} actions={actions} anchorRef={rowRef} visible={actionsVisible} onEnter={showActionBar} onLeave={hideActionBar} />}
       </div>
     );
   }
@@ -372,9 +376,9 @@ export const MessageItem = memo(function MessageItem({
       )}
         {...rowSelectProps}
       ref={rowRef}
-      onMouseEnter={() => setActionsVisible(true)}
-      onMouseLeave={() => setActionsVisible(false)}
-      onFocusCapture={() => setActionsVisible(true)}
+      onMouseEnter={showActionBar}
+      onMouseLeave={hideActionBar}
+      onFocusCapture={showActionBar}
     >
       {/* order-last on reversed (own) rows keeps the checkbox column visually left. */}
       {selectable && <SelectBox selected={selected} className={isOwn ? "order-last" : undefined} />}
@@ -440,7 +444,7 @@ export const MessageItem = memo(function MessageItem({
           />
         )}
       </div>
-      {showActions && <ActionBar message={message} actions={actions} reversed={isOwn} anchorRef={rowRef} visible={actionsVisible} onEnter={() => setActionsVisible(true)} onLeave={() => setActionsVisible(false)} />}
+      {showActions && <ActionBar message={message} actions={actions} reversed={isOwn} anchorRef={rowRef} visible={actionsVisible} onEnter={showActionBar} onLeave={hideActionBar} />}
     </div>
   );
 });
