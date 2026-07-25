@@ -111,8 +111,17 @@ fn preview_raw_input(raw: Option<&Value>) -> Option<String> {
         return Some(cmd);
     }
     let path = paths_from_raw_input(raw).into_iter().next()?;
-    let content_len = pick_str(raw, &["content", "new_string", "newString", "contents", "new_content"])
-        .map(|c| c.len());
+    let content_len = pick_str(
+        raw,
+        &[
+            "content",
+            "new_string",
+            "newString",
+            "contents",
+            "new_content",
+        ],
+    )
+    .map(|c| c.len());
     Some(match content_len {
         Some(n) => format!("{path}  ({n} chars)"),
         None => path,
