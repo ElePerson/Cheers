@@ -139,15 +139,15 @@ struct DrawerView: View {
                 let channels = scopedRows.filter { !$0.channel.isDM }
                 let dms = scopedRows.filter { $0.channel.isDM }
                 if !channels.isEmpty {
-                    sectionHeader("Channels")
+                    sectionHeader(String(localized: "Channels"))
                     ForEach(channels) { row in drawerRow(row) }
                 }
                 if !dms.isEmpty {
-                    sectionHeader("Direct messages")
+                    sectionHeader(String(localized: "Direct messages"))
                     ForEach(dms) { row in drawerRow(row) }
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, Theme.space1)
         }
     }
 
@@ -157,29 +157,29 @@ struct DrawerView: View {
             .tracking(0.7)
             .foregroundStyle(Theme.textSecondary)
             .padding(.horizontal, 18)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
+            .padding(.top, Theme.space3)
+            .padding(.bottom, Theme.space1)
     }
 
     private func drawerRow(_ row: ConversationRow) -> some View {
         Button {
             shell.openChat(row.channel)
         } label: {
-            HStack(spacing: 11) {
+            HStack(spacing: Theme.space3) {
                 if row.channel.isDM {
-                    ChannelAvatarView(channel: row.channel, size: 30)
+                    ChannelAvatarView(channel: row.channel, size: 36)
                 } else if row.channel.isVoice {
                     Image(systemName: "waveform")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 30, height: 30)
+                        .frame(width: 36, height: 36)
                         .background(Theme.bgRaised)
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 } else {
                     Text("#")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 30, height: 30)
+                        .frame(width: 36, height: 36)
                         .background(Theme.bgRaised)
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
@@ -200,7 +200,8 @@ struct DrawerView: View {
                 }
             }
             .padding(.horizontal, 18)
-            .padding(.vertical, 8)
+            .padding(.vertical, Theme.rowVertical)
+            .frame(minHeight: Theme.hitMin)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

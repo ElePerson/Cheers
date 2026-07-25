@@ -1646,3 +1646,39 @@ struct FsFile: Decodable {
         case path, content, version
     }
 }
+
+// MARK: - Durable agent-trace timeline (docs/arch/TRACE_PERSISTENCE.md)
+
+/// One persisted step of a bot turn (`message_traces`), including interleaved
+/// approval lifecycle rows (`kind == "approval"`).
+struct TraceEntryDto: Codable, Identifiable, Hashable {
+    var id: String
+    var msgId: String
+    var traceSeq: Int
+    var kind: String
+    var phase: String
+    var status: String?
+    var title: String?
+    var message: String?
+    var requestId: String?
+    var approvalKind: String?
+    var decision: String?
+    var optionId: String?
+    var actorId: String?
+    var createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, phase, status, title, message, decision
+        case msgId = "msg_id"
+        case traceSeq = "trace_seq"
+        case requestId = "request_id"
+        case approvalKind = "approval_kind"
+        case optionId = "option_id"
+        case actorId = "actor_id"
+        case createdAt = "created_at"
+    }
+}
+
+struct MessageTraceResponse: Decodable {
+    var events: [TraceEntryDto]
+}

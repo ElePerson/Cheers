@@ -16,7 +16,7 @@ struct CircleIconButton: View {
                     .frame(width: 36, height: 36)
                     .background(Theme.bgRaised)
                     .clipShape(Circle())
-                    .frame(width: 44, height: 44)
+                    .frame(width: Theme.hitMin, height: Theme.hitMin)
                     .contentShape(Rectangle())
                 if badge > 0 {
                     Text(badge > 99 ? "99+" : String(badge))

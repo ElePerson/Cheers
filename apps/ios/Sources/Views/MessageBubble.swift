@@ -39,11 +39,15 @@ struct SystemMessageView: View {
     private var text: String {
         if message.msgType == "permission" {
             let resolved = message.contentData?["resolved"]?.boolValue == true
-            return resolved ? "Approval request (resolved)" : "Approval request — respond from the web app"
+            return resolved
+                ? String(localized: "Approval request (resolved)")
+                : String(localized: "Approval request — respond from the web app")
         }
         if message.msgType == "auth_required" {
             let resolved = message.contentData?["resolved"]?.boolValue == true
-            return resolved ? "Agent sign-in (resolved)" : "Agent sign-in required"
+            return resolved
+                ? String(localized: "Agent sign-in (resolved)")
+                : String(localized: "Agent sign-in required")
         }
         return message.content
     }
@@ -81,9 +85,9 @@ struct MessageBubbleView: View {
                 Spacer(minLength: 60)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, showAvatar ? 4 : 1)   // a little breathing room above a new sender's run
-        .padding(.bottom, isLastInGroup ? 7 : 1)
+        .padding(.horizontal, Theme.space3)
+        .padding(.top, showAvatar ? Theme.space1 : 2)
+        .padding(.bottom, isLastInGroup ? Theme.space2 : 2)
     }
 
     @ViewBuilder
@@ -103,15 +107,15 @@ struct MessageBubbleView: View {
             if showSenderName {
                 HStack(spacing: 5) {
                     // Hierarchy via weight, not color (HIG): neutral semibold name.
-                    Text(message.senderName ?? (message.isBot ? "Bot" : "Unknown"))
+                    Text(message.senderName ?? (message.isBot ? String(localized: "Bot") : String(localized: "Unknown")))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textPrimary)
                     if message.isBot {
                         Text("BOT")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(Theme.textSecondary)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
+                            .padding(.horizontal, Theme.space1)
+                            .padding(.vertical, 2)
                             .background(Theme.bgSelected)
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
@@ -180,7 +184,7 @@ struct MessageBubbleView: View {
                 .fill(Theme.accent)
                 .frame(width: 2.5)
             VStack(alignment: .leading, spacing: 1) {
-                Text(quoted.senderName ?? (quoted.isBot ? "Bot" : "Message"))
+                Text(quoted.senderName ?? (quoted.isBot ? String(localized: "Bot") : String(localized: "Message")))
                     .font(.caption.weight(.semibold))
                 Text(quoted.content.replacingOccurrences(of: "\n", with: " "))
                     .font(.caption)
