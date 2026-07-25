@@ -24,6 +24,7 @@ pub mod seed;
 pub mod sessions;
 pub mod stt_settings;
 pub mod task_chains;
+pub mod tool_request;
 pub mod trace;
 pub mod two_factor;
 pub mod usage_store;
