@@ -83,6 +83,7 @@ function contentLine(detail: unknown): string | null {
   if (tool) {
     const ri = rawInputOf(tool);
     return (
+      str(tool, "summary") ||
       str(tool, "command") ||
       str(ri, "command") ||
       str(ri, "file_path") ||

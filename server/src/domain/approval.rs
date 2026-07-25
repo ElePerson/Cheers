@@ -231,7 +231,11 @@ pub async fn list_audit(
                     // detail always wins once seen. Either way, drop the duplicate.
                     if event_type == "requested" {
                         if let Some(existing) = merged[idx].as_object_mut() {
-                            existing.insert("detail".into(), detail.unwrap_or(Value::Null));
+                            let mut d = detail.unwrap_or(Value::Null);
+                            if d.is_object() {
+                                crate::domain::tool_request::normalize_audit_detail(&mut d);
+                            }
+                            existing.insert("detail".into(), d);
                             if existing.get("bot_id").is_none_or(Value::is_null) {
                                 existing.insert("bot_id".into(), json!(bot_id));
                             }
@@ -243,6 +247,11 @@ pub async fn list_audit(
             }
         }
 
+        let mut detail_out = detail.unwrap_or(Value::Null);
+        if detail_out.is_object() {
+            crate::domain::tool_request::normalize_audit_detail(&mut detail_out);
+        }
+
         merged.push(json!({
             "event_type": event_type,
             "bot_id": bot_id,
@@ -252,7 +261,7 @@ pub async fn list_audit(
             "target_user_id": r.try_get::<Option<String>, _>("target_user_id").ok().flatten(),
             "decision": r.try_get::<Option<String>, _>("decision").ok().flatten(),
             "option_id": r.try_get::<Option<String>, _>("option_id").ok().flatten(),
-            "detail": detail,
+            "detail": detail_out,
             "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
                 .map(|t| t.to_rfc3339()).unwrap_or_default(),
         }));
