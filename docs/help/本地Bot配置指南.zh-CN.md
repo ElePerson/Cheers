@@ -142,7 +142,7 @@ backend_may_set_cwd = true
 
 [accounts.codex.policy.env]
 inherit = false
-allow   = ["HOME", "PATH", "OPENAI_API_KEY"]   # HOME 让子进程读 ~/.codex 订阅鉴权
+allow   = ["HOME", "PATH", "OPENAI_API_KEY", "CODEX_API_KEY"]   # HOME 让子进程读 ~/.codex 订阅鉴权
 
 [accounts.codex.policy.permission]
 forward_to_backend = true            # 把 Agent 的工具授权请求转到频道审批卡
@@ -291,7 +291,7 @@ backend_may_set_cwd = true
 
 [accounts.codex.policy.env]
 inherit = false                      # false=不继承整套环境，只放行下面这些
-allow = ["HOME", "PATH", "OPENAI_API_KEY"]
+allow = ["HOME", "PATH", "OPENAI_API_KEY", "CODEX_API_KEY"]
 # set = { FOO = "bar" }              # 可选：额外注入的环境变量
 
 [accounts.codex.policy.config]

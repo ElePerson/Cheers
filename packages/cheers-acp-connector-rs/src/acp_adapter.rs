@@ -67,16 +67,66 @@ fn auth_method_info(m: &Value) -> Option<AuthMethodInfo> {
     })
 }
 
-/// Pick an ACP `authenticate` method from the agent's initialize response.
-/// Uses the first advertised method (ACP agents typically list one; when several
-/// exist the agent orders them by preference). Wire shape uses `id` or `methodId`.
-pub(crate) fn preferred_auth_method(initialize: &Value) -> Option<AuthMethodInfo> {
-    let methods = initialize.get("authMethods")?.as_array()?;
-    methods.iter().find_map(auth_method_info)
+fn is_api_key_auth_method(method: &AuthMethodInfo) -> bool {
+    matches!(method.id.as_str(), "api-key" | "api_key")
 }
 
-pub(crate) fn preferred_auth_method_id(initialize: &Value) -> Option<String> {
-    preferred_auth_method(initialize).map(|m| m.id)
+fn is_chatgpt_auth_method(method: &AuthMethodInfo) -> bool {
+    matches!(method.id.as_str(), "chat-gpt" | "chatgpt" | "chat_gpt")
+}
+
+fn agent_env_has_openai_api_key(agent_env: &BTreeMap<String, String>) -> bool {
+    ["CODEX_API_KEY", "OPENAI_API_KEY"].iter().any(|name| {
+        agent_env
+            .get(*name)
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    })
+}
+
+/// Pick an ACP `authenticate` method from the agent's initialize response.
+///
+/// Wire shape uses `id` or `methodId`. When several methods exist, agents may
+/// list `api-key` first (Codex does) even though a ChatGPT / session method is
+/// also advertised. Prefer `api-key` only when `CODEX_API_KEY` / `OPENAI_API_KEY`
+/// is actually present in the agent child env; otherwise prefer `chat-gpt` (or
+/// any non-api-key method) so subscription login via `HOME`/`~/.codex` works.
+pub(crate) fn preferred_auth_method(
+    initialize: &Value,
+    agent_env: &BTreeMap<String, String>,
+) -> Option<AuthMethodInfo> {
+    let methods: Vec<AuthMethodInfo> = initialize
+        .get("authMethods")?
+        .as_array()?
+        .iter()
+        .filter_map(auth_method_info)
+        .collect();
+    if methods.is_empty() {
+        return None;
+    }
+
+    let has_api_key = agent_env_has_openai_api_key(agent_env);
+    if has_api_key {
+        if let Some(method) = methods.iter().find(|m| is_api_key_auth_method(m)) {
+            return Some(method.clone());
+        }
+    }
+    if let Some(method) = methods.iter().find(|m| is_chatgpt_auth_method(m)) {
+        return Some(method.clone());
+    }
+    if !has_api_key {
+        if let Some(method) = methods.iter().find(|m| !is_api_key_auth_method(m)) {
+            return Some(method.clone());
+        }
+    }
+    methods.into_iter().next()
+}
+
+pub(crate) fn preferred_auth_method_id(
+    initialize: &Value,
+    agent_env: &BTreeMap<String, String>,
+) -> Option<String> {
+    preferred_auth_method(initialize, agent_env).map(|m| m.id)
 }
 
 /// Heuristic: agent/session errors that mean "need (re)authenticate".
@@ -672,7 +722,7 @@ impl RuntimeAdapter for AcpAdapter {
         );
         // Agents that advertise authMethods require `authenticate` before
         // session/new (ACP authentication). Skipping yields "Authentication required".
-        if let Some(method) = preferred_auth_method(&response) {
+        if let Some(method) = preferred_auth_method(&response, &self.config.env) {
             tracing::info!(
                 account = %self.account_id,
                 method_id = %method.id,
@@ -719,7 +769,7 @@ impl RuntimeAdapter for AcpAdapter {
         let Some(init) = self.initialize_response.clone() else {
             return Err(anyhow!("ACP authenticate called before initialize"));
         };
-        let Some(method) = preferred_auth_method(&init) else {
+        let Some(method) = preferred_auth_method(&init, &self.config.env) else {
             return Ok(());
         };
         tracing::info!(
@@ -1364,29 +1414,42 @@ mod tests {
     }
 
     #[test]
-    fn picks_first_advertised_auth_method() {
+    fn picks_auth_method_preferring_chatgpt_without_api_key_env() {
         let init = json!({
             "authMethods": [
-                { "id": "browser_login", "name": "Browser Login" },
-                { "id": "api_key", "name": "API Key" }
+                { "id": "api-key", "name": "API Key" },
+                { "id": "chat-gpt", "name": "ChatGPT" }
             ]
         });
+        let empty = BTreeMap::new();
         assert_eq!(
-            preferred_auth_method_id(&init).as_deref(),
-            Some("browser_login")
+            preferred_auth_method_id(&init, &empty).as_deref(),
+            Some("chat-gpt")
         );
-        assert_eq!(preferred_auth_method_id(&json!({})), None);
+
+        let mut with_key = BTreeMap::new();
+        with_key.insert("OPENAI_API_KEY".into(), "sk-test".into());
         assert_eq!(
-            preferred_auth_method_id(&json!({ "authMethods": [{ "methodId": "env" }] })).as_deref(),
+            preferred_auth_method_id(&init, &with_key).as_deref(),
+            Some("api-key")
+        );
+
+        assert_eq!(preferred_auth_method_id(&json!({}), &empty), None);
+        assert_eq!(
+            preferred_auth_method_id(&json!({ "authMethods": [{ "methodId": "env" }] }), &empty)
+                .as_deref(),
             Some("env")
         );
-        let with_desc = preferred_auth_method(&json!({
-            "authMethods": [{
-                "id": "login",
-                "name": "Sign in",
-                "description": "Open the vendor login page"
-            }]
-        }))
+        let with_desc = preferred_auth_method(
+            &json!({
+                "authMethods": [{
+                    "id": "login",
+                    "name": "Sign in",
+                    "description": "Open the vendor login page"
+                }]
+            }),
+            &empty,
+        )
         .expect("method");
         assert_eq!(with_desc.id, "login");
         assert_eq!(with_desc.name.as_deref(), Some("Sign in"));

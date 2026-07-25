@@ -62,7 +62,7 @@ impl RuntimeContext {
             let adapter = self.adapter.lock().await;
             adapter
                 .initialize_response()
-                .and_then(preferred_auth_method)
+                .and_then(|init| preferred_auth_method(init, &self.config.agent.env))
                 .unwrap_or_else(|| AuthMethodInfo {
                     id: "default".into(),
                     name: Some("Sign in".into()),
