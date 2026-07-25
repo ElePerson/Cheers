@@ -141,7 +141,7 @@ backend_may_set_cwd = true
 
 [accounts.codex.policy.env]
 inherit = false
-allow   = ["HOME", "PATH", "OPENAI_API_KEY"]   # HOME lets the child read ~/.codex subscription auth
+allow   = ["HOME", "PATH", "OPENAI_API_KEY", "CODEX_API_KEY"]   # HOME lets the child read ~/.codex subscription auth
 
 [accounts.codex.policy.permission]
 forward_to_backend = true            # route the agent's tool-permission requests to the channel approval card
@@ -294,7 +294,7 @@ backend_may_set_cwd = true
 
 [accounts.codex.policy.env]
 inherit = false                      # false = don't inherit the full env, only allow these
-allow = ["HOME", "PATH", "OPENAI_API_KEY"]
+allow = ["HOME", "PATH", "OPENAI_API_KEY", "CODEX_API_KEY"]
 # set = { FOO = "bar" }              # optional: extra env vars to inject
 
 [accounts.codex.policy.config]
