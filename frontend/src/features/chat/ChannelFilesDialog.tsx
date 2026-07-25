@@ -43,7 +43,9 @@ export function ChannelFilesDialog({
       storageKey="cheers.float.files"
       // Same lane-window defaults as the other instrument panels (drag/resize to
       // taste; geometry persists). Bounded to the lane via LaneBoundsContext.
+      // First open auto-fills / picks a free zone via spawnKind.
       className="w-[640px] h-[70%]"
+      spawnKind="files"
       defaultPosClassName="top-2 left-2"
       collapsedSummary={(expand) => (
         <GlanceRow

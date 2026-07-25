@@ -14,6 +14,12 @@ import {
   updateSnap,
   endSnap,
   getSnapState,
+  suggestSpawn,
+  setOccupant,
+  getOccupants,
+  subscribeOccupants,
+  isNearlyFill,
+  type SpawnKind,
 } from "@/features/chat/workbench/laneSnap";
 
 // ── z-order: bottom→top list of window keys; raise() moves a key to the top ──
@@ -111,6 +117,18 @@ export interface WindowDrag {
   reset: () => void;
 }
 
+export interface WindowDragOptions {
+  /** Bounded windows only: while dragging, publish the cursor to the lane snap
+   *  store (drives the LaneZones overlay) and, on drop, snap position+size to the
+   *  resolved zone. No-op when there's no bounds (free viewport float). */
+  snap?: boolean;
+  /** When set, a first open with no persisted geometry picks a free lane zone
+   *  (or fills the lane alone) instead of stacking every panel at top-left. */
+  spawnKind?: SpawnKind;
+  /** Panel visibility — spawn/occupant tracking only while open. Defaults true. */
+  open?: boolean;
+}
+
 // `getBounds` (optional) turns on BOUNDED mode: the window floats inside that
 // box (the work lane) with `absolute` positioning and lane-local coordinates,
 // instead of over the whole viewport. It's read live on every drag/resize so a
@@ -122,8 +140,15 @@ export function useWindowDrag(
   // Bounded windows only: while dragging, publish the cursor to the lane snap
   // store (drives the LaneZones overlay) and, on drop, snap position+size to the
   // resolved zone. No-op when there's no bounds (free viewport float).
-  snap = false
+  // Prefer `options.snap` for new call sites; the boolean form stays for
+  // FloatingPanel / existing callers.
+  snapOrOptions: boolean | WindowDragOptions = false
 ): WindowDrag {
+  const opts: WindowDragOptions =
+    typeof snapOrOptions === "boolean" ? { snap: snapOrOptions } : snapOrOptions;
+  const snap = opts.snap ?? false;
+  const spawnKind = opts.spawnKind;
+  const panelOpen = opts.open ?? true;
   const [geom, setGeom] = useState<Geom>(() => {
     try {
       const raw = localStorage.getItem(storageKey);
@@ -334,8 +359,81 @@ export function useWindowDrag(
     return () => window.removeEventListener("resize", reclamp);
   }, [enabled, getBounds]);
 
+  // First open with no persisted geometry: place into a free lane zone (or fill
+  // the lane when alone) instead of every panel defaulting to the same CSS
+  // top-left. Re-runs when the panel re-opens after a reset; skipped once the
+  // user has a saved geom.
+  useEffect(() => {
+    if (!enabled || !panelOpen || !spawnKind || !getBounds) return;
+    if (geomRef.current.x != null && geomRef.current.y != null) return;
+    const b = getBounds();
+    if (!b || b.width <= 0 || b.height <= 0) return;
+    const placed = suggestSpawn(spawnKind, b, getOccupants(storageKey));
+    const next: Geom = {
+      x: Math.round(placed.x),
+      y: Math.round(placed.y),
+      w: Math.round(placed.w),
+      h: Math.round(placed.h),
+    };
+    setGeom(next);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      /* private mode — geometry just won't persist */
+    }
+  }, [enabled, panelOpen, spawnKind, getBounds, storageKey]);
+
+  // A prior alone-fill spawn must yield when a sibling opens, otherwise the new
+  // panel lands under a full-lane window. Shrink to our preferred free zone.
+  useEffect(() => {
+    if (!enabled || !panelOpen || !spawnKind || !getBounds) return;
+    const reflow = () => {
+      const others = getOccupants(storageKey);
+      if (others.length === 0) return;
+      const b = getBounds();
+      if (!b || b.width <= 0) return;
+      const g = geomRef.current;
+      if (g.x == null || g.y == null || g.w == null || g.h == null) return;
+      if (!isNearlyFill({ x: g.x, y: g.y, w: g.w, h: g.h }, b)) return;
+      const placed = suggestSpawn(spawnKind, b, others);
+      const next: Geom = {
+        x: Math.round(placed.x),
+        y: Math.round(placed.y),
+        w: Math.round(placed.w),
+        h: Math.round(placed.h),
+      };
+      setGeom(next);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+    };
+    reflow();
+    return subscribeOccupants(reflow);
+  }, [enabled, panelOpen, spawnKind, getBounds, storageKey]);
+
+  // Publish live rect to the spawn registry so a later sibling avoids overlap.
+  useEffect(() => {
+    if (!enabled || !panelOpen || !getBounds) {
+      setOccupant(storageKey, null);
+      return () => setOccupant(storageKey, null);
+    }
+    const b = getBounds();
+    const g = geom;
+    if (g.x == null || g.y == null || !b) {
+      setOccupant(storageKey, null);
+      return () => setOccupant(storageKey, null);
+    }
+    const w = g.w ?? elRef.current?.offsetWidth ?? 0;
+    const h = g.h ?? elRef.current?.offsetHeight ?? 0;
+    setOccupant(storageKey, { x: g.x, y: g.y, w, h });
+    return () => setOccupant(storageKey, null);
+  }, [enabled, panelOpen, getBounds, storageKey, geom]);
+
   const reset = useCallback(() => {
     setGeom({});
+    setOccupant(storageKey, null);
     try {
       localStorage.removeItem(storageKey);
     } catch {

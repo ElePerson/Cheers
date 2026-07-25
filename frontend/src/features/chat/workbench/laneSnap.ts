@@ -8,6 +8,10 @@
 //
 // Coordinates are LANE-LOCAL (relative to the lane box's top-left), matching the
 // `absolute` positioning useWindowDrag uses in bounded mode.
+//
+// Also owns first-open spawn placement: when a panel opens with no persisted
+// geometry, `suggestSpawn` picks a free zone (or fills the lane when alone) so
+// every instrument doesn't stack at the same top-left default.
 
 export interface Rect {
   x: number;
@@ -21,6 +25,9 @@ export interface Zone extends Rect {
 
 // Breathing room between snapped windows and the lane edges.
 export const SNAP_GAP = 8;
+
+/** Instrument identity used to bias first-open placement. */
+export type SpawnKind = "workbench" | "viewboard" | "files" | "workspace";
 
 // Partition the lane into a clean cols×rows grid (no overlap → every drop
 // resolves to exactly one cell). Column/row counts adapt to the lane size so a
@@ -46,6 +53,108 @@ export function zonesFor(bounds: { width: number; height: number }): Zone[] {
   }
   return zones;
 }
+
+/** Full-lane rect (with gap inset) — used when a single instrument owns the lane. */
+export function fillLane(bounds: { width: number; height: number }): Rect {
+  return {
+    x: SNAP_GAP,
+    y: SNAP_GAP,
+    w: Math.max(0, bounds.width - SNAP_GAP * 2),
+    h: Math.max(0, bounds.height - SNAP_GAP * 2),
+  };
+}
+
+function overlapArea(a: Rect, b: Rect): number {
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.w, b.x + b.w);
+  const y2 = Math.min(a.y + a.h, b.y + b.h);
+  return Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+}
+
+// Kind → preferred zone order within a cols×rows grid (row-major ids z0-0…).
+// File-heavy surfaces prefer larger / leading cells; ViewBoard prefers a compact
+// trailing cell so it doesn't steal the reading column.
+function preferredZoneIndex(kind: SpawnKind, zoneCount: number): number {
+  if (zoneCount <= 1) return 0;
+  switch (kind) {
+    case "workbench":
+    case "workspace":
+      return 0; // leading / largest reading cell
+    case "files":
+      return Math.min(1, zoneCount - 1);
+    case "viewboard":
+      return zoneCount - 1; // trailing glance cell
+    default:
+      return 0;
+  }
+}
+
+/**
+ * First-open placement for a lane window. Alone → fill the lane (best for file
+ * reading). With neighbors → the freest preferred zone (least overlap). When the
+ * lane only has one cell and it's taken, force a vertical split so two panels
+ * can coexist on a narrow mid-width desktop.
+ */
+export function suggestSpawn(
+  kind: SpawnKind,
+  bounds: { width: number; height: number },
+  occupied: Rect[]
+): Rect {
+  const others = occupied.filter((r) => r.w > 0 && r.h > 0);
+  if (others.length === 0) return fillLane(bounds);
+
+  const zones = zonesFor(bounds);
+  if (!zones.length) return fillLane(bounds);
+
+  // Narrow lane with a single cell already taken: invent a top/bottom split so
+  // the newcomer isn't buried under the first panel.
+  if (zones.length === 1) {
+    const halfH = (bounds.height - SNAP_GAP * 3) / 2;
+    const top: Rect = {
+      x: SNAP_GAP,
+      y: SNAP_GAP,
+      w: Math.max(0, bounds.width - SNAP_GAP * 2),
+      h: Math.max(0, halfH),
+    };
+    const bot: Rect = {
+      x: SNAP_GAP,
+      y: SNAP_GAP * 2 + halfH,
+      w: Math.max(0, bounds.width - SNAP_GAP * 2),
+      h: Math.max(0, halfH),
+    };
+    const topOverlap = others.reduce((s, o) => s + overlapArea(top, o), 0);
+    const botOverlap = others.reduce((s, o) => s + overlapArea(bot, o), 0);
+    // File-heavy surfaces prefer the larger reading band (top); glance panels the bottom.
+    if (kind === "viewboard") return botOverlap <= topOverlap ? bot : top;
+    return topOverlap <= botOverlap ? top : bot;
+  }
+
+  const pref = preferredZoneIndex(kind, zones.length);
+  // Score: lower overlap is better; prefer the kind's preferred index as a tiebreak.
+  let best = zones[pref] ?? zones[0];
+  let bestScore = Infinity;
+  for (let i = 0; i < zones.length; i++) {
+    const z = zones[i];
+    const overlap = others.reduce((sum, o) => sum + overlapArea(z, o), 0);
+    const bias = Math.abs(i - pref) * 0.01; // tiny — only breaks ties
+    const score = overlap + bias;
+    if (score < bestScore) {
+      bestScore = score;
+      best = z;
+    }
+  }
+  return { x: best.x, y: best.y, w: best.w, h: best.h };
+}
+
+// Recommended lane widths (px) when opening a file-heavy instrument. ChannelView
+// expands the lane toward these so a fresh Workbench isn't crushed beside chat.
+export const LANE_TARGET: Record<SpawnKind, number> = {
+  workbench: 600,
+  workspace: 720,
+  files: 520,
+  viewboard: 420,
+};
 
 // The zone a lane-local pointer resolves to: the cell it sits inside, or (when it
 // lands in a gap) the cell with the nearest center. Returns null only for a
@@ -130,4 +239,55 @@ export function endSnap(): Zone | null {
   set({ active: false, bounds: null, pointer: null });
   if (!active || !bounds || !pointer) return null;
   return resolveZone(pointer, bounds);
+}
+
+// ── live occupant registry (for spawn placement) ───────────────────────────
+// Each open floating window publishes its lane-local rect here so a newly opened
+// sibling can avoid stacking on top of it. Closed / unmounted windows clear.
+const occupants = new Map<string, Rect>();
+const occupantListeners = new Set<() => void>();
+
+function notifyOccupants() {
+  occupantListeners.forEach((l) => l());
+}
+
+export function subscribeOccupants(l: () => void): () => void {
+  occupantListeners.add(l);
+  return () => {
+    occupantListeners.delete(l);
+  };
+}
+
+export function setOccupant(key: string, rect: Rect | null) {
+  if (rect == null || rect.w <= 0 || rect.h <= 0) {
+    if (!occupants.has(key)) return;
+    occupants.delete(key);
+    notifyOccupants();
+    return;
+  }
+  const prev = occupants.get(key);
+  if (prev && prev.x === rect.x && prev.y === rect.y && prev.w === rect.w && prev.h === rect.h) {
+    return;
+  }
+  occupants.set(key, rect);
+  notifyOccupants();
+}
+
+export function getOccupants(exceptKey?: string): Rect[] {
+  const out: Rect[] = [];
+  for (const [k, r] of occupants) {
+    if (exceptKey && k === exceptKey) continue;
+    out.push(r);
+  }
+  return out;
+}
+
+/** True when `rect` claims most of the lane (a prior alone-fill spawn). */
+export function isNearlyFill(
+  rect: Rect,
+  bounds: { width: number; height: number },
+  ratio = 0.85
+): boolean {
+  const fill = fillLane(bounds);
+  return rect.w >= fill.w * ratio && rect.h >= fill.h * ratio;
 }
