@@ -326,13 +326,26 @@ export function ChannelView({
   const loadingRef = useRef(false);
   const pendingCatchUpRef = useRef(false);
   const catchUpInFlightRef = useRef(false);
+  // A catch-up requested while one is already in flight used to be silently
+  // dropped with no retry — if that request was healing the only gap covering
+  // a message (e.g. a resubscribe racing a reconnect), the message could stay
+  // permanently missing even though it persisted server-side (#330). Coalesce
+  // instead: remember the latest overlapping request and run exactly one more
+  // pass (with the freshest cursor) right after the in-flight one finishes.
+  const catchUpPendingRef = useRef(false);
+  const catchUpPendingSinceRef = useRef<number | undefined>(undefined);
 
   // Reconnect/refresh self-heal: pull everything past our last seq and merge.
   // `sinceSeq` overrides the ref when the caller just seeded state (the ref
   // effect above only updates after that commit).
   const catchUp = useCallback(
     async (sinceSeq?: number) => {
-      if (!channel || catchUpInFlightRef.current) return;
+      if (!channel) return;
+      if (catchUpInFlightRef.current) {
+        catchUpPendingRef.current = true;
+        catchUpPendingSinceRef.current = sinceSeq;
+        return;
+      }
       const cid = channel.channel_id;
       catchUpInFlightRef.current = true;
       try {
@@ -347,6 +360,12 @@ export function ChannelView({
         /* best-effort; the live stream still delivers new frames */
       } finally {
         catchUpInFlightRef.current = false;
+        if (catchUpPendingRef.current) {
+          catchUpPendingRef.current = false;
+          const rerunSince = catchUpPendingSinceRef.current;
+          catchUpPendingSinceRef.current = undefined;
+          void catchUp(rerunSince);
+        }
       }
     },
     [channel],

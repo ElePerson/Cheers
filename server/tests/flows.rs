@@ -390,6 +390,115 @@ async fn r5_concurrent_dispatch_dispatches_task_exactly_once(db: PgPool) {
     assert_eq!(count, 1, "并发双触发只应产生一条占位");
 }
 
+// ── #330：频道内并发发送的多条不同用户消息，每条都应各自落库+各自派发一次 ──────
+
+/// 复现 #330（“频繁给 bot 发消息会吞消息”）：同一频道、同一用户几乎同时发出 N 条
+/// *不同* 消息（各自独立的 trigger_msg_id），频道设了 default_bot。
+/// 期望：N 条消息全部落库（seq 1..N 无洞无重复），且 dispatch_task 恰好被调用 N 次
+/// （每条消息各触发一次该 bot，互不覆盖/互不丢弃）。
+#[sqlx::test]
+async fn issue_330_concurrent_distinct_messages_all_persist_and_dispatch_once_each(db: PgPool) {
+    let ws = seed_workspace(&db).await;
+    let ch = seed_channel(&db, ws).await;
+    let user = seed_user(&db).await;
+    add_member(&db, ch, user, "user").await;
+    let bot = seed_bot(&db).await;
+    add_member(&db, ch, bot, "bot").await;
+    sqlx::query("UPDATE channels SET default_bot_id = $1 WHERE channel_id = $2")
+        .bind(bot.to_string())
+        .bind(ch.to_string())
+        .execute(&db)
+        .await
+        .unwrap();
+
+    let fanout = fanout();
+    let registry = StreamRegistry::new();
+    let counter = Arc::new(CountingBotLocator::default());
+    let bot_locator: Arc<dyn BotLocator> = counter.clone();
+
+    const N: usize = 5;
+    let mut handles = Vec::new();
+    for i in 0..N {
+        let (db, fanout, registry, bot_locator) = (
+            db.clone(),
+            fanout.clone(),
+            registry.clone(),
+            bot_locator.clone(),
+        );
+        handles.push(tokio::spawn(async move {
+            messages::create_message(
+                &db,
+                &fanout,
+                &registry,
+                &bot_locator,
+                CreateMessageParams {
+                    context_bundle: None,
+                    user_id: user,
+                    channel_id: ch,
+                    content: format!("rapid {i}"),
+                    msg_type: None,
+                    reply_to_msg_id: None,
+                    file_ids: vec![],
+                    mention_ids: vec![],
+                    mention_names: vec![],
+                    session_id: None,
+                },
+            )
+            .await
+        }));
+    }
+
+    let mut dtos = Vec::new();
+    for h in handles {
+        dtos.push(h.await.unwrap().expect("create_message should not fail"));
+    }
+
+    // 全部 N 条用户消息都必须落库，seq 1..N 各不相同、连续无洞。
+    let mut seqs: Vec<i64> = dtos.iter().filter_map(|d| d.channel_seq).collect();
+    seqs.sort_unstable();
+    assert_eq!(
+        seqs,
+        (1..=N as i64).collect::<Vec<_>>(),
+        "并发 {N} 条不同消息的 channel_seq 必须连续无洞无重复（#330 回归）"
+    );
+    let user_msg_count: i64 = sqlx::query(
+        "SELECT COUNT(*) AS c FROM messages WHERE channel_id = $1 AND sender_type = 'user'",
+    )
+    .bind(ch.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap()
+    .try_get("c")
+    .unwrap();
+    assert_eq!(
+        user_msg_count, N as i64,
+        "N 条用户消息必须全部落库，一条不少"
+    );
+
+    // 每条用户消息各自的 trigger 都应触发该 default bot 一次 —— 恰好 N 次，
+    // 一次不多（幂等）也一次不少（#330：并发下不应互相顶掉丢派发）。
+    assert_eq!(
+        counter.dispatched.load(Ordering::SeqCst),
+        N,
+        "每条独立消息都应各自派发一次 task，共 {N} 次"
+    );
+
+    // 每条消息各自派发的占位 bot 消息也应各自落库（N 条，互不覆盖）。
+    let placeholder_count: i64 = sqlx::query(
+        "SELECT COUNT(*) AS c FROM messages WHERE channel_id = $1 AND sender_type = 'bot'",
+    )
+    .bind(ch.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap()
+    .try_get("c")
+    .unwrap();
+    assert_eq!(
+        placeholder_count, N as i64,
+        "每条消息应各有一条独立的占位回复"
+    );
+}
+
 // ── 流程 4：done 落库 finalize；迟到的第二个 done 幂等（不双写、不耗 seq）──────
 
 /// 派发占位 → done 帧 finalize（此刻才分配 seq）。第二个 done 被 DB 守卫
