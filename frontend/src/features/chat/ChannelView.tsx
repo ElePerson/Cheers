@@ -10,6 +10,7 @@ import {
 import {
   ArrowLeft,
   Hash,
+  MessageSquare,
   Users,
   Loader2,
   PanelRight,
@@ -1576,6 +1577,12 @@ export function ChannelView({
   }
 
   const anyWorkOpen = vbOpen || wbOpen || wsOpen || filesOpen;
+  // DM channels are nameless on the wire (`channels.name` is '') — label them by
+  // the other participant, same fallback chain as Sidebar/ForwardDialog/QuickPanel.
+  const isDm = channel.type === "dm";
+  const channelTitle = isDm
+    ? channel.peer_name || channel.name || "Direct Message"
+    : channel.name;
 
   return (
     <ProfileCardProvider members={memberById}>
@@ -1599,9 +1606,13 @@ export function ChannelView({
               <ArrowLeft className="w-5 h-5" />
             </button>
           )}
-          <Hash className="w-4 h-4 text-zinc-500 flex-shrink-0 max-md:hidden" />
+          {isDm ? (
+            <MessageSquare className="w-4 h-4 text-zinc-500 flex-shrink-0 max-md:hidden" />
+          ) : (
+            <Hash className="w-4 h-4 text-zinc-500 flex-shrink-0 max-md:hidden" />
+          )}
           <span className="font-semibold text-zinc-100 text-sm truncate min-w-0 max-md:pl-1">
-            {channel.name}
+            {channelTitle}
           </span>
           {channel.purpose && (
             <div className="hidden md:flex items-center gap-3 pl-1 min-w-0">
