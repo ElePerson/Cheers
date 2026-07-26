@@ -666,6 +666,7 @@ struct ChannelDto: Decodable, Identifiable, Hashable {
     var isVoice: Bool { kind == "voice" }
     var displayName: String {
         if isDM, let peerName, !peerName.isEmpty { return peerName }
+        if isDM { return String(localized: "Unknown participant") }
         return name
     }
 

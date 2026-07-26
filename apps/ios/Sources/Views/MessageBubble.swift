@@ -56,6 +56,7 @@ struct SystemMessageView: View {
 // MARK: - Chat bubble (Telegram-style, design map §5.2b)
 
 struct MessageBubbleView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let message: MessageDto
     let isOwn: Bool
     let showSenderName: Bool
@@ -76,13 +77,13 @@ struct MessageBubbleView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             if isOwn {
-                Spacer(minLength: 60)
+                Spacer(minLength: dynamicTypeSize.isAccessibilitySize ? 8 : 60)
             } else {
                 avatarGutter
             }
             bubble
             if !isOwn {
-                Spacer(minLength: 60)
+                Spacer(minLength: dynamicTypeSize.isAccessibilitySize ? 8 : 60)
             }
         }
         .padding(.horizontal, Theme.space3)
@@ -210,6 +211,7 @@ struct MessageBubbleView: View {
             Text(formattedTime)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(Theme.textSecondary)
+                .dynamicTypeSize(...DynamicTypeSize.large)
         }
         .padding(.bottom, 1)
     }

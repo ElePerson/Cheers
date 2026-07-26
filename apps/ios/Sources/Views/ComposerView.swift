@@ -5,33 +5,8 @@ import SwiftUI
 /// Growing multiline composer pinned to the bottom of the chat screen.
 /// Visuals follow the web MessageComposer: raised capsule, strong border that
 /// turns indigo on focus, 32pt indigo send button.
-/// Composer "..." menu actions, mirroring the web MessageComposer controls
-/// (attach file, add context, choose session, model & bot settings).
-private enum ComposerAction: String, Identifiable {
-    case attach = "Attach file"
-    case context = "Add context"
-    case session = "Choose session"
-    case model = "Model & bot settings"
-    var id: String { rawValue }
-    var icon: String {
-        switch self {
-        case .attach: return "paperclip"
-        case .context: return "text.badge.plus"
-        case .session: return "square.stack.3d.up"
-        case .model: return "slider.horizontal.3"
-        }
-    }
-    var blurb: String {
-        switch self {
-        case .attach: return "Upload a file or pick an existing channel file to send."
-        case .context: return "Add Cheers resources (plan, decisions, files) as context for your next message."
-        case .session: return "Route this message to a specific bot session, or Auto by @mention."
-        case .model: return "Session mode and per-bot model settings for this channel."
-        }
-    }
-}
-
 struct ComposerView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Draft and keyboard focus live inside this leaf view. A keystroke now
     /// invalidates only the composer subtree, never the chat timeline.
     @State private var text: String
@@ -49,7 +24,6 @@ struct ComposerView: View {
     var onMentionPicked: (MentionCandidate) -> Void = { _ in }
 
     @FocusState private var isFocused: Bool
-    @State private var action: ComposerAction?
     @State private var dictation = ComposerDictationController()
 
     init(
@@ -136,11 +110,6 @@ struct ComposerView: View {
             transaction.disablesAnimations = true
             withTransaction(transaction) { text = "" }
         }
-        .sheet(item: $action) { action in
-            ComposerActionSheet(action: action)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-        }
     }
 
     private var mentionPicker: some View {
@@ -190,8 +159,6 @@ struct ComposerView: View {
     private var inputRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Menu {
-                Button { action = .attach } label: { Label("Attach file", systemImage: "paperclip") }
-                Button { action = .context } label: { Label("Add context", systemImage: "text.badge.plus") }
                 Button { onChooseSession() } label: { Label("Choose session", systemImage: "square.stack.3d.up") }
                 Button { onModelSettings() } label: { Label("Model & bot settings", systemImage: "slider.horizontal.3") }
             } label: {
@@ -257,6 +224,7 @@ struct ComposerView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(isFocused ? Theme.accentHover.opacity(0.6) : Color.clear, lineWidth: 1.5)
         )
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .alert("Voice dictation", isPresented: Binding(
             get: { dictation.errorMessage != nil },
             set: { if !$0 { dictation.errorMessage = nil } }
@@ -489,33 +457,5 @@ private final class PCM16Accumulator: @unchecked Sendable {
             guard storage.count + converted.count <= 8 * 1024 * 1024 else { return }
             storage.append(converted)
         }
-    }
-}
-
-/// Placeholder detail for a composer action — the full pickers (file upload,
-/// context bundle, session/model) are a follow-up; this names the action and
-/// its purpose so the entry points match the web composer.
-private struct ComposerActionSheet: View {
-    let action: ComposerAction
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Capsule().fill(Theme.bgSelected).frame(width: 38, height: 5).padding(.top, 8)
-            Image(systemName: action.icon)
-                .font(.system(size: 34))
-                .foregroundStyle(Theme.accent)
-                .padding(.top, 8)
-            Text(action.rawValue)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-            Text(action.blurb)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.bgSurface)
     }
 }

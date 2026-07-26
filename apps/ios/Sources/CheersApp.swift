@@ -30,11 +30,19 @@ struct RootView: View {
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: app.session == nil)
+        .task(id: app.session?.userId) {
+            guard app.session != nil else { return }
+            await app.runSessionRefreshLoop()
+        }
         .onChange(of: scenePhase) { _, phase in
             // iOS suspends the socket in the background; on return, reconnect
-            // immediately (with a fresh backoff budget) if realtime is down.
+            // immediately (with a fresh backoff budget) if realtime is down and
+            // rotate an access token that aged while the app was suspended.
             if phase == .active {
-                app.reconnectSocketIfNeeded()
+                Task {
+                    await app.refreshSessionIfNeeded()
+                    app.reconnectSocketIfNeeded()
+                }
             }
         }
     }

@@ -62,7 +62,27 @@
 		CE0000000000000000000436 /* FriendsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000428 /* FriendsView.swift */; };
 		CE0000000000000000000437 /* GoogleOAuthSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000429 /* GoogleOAuthSession.swift */; };
 		CE0000000000000000000452 /* BotTracePanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000453 /* BotTracePanelView.swift */; };
+		CE1000000000000000000001 /* ServerIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000011 /* ServerIdentity.swift */; };
+		CE1000000000000000000002 /* ReleaseReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000012 /* ReleaseReadinessTests.swift */; };
+		CE1000000000000000000003 /* AuthenticationAccessibilityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000013 /* AuthenticationAccessibilityUITests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		CE1000000000000000000021 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CE0000000000000000000400 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CE0000000000000000000401;
+			remoteInfo = Cheers;
+		};
+		CE1000000000000000000022 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CE0000000000000000000400 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CE0000000000000000000401;
+			remoteInfo = Cheers;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		CE0000000000000000000101 /* CheersApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheersApp.swift; sourceTree = "<group>"; };
@@ -122,6 +142,11 @@
 		CE0000000000000000000427 /* ForgotPasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgotPasswordView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000428 /* FriendsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000429 /* GoogleOAuthSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuthSession.swift; sourceTree = "<group>"; };
+		CE1000000000000000000011 /* ServerIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerIdentity.swift; sourceTree = "<group>"; };
+		CE1000000000000000000012 /* ReleaseReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseReadinessTests.swift; sourceTree = "<group>"; };
+		CE1000000000000000000013 /* AuthenticationAccessibilityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationAccessibilityUITests.swift; sourceTree = "<group>"; };
+		CE1000000000000000000014 /* CheersTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CheersTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CE1000000000000000000015 /* CheersUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CheersUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -133,6 +158,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CE1000000000000000000031 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CE1000000000000000000032 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -140,6 +179,8 @@
 			isa = PBXGroup;
 			children = (
 				CE0000000000000000000303 /* Sources */,
+				CE1000000000000000000041 /* Tests */,
+				CE1000000000000000000042 /* UITests */,
 				CE0000000000000000000302 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -148,6 +189,8 @@
 			isa = PBXGroup;
 			children = (
 				CE0000000000000000000402 /* Cheers.app */,
+				CE1000000000000000000014 /* CheersTests.xctest */,
+				CE1000000000000000000015 /* CheersUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -174,6 +217,7 @@
 			isa = PBXGroup;
 			children = (
 				CE0000000000000000000102 /* Theme.swift */,
+				CE1000000000000000000011 /* ServerIdentity.swift */,
 				CE0000000000000000000103 /* KeychainStore.swift */,
 				CE000000000000000000011F /* PushRouter.swift */,
 				CE0000000000000000000425 /* PasskeyController.swift */,
@@ -255,6 +299,22 @@
 			path = Views;
 			sourceTree = "<group>";
 		};
+		CE1000000000000000000041 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				CE1000000000000000000012 /* ReleaseReadinessTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		CE1000000000000000000042 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				CE1000000000000000000013 /* AuthenticationAccessibilityUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -278,6 +338,42 @@
 			productReference = CE0000000000000000000402 /* Cheers.app */;
 			productType = "com.apple.product-type.application";
 		};
+		CE1000000000000000000051 /* CheersTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CE1000000000000000000091 /* Build configuration list for PBXNativeTarget "CheersTests" */;
+			buildPhases = (
+				CE1000000000000000000061 /* Sources */,
+				CE1000000000000000000031 /* Frameworks */,
+				CE1000000000000000000071 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CE1000000000000000000081 /* PBXTargetDependency */,
+			);
+			name = CheersTests;
+			productName = CheersTests;
+			productReference = CE1000000000000000000014 /* CheersTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		CE1000000000000000000052 /* CheersUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CE1000000000000000000092 /* Build configuration list for PBXNativeTarget "CheersUITests" */;
+			buildPhases = (
+				CE1000000000000000000062 /* Sources */,
+				CE1000000000000000000032 /* Frameworks */,
+				CE1000000000000000000072 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CE1000000000000000000082 /* PBXTargetDependency */,
+			);
+			name = CheersUITests;
+			productName = CheersUITests;
+			productReference = CE1000000000000000000015 /* CheersUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -290,6 +386,14 @@
 				TargetAttributes = {
 					CE0000000000000000000401 = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					CE1000000000000000000051 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = CE0000000000000000000401;
+					};
+					CE1000000000000000000052 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = CE0000000000000000000401;
 					};
 				};
 			};
@@ -311,6 +415,8 @@
 			);
 			targets = (
 				CE0000000000000000000401 /* Cheers */,
+				CE1000000000000000000051 /* CheersTests */,
+				CE1000000000000000000052 /* CheersUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -326,6 +432,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CE1000000000000000000071 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CE1000000000000000000072 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -335,6 +455,7 @@
 			files = (
 				CE0000000000000000000201 /* CheersApp.swift in Sources */,
 				CE0000000000000000000202 /* Theme.swift in Sources */,
+				CE1000000000000000000001 /* ServerIdentity.swift in Sources */,
 				CE0000000000000000000203 /* KeychainStore.swift in Sources */,
 				CE0000000000000000000204 /* DTOs.swift in Sources */,
 				CE0000000000000000000205 /* APIClient.swift in Sources */,
@@ -387,7 +508,36 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CE1000000000000000000061 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CE1000000000000000000002 /* ReleaseReadinessTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CE1000000000000000000062 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CE1000000000000000000003 /* AuthenticationAccessibilityUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CE1000000000000000000081 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CE0000000000000000000401 /* Cheers */;
+			targetProxy = CE1000000000000000000021 /* PBXContainerItemProxy */;
+		};
+		CE1000000000000000000082 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CE0000000000000000000401 /* Cheers */;
+			targetProxy = CE1000000000000000000022 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		CE0000000000000000000408 /* Debug */ = {
@@ -492,6 +642,68 @@
 			};
 			name = Release;
 		};
+		CE10000000000000000000A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 8M272Q9TAD;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.cheers.ios.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cheers.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cheers";
+			};
+			name = Debug;
+		};
+		CE10000000000000000000A2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 8M272Q9TAD;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.cheers.ios.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cheers.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cheers";
+			};
+			name = Release;
+		};
+		CE10000000000000000000A3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 8M272Q9TAD;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.cheers.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Cheers;
+			};
+			name = Debug;
+		};
+		CE10000000000000000000A4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 8M272Q9TAD;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.cheers.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Cheers;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -509,6 +721,24 @@
 			buildConfigurations = (
 				CE000000000000000000040A /* Debug */,
 				CE000000000000000000040B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CE1000000000000000000091 /* Build configuration list for PBXNativeTarget "CheersTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CE10000000000000000000A1 /* Debug */,
+				CE10000000000000000000A2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CE1000000000000000000092 /* Build configuration list for PBXNativeTarget "CheersUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CE10000000000000000000A3 /* Debug */,
+				CE10000000000000000000A4 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

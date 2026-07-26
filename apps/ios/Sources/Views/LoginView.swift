@@ -6,6 +6,7 @@ import UIKit
 struct LoginView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var server = AppModel.defaultServerURL
     @State private var username = ""
@@ -19,6 +20,8 @@ struct LoginView: View {
     @State private var appleEnabled = false
     @State private var googleEnabled = false
     @State private var capabilityLoaded = false
+    @State private var capabilityError: String?
+    @State private var showAdvancedServer = false
     @State private var registrationEnabled = false
     @State private var appleChallenge: AppleChallenge?
     @State private var showingRegistration = false
@@ -41,7 +44,7 @@ struct LoginView: View {
                 legalLinks
             }
             .padding(.horizontal, 24)
-            .padding(.top, 64)
+            .padding(.top, dynamicTypeSize.isAccessibilitySize ? 24 : 64)
             .frame(maxWidth: 420)
             .frame(maxWidth: .infinity)
         }
@@ -89,9 +92,16 @@ struct LoginView: View {
 
     private var card: some View {
         VStack(spacing: 14) {
-            field("Server", text: $server, placeholder: AppModel.defaultServerURL, field: .server)
-                .keyboardType(.URL)
-                .textContentType(.URL)
+            serverIdentityCard
+
+            DisclosureGroup("Advanced server settings", isExpanded: $showAdvancedServer) {
+                field("Server URL", text: $server, placeholder: AppModel.defaultServerURL, field: .server)
+                    .keyboardType(.URL)
+                    .textContentType(.URL)
+                    .padding(.top, 8)
+            }
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(Theme.textSecondary)
 
             field("Username or email", text: $username, placeholder: "admin", field: .username)
                 .textContentType(.username)
@@ -162,7 +172,28 @@ struct LoginView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Theme.space2)
 
-            if googleEnabled {
+            if !capabilityLoaded {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking sign-in options…")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            } else if let capabilityError {
+                Button {
+                    Task { await loadAppleCapability() }
+                } label: {
+                    Label(capabilityError, systemImage: "arrow.clockwise")
+                        .font(.footnote)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.warning)
+            }
+
+            if capabilityLoaded && googleEnabled {
                 Button(action: submitGoogle) {
                     HStack(spacing: 8) {
                         Image(systemName: "g.circle.fill")
@@ -184,7 +215,8 @@ struct LoginView: View {
                 .disabled(isBusy)
             }
 
-            SignInWithAppleButton(.signIn) { request in
+            if capabilityLoaded && appleEnabled {
+                SignInWithAppleButton(.signIn) { request in
                 request.requestedScopes = [.fullName, .email]
                 if let nonce = appleChallenge?.nonce {
                     request.nonce = SHA256.hash(data: Data(nonce.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -192,22 +224,11 @@ struct LoginView: View {
             } onCompletion: { result in
                 handleAppleCompletion(result)
             }
-            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
-            .frame(height: 48)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .disabled(isBusy || appleChallenge == nil)
-            .opacity(appleChallenge == nil ? 0.55 : 1)
-            .accessibilityHint(
-                appleEnabled
-                    ? "Uses the Apple account signed in on this device"
-                    : "Unavailable because this server has not configured Sign in with Apple"
-            )
-
-            if capabilityLoaded && !appleEnabled {
-                Label("Apple sign-in isn't configured on this server.", systemImage: "info.circle")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.textMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                .frame(height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .disabled(isBusy || appleChallenge == nil)
+                .accessibilityHint("Uses the Apple account signed in on this device")
             }
 
             Button {
@@ -226,13 +247,45 @@ struct LoginView: View {
                     : "An invitation is required on this server"
             )
         }
-        .padding(24)
+        .padding(dynamicTypeSize.isAccessibilitySize ? 16 : 24)
         .background(Theme.bgSurface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1)
         )
+    }
+
+    private var serverIdentityCard: some View {
+        let identity = ServerIdentity.resolve(server)
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: identity.isProduction ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                .font(.title3)
+                .foregroundStyle(identity.isProduction ? Theme.online : Theme.warning)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(identity.title)
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(identity.detail)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+                if identity.kind == .custom {
+                    Text("Accounts and data on this server may differ from Cheers Cloud.")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(Theme.warning)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(identity.isProduction ? Theme.online.opacity(0.1) : Theme.warning.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("server-identity-card")
+        .accessibilityLabel("\(identity.title), \(identity.detail)")
     }
 
     private var factorCard: some View {
@@ -506,6 +559,7 @@ struct LoginView: View {
     @MainActor
     private func loadAppleCapability() async {
         capabilityLoaded = false
+        capabilityError = nil
         do {
             let (capabilities, challenge) = try await app.appleCapabilities(server: server)
             appleEnabled = capabilities.signInWithApple
@@ -518,6 +572,7 @@ struct LoginView: View {
             googleEnabled = false
             registrationEnabled = false
             appleChallenge = nil
+            capabilityError = String(localized: "Couldn't check sign-in options. Tap to retry.")
             capabilityLoaded = true
         }
     }

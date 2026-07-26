@@ -30,7 +30,7 @@ export interface UserSearchResult {
   avatar_url?: string | null;
 }
 
-/** Look up a single user by EXACT user id (friend-add is id-only; GET /friends/search?q=). */
+/** Look up a single user by exact username or user id; no partial directory search. */
 export async function searchUsers(q: string): Promise<UserSearchResult[]> {
   return apiJson<UserSearchResult[]>(`/friends/search?q=${encodeURIComponent(q)}`);
 }

@@ -13,8 +13,10 @@ voice media; the rest of the client uses Apple platform frameworks.
   `message` / `message_stream` / `message_done` / `message_deleted` /
   `presence` envelopes), exponential-backoff reconnect (1 s → 30 s, max 10
   retries) with automatic resubscribe and `?since_seq=` gap healing
-- **Auth:** JWT stored in the Keychain (`Sources/Support/KeychainStore.swift`);
-  non-secret session fields in `UserDefaults`
+- **Auth:** short-lived JWT plus rotating refresh token stored in the Keychain
+  (`Sources/Support/KeychainStore.swift`); the access token is refreshed on the
+  same eight-minute cadence as web/macOS and after foregrounding; non-secret
+  session fields live in `UserDefaults`
 - **Theming:** follows the system light/dark appearance. Dark is the canonical
   web palette (zinc + indigo); light is the derived mapping from the design
   language map (§1.4). Avatar colors reuse the exact web hash
@@ -116,9 +118,9 @@ should use HTTPS.
   placeholders and live token streaming via `message_stream` deltas.
 - **Read state:** `POST /channels/:id/read` on open and on incoming messages
   while the channel is on screen.
-- **Session:** revoked/expired tokens (REST 401 or socket `auth_err`) sign the
-  user out locally; logout also calls `POST /auth/logout` to revoke
-  server-side.
+- **Session:** the access token is proactively refreshed before its ten-minute
+  expiry; rejected refresh tokens, REST 401s, or socket `auth_err` sign the user
+  out locally. Logout also calls `POST /auth/logout` to revoke server-side.
 
 ## Not yet implemented
 
