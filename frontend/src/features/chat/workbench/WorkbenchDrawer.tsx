@@ -458,7 +458,10 @@ function WorkbenchDrawerImpl({ open, onClose, channelId, sendResourceReq, openFi
   const minimized = collapsed && !isMobile;
   // Desktop: a draggable/resizable floating window inside the work lane; dragging
   // snaps it to the lane's grid zones.
-  const { float, drag } = useLaneWindow("cheers.float.workbench");
+  const { float, drag } = useLaneWindow("cheers.float.workbench", {
+    open,
+    spawnKind: "workbench",
+  });
 
   const ctx: WorkbenchContext = useMemo(
     () => ({

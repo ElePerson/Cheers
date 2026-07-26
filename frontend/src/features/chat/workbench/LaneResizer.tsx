@@ -12,8 +12,8 @@ import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 export function LaneResizer({
   onChange,
   onCommit,
-  minLane = 320, // 20rem — matches the lane's md:min-w
-  minChat = 384, // 24rem — matches the chat column's md:min-w
+  minLane = 256, // 16rem — matches the lane's md:min-w (tight mid-width floor)
+  minChat = 320, // 20rem — matches the chat column's md:min-w; CSS raises to 24rem ≥1100px
 }: {
   /** Live lane width (px) while dragging. */
   onChange: (widthPx: number) => void;
@@ -35,7 +35,9 @@ export function LaneResizer({
     const row = ref.current?.parentElement;
     if (!row) return;
     const r = row.getBoundingClientRect();
-    const maxLane = Math.max(minLane, r.width - minChat);
+    // Mirror ChannelView's adaptive chat floor so the splitter and CSS agree.
+    const chatFloor = r.width < 1100 ? minChat : Math.max(minChat, 384);
+    const maxLane = Math.max(minLane, r.width - chatFloor);
     const w = Math.min(Math.max(r.right - e.clientX, minLane), maxLane);
     onChange(Math.round(w));
   };

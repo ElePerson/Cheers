@@ -1126,7 +1126,9 @@ export function RemoteWorkspaceDialog({
       storageKey="cheers.float.workspace"
       // Widest card (it hosts a side-by-side tree + editor); default height fills
       // most of the lane. Clamped to the lane's width/height by FloatingPanel.
+      // First open auto-fills / picks a free zone via spawnKind.
       className="w-[1024px] h-[85%]"
+      spawnKind="workspace"
       defaultPosClassName="top-6 left-6"
       // The panes stack (mobile) or sit side-by-side (desktop) and stretch — the
       // body must be a non-scrolling flex column in both cases.
