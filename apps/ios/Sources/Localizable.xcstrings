@@ -1151,6 +1151,16 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新密码（至少 12 个字符）" } }
       }
     },
+    "Copied" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制" } }
+      }
+    },
+    "More message actions" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更多消息操作" } }
+      }
+    },
     "Confirm password" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "确认密码" } }
