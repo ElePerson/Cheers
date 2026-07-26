@@ -39,11 +39,8 @@ bot:
   image:
     tag: dev
     pullPolicy: IfNotPresent
-  # Default agent is OpenCode (OpenAI-compatible; works with a DeepSeek key).
   # Enable with:
-  #   --set bot.enabled=true --set bot.token.existingSecret=cheers-opencode-bot \
-  #   --set bot.openaiApiKey.existingSecret=cheers-opencode-bot
-  # For Codex instead: add --set bot.agentType=codex
+  #   --set bot.enabled=true --set bot.token.existingSecret=cheers-codex-bot
   enabled: false
   # The agent runtime is the heaviest workload — allow more headroom.
   resources:

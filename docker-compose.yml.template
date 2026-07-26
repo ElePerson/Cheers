@@ -93,47 +93,6 @@ services:
       retries: 12
       start_period: 20s
 
-  # Optional agent bot. It needs an Agent Bridge token that can only be minted
-  # from a running gateway, so it is NOT started by `docker compose up -d`. Bring
-  # up the core stack first, mint a token (see the Docker Compose deploy guide),
-  # put it in OPENCODE_BOT_TOKEN, then start this with:
-  #   docker compose --profile bot up -d opencode-bot
-  opencode-bot:
-    profiles: ["bot"]
-    build:
-      context: .
-      dockerfile: docker/opencode-bot/Dockerfile
-    image: ${OPENCODE_BOT_IMAGE:-cheers/opencode-bot:latest}
-    restart: unless-stopped
-    # The agent runtime (node + ACP) is the heaviest workload — allow more headroom.
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 2G
-        reservations:
-          memory: 256M
-    env_file:
-      - .env
-    environment:
-      - CHEERS_WS_BASE=${OPENCODE_BOT_WS_BASE:-ws://gateway:8000}
-      - OPENCODE_BOT_USERNAME=${OPENCODE_BOT_USERNAME:-opencode}
-      - OPENCODE_BOT_TOKEN=${OPENCODE_BOT_TOKEN:-}
-      - OPENCODE_OPENAI_API_KEY=${OPENCODE_OPENAI_API_KEY:-}
-      - OPENCODE_OPENAI_BASE_URL=${OPENCODE_OPENAI_BASE_URL:-}
-      - OPENCODE_PROVIDER=${OPENCODE_PROVIDER:-deepseek}
-      - OPENCODE_MODEL=${OPENCODE_MODEL:-}
-      - OPENCODE_WORKSPACE_DIR=${OPENCODE_WORKSPACE_DIR:-/workspace}
-      - OPENCODE_NATIVE_PERMISSION_MODE=${OPENCODE_NATIVE_PERMISSION_MODE:-ask}
-      - OPENCODE_PROMPT_TIMEOUT_MS=${OPENCODE_PROMPT_TIMEOUT_MS:-660000}
-      - OPENCODE_REQUEST_TIMEOUT_MS=${OPENCODE_REQUEST_TIMEOUT_MS:-}
-    volumes:
-      - ./data/opencode-bot:/app/state
-      - ./data/opencode-workspace:/workspace
-    depends_on:
-      gateway:
-        condition: service_healthy
-
   # Optional streaming STT worker. Keep this compute workload off the small
   # dedicated LiveKit SFU host; it connects outbound to LiveKit and the gateway.
   voice-transcriber:

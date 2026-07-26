@@ -5,9 +5,9 @@
 For users / developers connecting an ACP agent (e.g. Codex, Claude) **as a local host daemon**.
 It covers: how to configure one bot, where the token goes, how to manage multiple bots, and how to troubleshoot.
 
-- For containerized deployment (the built-in OpenCode bot in Docker) and the full "create a bot in the UI"
-  flow, see the [Agent Bridge Integration Guide](AgentBridge接入指南.md). This document focuses on the
-  **local path: gateway from source + a host connector**.
+- For the full "create a bot in the UI" flow, see the
+  [Agent Bridge Integration Guide](AgentBridge接入指南.md). This document focuses
+  on the **local path: gateway from source + a host connector**.
 - Terms: **Gateway** (the Rust backend in `server/`), **Connector** (`cce-acp-connector`, bridges an ACP
   agent to the gateway), **ACP agent** (the `codex-acp` / `claude-agent-acp` child process).
 
@@ -383,7 +383,7 @@ connection it is restored automatically and that version is never retried.
 
 ## 9. References
 
-- [Agent Bridge Integration Guide](AgentBridge接入指南.md): concepts, creating a bot in the UI, the Docker OpenCode bot, OpenClaw (legacy)
+- [Agent Bridge Integration Guide](AgentBridge接入指南.md): concepts, creating a bot in the UI, OpenClaw (legacy)
 - [Installation Guide](安装部署说明.md): overall deployment, `.env`, migrations
 - [Troubleshooting Q&A](技术排查Q&A.md): health checks, logs, bot no-response
 - Connector source: `packages/cheers-acp-connector-rs/` (editable templates under `examples/`)

@@ -61,9 +61,7 @@ TypeScript 版 `packages/cheers-acp-connector` npm 包已经删除。
 
 1. Rust connector 版本或依赖变化时，更新 `packages/cheers-acp-connector-rs/Cargo.toml` 和 `Cargo.lock`。
 2. 对 `packages/cheers-acp-connector-rs` 运行 `cargo fmt --check`、`cargo test` 和 `cargo check`。
-3. 从同一个已合并提交重建并推送 `opencode-bot` 镜像，确保容器部署包含新的 Rust connector 和 MCP server 二进制。
-4. 对本地运行 connector 的机器，从 repo 或批准的 release artifact 安装 Rust binary，然后重启对应的 connector daemon。
-5. 对容器部署，拉取或部署重建后的 `opencode-bot` 镜像并重新创建服务。
+3. 对本地运行 connector 的机器，从 repo 或批准的 release artifact 安装 Rust binary，然后重启对应的 connector daemon。
 
 不要重新引入旧的 npm connector 包或已退役的 `@haowei0520/acp-connector` 发布 workflow。
 

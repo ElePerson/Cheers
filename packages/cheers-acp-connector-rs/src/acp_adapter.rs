@@ -720,30 +720,11 @@ impl RuntimeAdapter for AcpAdapter {
                 .unwrap_or("unknown"),
             "initialized ACP agent"
         );
-        // Agents that advertise authMethods require `authenticate` before
-        // session/new (ACP authentication). Skipping yields "Authentication required".
-        if let Some(method) = preferred_auth_method(&response, &self.config.env) {
-            tracing::info!(
-                account = %self.account_id,
-                method_id = %method.id,
-                "ACP agent requires authenticate; calling it"
-            );
-            if let Err(e) = self
-                .request(
-                    "authenticate",
-                    json!({ "methodId": method.id }),
-                    self.request_timeout_ms(),
-                )
-                .await
-            {
-                let _ = self.stop().await;
-                let hint = auth_failure_hint(&method);
-                return Err(anyhow!(
-                    "ACP authenticate({}) failed: {e}. {hint}",
-                    method.id
-                ));
-            }
-        }
+        // `authMethods` advertises available login mechanisms; it does not say
+        // that the agent's existing account is unauthenticated. In particular,
+        // Codex and Claude load subscription credentials from HOME themselves.
+        // Let session/new use that state first. The bridge runtime handles an
+        // explicit auth_required failure by selecting a method and retrying.
         self.initialize_response = Some(response.clone());
         Ok(response)
     }

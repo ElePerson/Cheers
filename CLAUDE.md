@@ -142,8 +142,8 @@ invite, settings, workbench).
 ## Connector Releases
 
 When `packages/cheers-acp-connector-rs` behavior materially changes, follow the
-release order in [AGENTS.md](AGENTS.md) (version bump → fmt/test/check → rebuild
-`opencode-bot` image → upgrade local daemons → recreate container deployments;
+release order in [AGENTS.md](AGENTS.md) (version bump → fmt/test/check → upgrade
+local daemons;
 auto-update requires the signed `connector-manifest.json` from the tag's CI job).
 
 ## Related Documentation

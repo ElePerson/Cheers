@@ -281,41 +281,7 @@ cargo install --path packages/cheers-acp-connector-rs --locked
 cce-acp-connector --help
 ```
 
-### 4.2 Docker Compose 预置 OpenCode Bot
-
-`docker-compose.yml.template` 内置了可选的 `opencode-bot` profile：backend seed 会创建一个 Agent Bridge Bot，`opencode-bot` 容器会用同一个 Bot token 连接 Cheers，并通过 OpenCode ACP 调用 DeepSeek/OpenAI 兼容 API。OpenCode ACP 声明支持图片输入和嵌入文件上下文；实际图片理解能力仍取决于配置的模型/供应商。
-
-在 `.env` 中配置：
-
-```bash
-OPENCODE_BOT_ENABLED=true
-OPENCODE_BOT_TOKEN=agb_<随机密钥>
-OPENCODE_OPENAI_API_KEY=<你的 OpenAI 兼容 API Key>
-OPENCODE_OPENAI_BASE_URL=https://api.deepseek.com
-OPENCODE_PROVIDER=deepseek
-OPENCODE_MODEL=<模型名>
-```
-
-生成 `OPENCODE_BOT_TOKEN` 示例：
-
-```bash
-python - <<'PY'
-import secrets
-print("agb_" + secrets.token_urlsafe(32))
-PY
-```
-
-启动：
-
-```bash
-docker compose --profile opencode-bot up -d --wait
-```
-
-`OPENCODE_BOT_TOKEN` 必须同时给 backend seed 和 `opencode-bot` 容器使用。容器内会生成
-Rust connector TOML 配置；平台可见权限请求始终经 Cheers Backend 审批。OpenCode
-自身的本地写文件/执行命令策略由 `OPENCODE_NATIVE_PERMISSION_MODE` 控制，默认是 `ask`。
-
-### 4.3 注册 OpenCode ACP Bot
+### 4.2 注册 OpenCode ACP Bot
 
 通过 Cheers 注册接口创建一个 ACP provider Bot：
 
@@ -340,7 +306,7 @@ curl -X POST "$CHEERS_BASE_URL/docs/agent-bridge/register" \
 - `data.bridge.data_ws`
 - `bot_token` 建议写入环境变量，例如 `CHEERS_BOT_TOKEN`，不要写入 TOML 明文。
 
-### 4.4 编写 `cheers-daemon.toml`
+### 4.3 编写 `cheers-daemon.toml`
 
 示例：
 
@@ -393,7 +359,7 @@ request_timeout_ms = 600000
 - 本地没有 `permissionMode = "ask"`；ACP permission request 必须转发给 Backend，再由
   `permission_resolution` 返回 ACP outcome。
 
-### 4.5 启动 ACP Connector
+### 4.4 启动 ACP Connector
 
 前台调试：
 
@@ -417,7 +383,7 @@ cce-acp-connector restart --name opencode-acp
 cce-acp-connector stop --name opencode-acp
 ```
 
-### 4.6 在 Cheers 中测试 OpenCode ACP
+### 4.5 在 Cheers 中测试 OpenCode ACP
 
 先把 `opencode-acp` Bot 加入目标频道，然后发送：
 
@@ -447,7 +413,7 @@ cce-acp-connector stop --name opencode-acp
 
 当前 ACP Connector 会在 agent 声明 `embeddedContext` capability 时，通过 `/api/v1/agent-bridge/files/{file_id}/content` 读取文件正文，并作为 ACP `resource` content block 传给 agent。
 
-### 4.7 让 OpenCode ACP 返回文件到 Cheers
+### 4.6 让 OpenCode ACP 返回文件到 Cheers
 
 ACP Connector 支持两条文件回传路径：
 

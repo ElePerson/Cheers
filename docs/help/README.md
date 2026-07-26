@@ -9,7 +9,7 @@ This directory contains user-facing, administrator-facing, and operations-facing
 | Reader | Start Here | Covers |
 |---|---|---|
 | Anyone deploying | [Deployment Guide](deployment.md) | The three methods — from source, Docker Compose, Helm/Kubernetes — and when to use each |
-| First-time deployer (Compose) | [Docker Compose Deployment Guide](docker-compose-deploy.md) | Single-host Compose stack: JWT keys, `.env`, core stack, OpenCode bot, TLS, ops |
+| First-time deployer (Compose) | [Docker Compose Deployment Guide](docker-compose-deploy.md) | Single-host Compose stack: JWT keys, `.env`, core stack, TLS, ops |
 | First-time deployer (legacy) | [Installation Guide](安装部署说明.md) | Older combined install notes (predates the Rust gateway; being revised) |
 | Daily user | [User Guide](普通用户使用说明.md) | Entering channels, sending messages, mentioning Bots, uploading files |
 | Frontend operator | [Frontend Operation Manual](<Cheers 前端操作手册.md>) | Main UI entry points, controls, and common operations |

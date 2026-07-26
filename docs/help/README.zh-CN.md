@@ -9,7 +9,7 @@
 | 读者 | 推荐文档 | 解决的问题 |
 |------|----------|------------|
 | 任何要部署的人 | [部署指南](deployment.zh-CN.md) | 三种方式 —— 源码、Docker Compose、Helm/Kubernetes —— 及各自适用场景 |
-| 想快速跑起来（Compose） | [Docker Compose 部署指南](docker-compose-deploy.zh-CN.md) | 单机 Compose 栈：JWT 密钥、`.env`、核心栈、OpenCode Bot、TLS、运维 |
+| 想快速跑起来（Compose） | [Docker Compose 部署指南](docker-compose-deploy.zh-CN.md) | 单机 Compose 栈：JWT 密钥、`.env`、核心栈、TLS、运维 |
 | 想快速跑起来（旧版） | [安装部署说明](安装部署说明.md) | 早期综合安装说明（早于 Rust gateway，修订中） |
 | 普通用户 | [普通用户使用说明](普通用户使用说明.md) | 进入项目、发消息、@ Bot、上传文件、常见问题 |
 | 系统管理员 | [系统管理说明书](系统管理说明书.md) | 创建工作空间/项目、添加成员、创建 Bot、接入 Agent Bridge |
