@@ -1,4 +1,34 @@
 import SwiftUI
+import UIKit
+
+enum NativeFeedback {
+    static func lightImpact() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    static func selection() {
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+}
+
+struct NativeCircleButtonLabel: View {
+    let systemName: String
+    var visualSize: CGFloat = 38
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(Theme.textPrimary)
+            .frame(width: visualSize, height: visualSize)
+            .background(.regularMaterial, in: Circle())
+            .overlay {
+                Circle().stroke(.primary.opacity(0.08), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.09), radius: 8, y: 3)
+            .frame(width: Theme.hitMin, height: Theme.hitMin)
+            .contentShape(Rectangle())
+    }
+}
 
 /// Claude-app-style circular header button (36pt, raised surface fill).
 struct CircleIconButton: View {
@@ -7,17 +37,12 @@ struct CircleIconButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            NativeFeedback.lightImpact()
+            action()
+        } label: {
             ZStack(alignment: .topTrailing) {
-                // 36pt visual inside a 44pt hit target (HIG hard minimum).
-                Image(systemName: systemName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.textBody)
-                    .frame(width: 36, height: 36)
-                    .background(Theme.bgRaised)
-                    .clipShape(Circle())
-                    .frame(width: Theme.hitMin, height: Theme.hitMin)
-                    .contentShape(Rectangle())
+                NativeCircleButtonLabel(systemName: systemName)
                 if badge > 0 {
                     Text(badge > 99 ? "99+" : String(badge))
                         .font(.system(size: 10, weight: .bold))

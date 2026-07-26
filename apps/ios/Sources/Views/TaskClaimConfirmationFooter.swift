@@ -16,15 +16,14 @@ struct TaskClaimConfirmationFooter: View {
 
     var body: some View {
         if resolved {
-            Text("Claim response recorded").font(.system(size: 12)).foregroundStyle(Theme.textMuted)
+            Label("Claim response recorded", systemImage: "checkmark.circle.fill")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(.thinMaterial, in: Capsule())
         } else if actionable {
-            HStack(spacing: 8) {
-                Button("Decline") { resolve("reject") }
-                    .buttonStyle(.bordered).tint(Theme.textSecondary).disabled(busy)
-                Button("Accept claim") { resolve("accept") }
-                    .buttonStyle(.borderedProminent).tint(Theme.accent).disabled(busy)
-            }
-            .font(.system(size: 13, weight: .semibold))
+            TaskClaimActionButtons(busy: busy, onDecision: resolve)
         }
     }
 
@@ -36,6 +35,7 @@ struct TaskClaimConfirmationFooter: View {
 
     private func resolve(_ decision: String) {
         guard let api = app.api, let claimId, !busy else { return }
+        NativeFeedback.selection()
         busy = true
         Task {
             defer { busy = false }
@@ -46,5 +46,35 @@ struct TaskClaimConfirmationFooter: View {
                 // Message-level feedback stays compact; a retry remains available.
             }
         }
+    }
+}
+
+struct TaskClaimActionButtons: View {
+    let busy: Bool
+    let onDecision: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { onDecision("reject") } label: {
+                Label("Decline", systemImage: "xmark")
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .tint(Theme.textSecondary)
+
+            Button { onDecision("accept") } label: {
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Accept claim", systemImage: "checkmark")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .tint(Theme.accent)
+        }
+        .controlSize(.small)
+        .font(.subheadline.weight(.semibold))
+        .disabled(busy)
     }
 }

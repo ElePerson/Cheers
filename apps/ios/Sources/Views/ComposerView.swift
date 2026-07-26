@@ -162,11 +162,12 @@ struct ComposerView: View {
                 Button { onChooseSession() } label: { Label("Choose session", systemImage: "square.stack.3d.up") }
                 Button { onModelSettings() } label: { Label("Model & bot settings", systemImage: "slider.horizontal.3") }
             } label: {
-                // 44pt hit target (HIG hard minimum), 32pt glyph footprint.
                 Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 44, height: 44)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(width: 34, height: 34)
+                    .background(.thinMaterial, in: Circle())
+                    .frame(width: Theme.hitMin, height: Theme.hitMin)
                     .contentShape(Rectangle())
             }
             .padding(.leading, 2)
@@ -207,23 +208,23 @@ struct ComposerView: View {
                             .foregroundStyle(canSend ? Color.white : Theme.textFaint)
                     }
                 }
-                .frame(width: 34, height: 34)
+                .frame(width: 36, height: 36)
                 .background(canSend ? Theme.accent : Theme.bgSelected.opacity(0.5))
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .frame(width: 44, height: 44)   // 44pt hit target around the 34pt visual
+                .clipShape(Circle())
+                .shadow(color: canSend ? Theme.accent.opacity(0.22) : .clear, radius: 5, y: 2)
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
             }
             .disabled(!canSend)
             .padding(.trailing, 2)
             .accessibilityLabel(isSending ? "Sending message" : "Send message")
         }
-        .background(Theme.bgRaised.opacity(0.8))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        // Borderless at rest (content-first); the accent ring appears only on focus.
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isFocused ? Theme.accentHover.opacity(0.6) : Color.clear, lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(isFocused ? Theme.accentHover.opacity(0.55) : Color.primary.opacity(0.08), lineWidth: 1)
         )
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .alert("Voice dictation", isPresented: Binding(
             get: { dictation.errorMessage != nil },

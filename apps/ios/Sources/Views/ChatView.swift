@@ -304,14 +304,7 @@ struct ChatView: View {
                 }
             }
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Theme.textBody)
-                .frame(width: 36, height: 36)
-                .background(Theme.bgRaised)
-                .clipShape(Circle())
-                .frame(width: Theme.hitMin, height: Theme.hitMin)
-                .contentShape(Rectangle())
+            NativeCircleButtonLabel(systemName: "ellipsis")
         }
     }
 
@@ -359,8 +352,9 @@ struct ChatView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: 44, height: 44)          // HIG minimum tap target
-                .background(Theme.bgRaised, in: Circle())
-                .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+                .background(.regularMaterial, in: Circle())
+                .overlay { Circle().stroke(.primary.opacity(0.08), lineWidth: 0.5) }
+                .shadow(color: .black.opacity(0.1), radius: 8, y: 3)
         }
         .accessibilityLabel(model.hasTrimmedNewer ? "Return to latest messages" : "Jump to latest messages")
         .padding(.trailing, 14)
