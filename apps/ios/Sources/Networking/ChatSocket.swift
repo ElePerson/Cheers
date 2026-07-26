@@ -112,6 +112,15 @@ final class ChatSocket: NSObject {
         openSocket()
     }
 
+    /// Re-authenticate an existing websocket after the REST refresh-token rotation.
+    /// The gateway accepts an `auth` frame in the authenticated state, so subscriptions
+    /// remain live and the app does not visibly disconnect every eight minutes.
+    func refreshAuthentication(token: String) {
+        self.token = token
+        guard isAuthed else { return }
+        sendJSON(["type": "auth", "token": token])
+    }
+
     func disconnect() {
         intentionallyClosed = true
         reconnectTask?.cancel()
@@ -345,12 +354,15 @@ final class ChatSocket: NSObject {
         switch head.type {
         // ---- Control frames (ServerControl) ----
         case "auth_ok":
+            let wasAuthed = isAuthed
             isAuthed = true
             retryCount = 0
             startPinging()
-            onEvent?(.connected)
-            for channelId in subscriptions {
-                sendJSON(["type": "subscribe", "channel_id": channelId])
+            if !wasAuthed {
+                onEvent?(.connected)
+                for channelId in subscriptions {
+                    sendJSON(["type": "subscribe", "channel_id": channelId])
+                }
             }
         case "auth_err":
             isAuthed = false

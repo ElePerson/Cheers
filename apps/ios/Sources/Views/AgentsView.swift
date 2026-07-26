@@ -163,7 +163,7 @@ struct FleetView: View {
     private var summaryStrip: some View {
         HStack(spacing: 7) {
             summaryChip(dot: Theme.online, "\(model.onlineCount) online")
-            summaryChip(dot: Theme.textFaint, "\(model.offlineCount) idle")
+            summaryChip(dot: Theme.textFaint, "\(model.offlineCount) offline")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

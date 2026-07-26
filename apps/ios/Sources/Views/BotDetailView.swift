@@ -14,6 +14,7 @@ struct BotDetailView: View {
     @State private var isSaving = false
     @State private var isToggling = false
     @State private var showDeleteConfirm = false
+    @State private var showDisableConfirm = false
     @State private var showReconnect = false
     @State private var errorText: String?
 
@@ -84,7 +85,7 @@ struct BotDetailView: View {
                             .disabled(isToggling)
                         } else {
                             Button(role: .destructive) {
-                                Task { await setDisabled(true) }
+                                showDisableConfirm = true
                             } label: {
                                 if isToggling { ProgressView() }
                                 else { Text("Disable bot") }
@@ -119,6 +120,18 @@ struct BotDetailView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .confirmationDialog(
+                "Disable \(bot.name)?",
+                isPresented: $showDisableConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Disable bot", role: .destructive) {
+                    Task { await setDisabled(true) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This disconnects the bot and stops it from handling new work until it is enabled again.")
             }
             .confirmationDialog(
                 "Delete \(bot.name)?",

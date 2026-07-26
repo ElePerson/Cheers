@@ -59,8 +59,24 @@ final class AppModel {
     @ObservationIgnored
     private(set) var token: String?
 
+    /// Refresh tokens rotate on every use. Keep the refresh operation single-flight so
+    /// a foreground wakeup and the periodic timer cannot present the same token twice
+    /// and trigger the gateway's refresh-token-reuse revocation.
+    @ObservationIgnored
+    private var isRefreshingSession = false
+
+    @ObservationIgnored
+    private var lastSessionRefreshAt: Date?
+
     init() {
         let defaults = UserDefaults.standard
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing-reset-session") {
+            KeychainStore.remove(Keys.token)
+            KeychainStore.remove(Keys.refreshToken)
+            KeychainStore.remove(Keys.trustedDevice)
+            [Keys.serverURL, Keys.userId, Keys.displayName, Keys.role, Keys.username]
+                .forEach(defaults.removeObject(forKey:))
+        }
         serverURLString = defaults.string(forKey: Keys.serverURL) ?? Self.defaultServerURL
         token = KeychainStore.get(Keys.token)
         if let token, !token.isEmpty, let userId = defaults.string(forKey: Keys.userId) {
@@ -79,7 +95,7 @@ final class AppModel {
         }
         if session != nil {
             if KeychainStore.get(Keys.refreshToken) != nil {
-                Task { await restoreSession() }
+                Task { await refreshSessionIfNeeded(force: true) }
             } else {
                 connectSocket()
             }
@@ -281,16 +297,54 @@ final class AppModel {
             role: role,
             username: response.username
         )
-        connectSocket()
+        lastSessionRefreshAt = Date()
+        if socket.isAuthed {
+            socket.refreshAuthentication(token: accessToken)
+        } else {
+            connectSocket()
+        }
     }
 
-    private func restoreSession() async {
-        guard let base = baseURL, let refreshToken = KeychainStore.get(Keys.refreshToken) else { return }
+    /// Rotates the native refresh token before the ten-minute access token expires.
+    /// Web and macOS use the same eight-minute cadence. Transient network failures keep
+    /// the local session so a later timer/foreground wakeup can retry; only a rejected
+    /// refresh credential signs the user out.
+    func refreshSessionIfNeeded(force: Bool = false) async {
+        guard session != nil,
+              !isRefreshingSession,
+              let base = baseURL,
+              let refreshToken = KeychainStore.get(Keys.refreshToken)
+        else { return }
+        if !force,
+           let lastSessionRefreshAt,
+           Date().timeIntervalSince(lastSessionRefreshAt) < 8 * 60 {
+            return
+        }
+
+        isRefreshingSession = true
+        defer { isRefreshingSession = false }
         do {
             let response = try await APIClient(baseURL: base, token: nil).refresh(refreshToken: refreshToken)
             try finishLogin(base: base, response: response)
-        } catch {
+        } catch APIError.http(let status, _) where status == 401 {
             clearSession()
+        } catch {
+            // Offline/server failures are retryable. Keep using the current access
+            // token when it is still valid and retry on the next minute tick.
+            reconnectSocketIfNeeded()
+        }
+    }
+
+    /// One-minute checks make a failed eight-minute refresh retry before the access
+    /// token's ten-minute expiry. SwiftUI cancels this task automatically on sign-out.
+    func runSessionRefreshLoop() async {
+        while !Task.isCancelled, session != nil {
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch {
+                return
+            }
+            await refreshSessionIfNeeded()
         }
     }
 
@@ -335,6 +389,7 @@ final class AppModel {
         Task { await messageStore.removeAll() }
         token = nil
         session = nil
+        lastSessionRefreshAt = nil
         KeychainStore.remove(Keys.token)
         KeychainStore.remove(Keys.refreshToken)
         KeychainStore.remove(Keys.trustedDevice)

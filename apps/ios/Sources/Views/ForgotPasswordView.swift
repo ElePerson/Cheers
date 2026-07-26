@@ -45,6 +45,8 @@ struct ForgotPasswordView: View {
                             if isBusy { ProgressView() } else { Text("Send reset code") }
                         }
                         .disabled(isBusy || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.accent)
                     }
                 }
             }

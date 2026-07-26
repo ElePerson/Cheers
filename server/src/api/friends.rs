@@ -28,30 +28,52 @@ fn pair_key(a: &str, b: &str) -> String {
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct FriendLookup<'a> {
+    user_id: String,
+    username: &'a str,
+}
+
+fn parse_friend_lookup(raw: &str) -> Option<FriendLookup<'_>> {
+    let term = raw.trim();
+    if term.is_empty() || term.len() > 64 || term.chars().any(char::is_whitespace) {
+        return None;
+    }
+    Some(FriendLookup {
+        user_id: Uuid::parse_str(term)
+            .ok()
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
+        username: term,
+    })
+}
+
 pub async fn search_users(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Query(q): Query<FriendQuery>,
 ) -> Result<Json<Vec<Value>>, AppError> {
-    // Friends can be added ONLY by exact user ID — no username / display-name search,
-    // so the user directory can't be enumerated or browsed. A non-UUID term (or your
-    // own id) resolves to nobody; a valid id returns exactly that one user (for a
-    // confirm-before-adding card). Email is never matched.
+    // Friend discovery accepts an exact user ID or exact username. It intentionally
+    // does not support partial matching, display names, or email, so this remains a
+    // targeted confirm-before-adding lookup rather than an enumerable directory.
     let raw = q.q.unwrap_or_default();
-    let term = raw.trim();
-    let Ok(target) = Uuid::parse_str(term) else {
+    let Some(lookup) = parse_friend_lookup(&raw) else {
         return Ok(Json(vec![]));
     };
-    if target.to_string() == claims.sub {
+    if lookup.user_id == claims.sub {
         return Ok(Json(vec![]));
     }
     let rows = sqlx::query(
         "SELECT user_id, username, display_name, avatar_url
          FROM users
-         WHERE user_id = $1 AND is_deleted = FALSE
+         WHERE is_deleted = FALSE
+           AND (user_id = $1 OR LOWER(username) = LOWER($2))
+           AND user_id <> $3
          LIMIT 1",
     )
-    .bind(target.to_string())
+    .bind(lookup.user_id)
+    .bind(lookup.username)
+    .bind(&claims.sub)
     .fetch_all(&state.db)
     .await?;
     Ok(Json(
@@ -350,4 +372,30 @@ pub async fn list_blocks(
             })
             .collect(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_friend_lookup;
+
+    #[test]
+    fn friend_lookup_accepts_exact_username() {
+        let lookup = parse_friend_lookup("ada_lovelace").expect("valid username");
+        assert_eq!(lookup.username, "ada_lovelace");
+        assert!(lookup.user_id.is_empty());
+    }
+
+    #[test]
+    fn friend_lookup_normalizes_uuid() {
+        let lookup =
+            parse_friend_lookup("550E8400-E29B-41D4-A716-446655440000").expect("valid user id");
+        assert_eq!(lookup.user_id, "550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    #[test]
+    fn friend_lookup_rejects_broad_or_ambiguous_queries() {
+        assert!(parse_friend_lookup("").is_none());
+        assert!(parse_friend_lookup("ada lovelace").is_none());
+        assert!(parse_friend_lookup(&"a".repeat(65)).is_none());
+    }
 }

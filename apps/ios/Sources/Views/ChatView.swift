@@ -12,8 +12,6 @@ private let timelinePerformanceSignposter = OSSignposter(
 /// drawer destinations, so the menu's presentation stays consistent.
 enum ChannelPanel: String, Identifiable {
     case members = "Members"
-    case files = "Channel files"
-    case workspaceFiles = "Workspace files"
     case viewboard = "ViewBoard"
     case workbench = "Workbench"
     case settings = "Channel settings"
@@ -21,8 +19,6 @@ enum ChannelPanel: String, Identifiable {
     var icon: String {
         switch self {
         case .members: return "person.2"
-        case .files: return "paperclip"
-        case .workspaceFiles: return "folder"
         case .viewboard: return "rectangle.3.group"
         case .workbench: return "sidebar.right"
         case .settings: return "gearshape"
@@ -31,8 +27,6 @@ enum ChannelPanel: String, Identifiable {
     var blurb: String {
         switch self {
         case .members: return "People and bots in this channel."
-        case .files: return "Files shared in this channel."
-        case .workspaceFiles: return "Browse the connected remote workspace's files."
         case .viewboard: return "Live plan, cost, sessions and audit for this channel's agents (the instrument plane)."
         case .workbench: return "The channel's file workspace."
         case .settings: return "Name, purpose, invites, membership and the danger zone."
@@ -175,7 +169,6 @@ struct ChatView: View {
                 case .viewboard: ViewBoardSheet(channelId: model.channel.channelId)
                 case .workbench: WorkbenchSheet(channelId: model.channel.channelId)
                 case .settings:  ChannelSettingsSheet(channel: model.channel)
-                default:         ChannelPanelSheet(panel: panel)
                 }
             }
             .presentationDetents([.medium, .large])
@@ -298,12 +291,6 @@ struct ChatView: View {
         Menu {
             Button { panel = .members } label: {
                 Label("Members", systemImage: "person.2")
-            }
-            Button { panel = .files } label: {
-                Label("Channel files", systemImage: "paperclip")
-            }
-            Button { panel = .workspaceFiles } label: {
-                Label("Workspace files", systemImage: "folder")
             }
             Button { panel = .viewboard } label: {
                 Label("ViewBoard", systemImage: "rectangle.3.group")

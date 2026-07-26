@@ -495,6 +495,666 @@
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已完成" } }
       }
+    },
+    "#" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "#" } }
+      }
+    },
+    "%@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@" } }
+      }
+    },
+    "%@ invited you to join" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 邀请你加入" } }
+      }
+    },
+    "%@ needs sign-in" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 需要登录" } }
+      }
+    },
+    "%@ requests permission" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 请求权限" } }
+      }
+    },
+    "%@ sessions" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 个会话" } }
+      }
+    },
+    "%@ · #%@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · #%@" } }
+      }
+    },
+    "%@ · %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %@" } }
+      }
+    },
+    "%@/%@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@/%@" } }
+      }
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@: %@" } }
+      }
+    },
+    "@%@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "@%@" } }
+      }
+    },
+    "@%@ is online — the connector reached the gateway." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "@%@ 已上线 — 连接器已连接到网关。" } }
+      }
+    },
+    "AGENT" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "智能体" } }
+      }
+    },
+    "Accounts and data on this server may differ from Cheers Cloud." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此服务器上的账号和数据可能与 Cheers Cloud 不同。" } }
+      }
+    },
+    "Add to #%@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "添加到 #%@" } }
+      }
+    },
+    "Added %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已添加 %@" } }
+      }
+    },
+    "Already in this channel" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已在此频道中" } }
+      }
+    },
+    "Anyone in the workspace can join. Invite links require this." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "工作区中的任何人都可以加入。邀请链接需要此设置。" } }
+      }
+    },
+    "Approval detail" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "审批详情" } }
+      }
+    },
+    "Approval may let %@ act on the connected computer or service. Confirm that you reviewed the command, files, and diff above." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "批准后，%@ 可能会操作已连接的电脑或服务。请确认你已检查上方的命令、文件和差异。" } }
+      }
+    },
+    "Approve" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "批准" } }
+      }
+    },
+    "Attachment" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "附件" } }
+      }
+    },
+    "Authenticate both your current Cheers session and Apple account. Matching email addresses are never linked automatically." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请同时验证当前 Cheers 会话和 Apple 账号。即使邮箱相同，也不会自动关联。" } }
+      }
+    },
+    "Authenticator apps and backup codes protect your account when signing in." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "身份验证器应用和备用代码可在登录时保护你的账号。" } }
+      }
+    },
+    "Backup codes" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "备用代码" } }
+      }
+    },
+    "Blocking removes any friendship and prevents direct messages in either direction." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "拉黑会移除好友关系，并阻止双方发送私信。" } }
+      }
+    },
+    "Changing your password signs out other sessions. This device keeps its notification registration; other devices must sign in again." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修改密码会退出其他会话。本设备会保留通知注册，其他设备需要重新登录。" } }
+      }
+    },
+    "Checking sign-in options…" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在检查登录选项…" } }
+      }
+    },
+    "Cheers" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Cheers" } }
+      }
+    },
+    "Claim response recorded" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "认领结果已记录" } }
+      }
+    },
+    "Clearing the purpose isn't supported by the server — it will keep the previous text." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器不支持清空用途，将保留原有文本。" } }
+      }
+    },
+    "Connecting @%@. Pick how the connector gets onto the agent's machine." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在连接 @%@。请选择如何将连接器安装到智能体所在设备。" } }
+      }
+    },
+    "Continue" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "继续" } }
+      }
+    },
+    "Create invite link" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "创建邀请链接" } }
+      }
+    },
+    "Create one here, then connect it from the machine that will run it — this phone can't host an agent itself." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "先在此创建，然后从运行智能体的设备连接；此手机本身无法托管智能体。" } }
+      }
+    },
+    "Danger zone" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "危险操作" } }
+      }
+    },
+    "Deny" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "拒绝" } }
+      }
+    },
+    "Disable bot" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停用机器人" } }
+      }
+    },
+    "Disable kicks the live connector. Delete permanently removes the bot." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停用会断开实时连接器；删除会永久移除机器人。" } }
+      }
+    },
+    "Email" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "邮箱" } }
+      }
+    },
+    "Enable bot" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启用机器人" } }
+      }
+    },
+    "Enter a current authenticator code or an unused backup code." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入当前身份验证器代码或未使用的备用代码。" } }
+      }
+    },
+    "Enter an exact username or user ID. Email and partial-name search are not supported." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入准确的用户名或用户 ID。不支持邮箱或部分名称搜索。" } }
+      }
+    },
+    "Existing bot" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "现有机器人" } }
+      }
+    },
+    "Forward to" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "转发到" } }
+      }
+    },
+    "I've signed in" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "我已登录" } }
+      }
+    },
+    "If %@ has an account, a reset code has been sent. Enter it on the next screen." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "如果 %@ 对应账号存在，重置代码已发送。请在下一页输入。" } }
+      }
+    },
+    "If you cannot scan the QR code, enter the secret manually." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "如果无法扫描二维码，请手动输入密钥。" } }
+      }
+    },
+    "Invited · awaiting reply" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已邀请 · 等待回复" } }
+      }
+    },
+    "Join Cheers" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "加入 Cheers" } }
+      }
+    },
+    "Message an agent" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "向智能体发消息" } }
+      }
+    },
+    "New bot" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新建机器人" } }
+      }
+    },
+    "New channel" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新建频道" } }
+      }
+    },
+    "No active session — start one to change settings." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有活动会话 — 启动会话后才能修改设置。" } }
+      }
+    },
+    "No agents available" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有可用的智能体" } }
+      }
+    },
+    "No agents in this channel" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此频道中没有智能体" } }
+      }
+    },
+    "No agents yet" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无智能体" } }
+      }
+    },
+    "No blocked users" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有已拉黑的用户" } }
+      }
+    },
+    "No conversation open" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未打开会话" } }
+      }
+    },
+    "No external AI permissions granted" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "尚未授予外部 AI 权限" } }
+      }
+    },
+    "No friends yet. Use Add to find people by username or user ID." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有好友。使用“添加”按用户名或用户 ID 查找。" } }
+      }
+    },
+    "No matches" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有匹配结果" } }
+      }
+    },
+    "No passkeys yet" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无通行密钥" } }
+      }
+    },
+    "No sessions" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无会话" } }
+      }
+    },
+    "OFF" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭" } }
+      }
+    },
+    "Only workspace members can be invited to a channel. Use an invite link to bring in someone new." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只能邀请工作区成员加入频道。请使用邀请链接邀请新成员。" } }
+      }
+    },
+    "Only you are here" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这里只有你" } }
+      }
+    },
+    "Open Cheers on the machine that will run the agent, go to Settings → Connector → I have a code, and scan or type this." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在运行智能体的设备上打开 Cheers，前往“设置 → 连接器 → 我有代码”，然后扫描或输入此代码。" } }
+      }
+    },
+    "PRIMARY" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "主要" } }
+      }
+    },
+    "Passkeys use Face ID or Touch ID and sync through iCloud Keychain when enabled." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "通行密钥使用 Face ID 或 Touch ID，并可在启用时通过 iCloud 钥匙串同步。" } }
+      }
+    },
+    "Password updated. Sign in with your new password." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码已更新。请使用新密码登录。" } }
+      }
+    },
+    "Paste this to an agent already running on the target machine. It installs the connector as a background service — otherwise @%@ goes offline the moment that agent's turn ends." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将此内容粘贴给目标设备上已运行的智能体。它会把连接器安装为后台服务；否则智能体任务结束时 @%@ 就会离线。" } }
+      }
+    },
+    "Permanent action" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "永久操作" } }
+      }
+    },
+    "Preview not available for this type" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此类型不支持预览" } }
+      }
+    },
+    "Public channel" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "公开频道" } }
+      }
+    },
+    "Realtime" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "实时" } }
+      }
+    },
+    "Reauthenticate with Apple to confirm deletion." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请重新通过 Apple 验证以确认删除。" } }
+      }
+    },
+    "Replying to %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在回复 %@" } }
+      }
+    },
+    "Request" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请求" } }
+      }
+    },
+    "Required because two-factor authentication is on." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "由于已开启两步验证，此项为必填。" } }
+      }
+    },
+    "Review" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "审核" } }
+      }
+    },
+    "Save" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存" } }
+      }
+    },
+    "Save as ~/.cheers/cheers-daemon.%@.toml" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存为 ~/.cheers/cheers-daemon.%@.toml" } }
+      }
+    },
+    "Saved" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存" } }
+      }
+    },
+    "Scan with your authenticator" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用身份验证器扫描" } }
+      }
+    },
+    "Send reset code" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "发送重置代码" } }
+      }
+    },
+    "Set new password" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设置新密码" } }
+      }
+    },
+    "Set up authenticator" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设置身份验证器" } }
+      }
+    },
+    "Single-use, expires in about %@ min." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "仅可使用一次，约 %@ 分钟后过期。" } }
+      }
+    },
+    "Step 1: Verify your email · Step 2: Create your account" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "第 1 步：验证邮箱 · 第 2 步：创建账号" } }
+      }
+    },
+    "Store these somewhere safe. Each code works once if you lose your authenticator." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请妥善保存。如果无法使用身份验证器，每个代码可使用一次。" } }
+      }
+    },
+    "This cannot be undone." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此操作无法撤销。" } }
+      }
+    },
+    "This disconnects the bot and stops it from handling new work until it is enabled again." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这会断开机器人连接，并停止处理新任务，直到再次启用。" } }
+      }
+    },
+    "This permanently disables your account, revokes sessions and push notifications, anonymizes your profile, and disables bots you own. Shared workspaces are transferred or archived." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这会永久停用账号、撤销会话和推送通知、匿名化个人资料，并停用你拥有的机器人。共享工作区将被转移或归档。" } }
+      }
+    },
+    "This revokes your sessions on this server." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这会撤销你在此服务器上的会话。" } }
+      }
+    },
+    "To DM a person, add them in Friends first." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "要向某人发送私信，请先在“好友”中添加对方。" } }
+      }
+    },
+    "To switch servers, sign out and sign back in with a different server URL." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "如需切换服务器，请退出登录并使用其他服务器 URL 重新登录。" } }
+      }
+    },
+    "Two pieces: a settings file (safe to keep) and a token — that one is a password, so save it where only you can read it." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "包含两部分：可安全保存的设置文件和令牌。令牌相当于密码，请保存在只有你能读取的位置。" } }
+      }
+    },
+    "Use at least 12 characters." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "至少使用 12 个字符。" } }
+      }
+    },
+    "Use at least 12 characters. A longer, unique passphrase is recommended." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "至少使用 12 个字符。建议使用更长且唯一的密码短语。" } }
+      }
+    },
+    "User ID" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户 ID" } }
+      }
+    },
+    "Voice meeting" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "语音会议" } }
+      }
+    },
+    "Waiting for the bot owner to finish agent authentication." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在等待机器人所有者完成智能体验证。" } }
+      }
+    },
+    "We'll email a one-time code. This never reveals whether the address is registered." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "我们会发送一次性代码，且不会透露该邮箱是否已注册。" } }
+      }
+    },
+    "Write to ~/.cheers/%@.token" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "写入 ~/.cheers/%@.token" } }
+      }
+    },
+    "You become the owner. Invite people after the workspace is created." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "你将成为所有者。工作区创建后即可邀请成员。" } }
+      }
+    },
+    "You can view this bot but only an owner or admin can manage it." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "你可以查看此机器人，但只有所有者或管理员可以管理。" } }
+      }
+    },
+    "Your message is about to be sent to the external AI services below. This permission applies to this channel and can be revoked in Settings." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "你的消息即将发送到下列外部 AI 服务。此权限仅适用于当前频道，可在设置中撤销。" } }
+      }
+    },
+    "Your password remains available after unlinking Apple." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消关联 Apple 后，仍可使用密码登录。" } }
+      }
+    },
+    "bot" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "机器人" } }
+      }
+    },
+    "member" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "成员" } }
+      }
+    },
+    "—" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "—" } }
+      }
+    },
+    "Invalid server address" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器地址无效" } }
+      }
+    },
+    "Open Advanced server settings to correct it." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请打开“高级服务器设置”进行修正。" } }
+      }
+    },
+    "Cheers Cloud" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Cheers Cloud" } }
+      }
+    },
+    "Official production workspace" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "官方生产工作区" } }
+      }
+    },
+    "Custom workspace" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自定义工作区" } }
+      }
+    },
+    "Advanced server settings" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高级服务器设置" } }
+      }
+    },
+    "Server URL" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器 URL" } }
+      }
+    },
+    "Couldn't check sign-in options. Tap to retry." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法检查登录选项。轻点重试。" } }
+      }
+    },
+    "Uses the Apple account signed in on this device" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用此设备已登录的 Apple 账号" } }
+      }
+    },
+    "Username or user ID" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户名或用户 ID" } }
+      }
+    },
+    "No user found for that username or ID." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "找不到该用户名或用户 ID。" } }
+      }
+    },
+    "Unknown participant" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知参与者" } }
+      }
+    },
+    "Create account" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "创建账号" } }
+      }
+    },
+    "Creating account…" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在创建账号…" } }
+      }
+    },
+    "Already have an account? Sign in" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已有账号？登录" } }
+      }
+    },
+    "Reset password" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置密码" } }
+      }
+    },
+    "Close" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭" } }
+      }
+    },
+    "Enter code" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入代码" } }
+      }
+    },
+    "New password (12+ chars)" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新密码（至少 12 个字符）" } }
+      }
+    },
+    "Confirm password" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "确认密码" } }
+      }
     }
   },
   "version" : "1.0"
