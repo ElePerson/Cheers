@@ -96,75 +96,7 @@ Verify the gateway is healthy:
 curl -fsS http://localhost:8000/health && echo OK
 ```
 
-## 5. (Optional) Configure the OpenCode bot's model provider
-
-The bot defaults to **DeepSeek**. In `.env`:
-
-```dotenv
-OPENCODE_PROVIDER=deepseek
-OPENCODE_OPENAI_BASE_URL=https://api.deepseek.com
-OPENCODE_OPENAI_API_KEY=sk-your-deepseek-key
-OPENCODE_MODEL=                     # empty → deepseek/deepseek-chat
-```
-
-To use OpenAI (or another OpenAI-compatible endpoint) instead, change the
-provider, base URL, and model — and use a matching key:
-
-```dotenv
-OPENCODE_PROVIDER=openai
-OPENCODE_OPENAI_BASE_URL=https://api.openai.com
-OPENCODE_OPENAI_API_KEY=sk-your-openai-key
-OPENCODE_MODEL=gpt-4o
-```
-
-The API key must match the endpoint — a DeepSeek key against the OpenAI base URL
-will 401.
-
-## 6. (Optional) Create the bot account and mint its token
-
-The bot authenticates to the gateway with an Agent Bridge token tied to a bot
-account. Create the account and mint a token via the admin API:
-
-```bash
-# a) log in as admin → capture an access token
-TOKEN=$(curl -fsS -X POST http://localhost:8000/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"login":"admin","password":"'"$ADMIN_PASSWORD"'"}' \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
-
-# b) create the bot account (scope "everyone" makes it usable in any channel)
-BOT_ID=$(curl -fsS -X POST http://localhost:8000/api/v1/bots \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"username":"opencode","display_name":"OpenCode","scope":"everyone"}' \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["bot_id"])')
-
-# c) mint the bot's token (shown once)
-curl -fsS -X POST "http://localhost:8000/api/v1/bots/$BOT_ID/token" \
-  -H "Authorization: Bearer $TOKEN" \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])'
-```
-
-Put the printed token (`agb_...`) into `.env`:
-
-```dotenv
-OPENCODE_BOT_TOKEN=agb_...
-OPENCODE_BOT_USERNAME=opencode
-```
-
-## 7. (Optional) Start the bot
-
-```bash
-docker compose --profile bot up -d opencode-bot
-docker compose logs -f opencode-bot     # look for api_key_set=true
-```
-
-The startup log line reports the resolved config, e.g.
-`model=deepseek/deepseek-chat ... api_key_set=true`.
-
-**Use it:** in the UI, add the `opencode` bot to a channel (member list → add
-bot), then mention it: `@opencode hello`.
-
-## 8. (Optional) Start live voice transcription
+## 5. (Optional) Start live voice transcription
 
 Deploy the small LiveKit media stack from [`deploy/livekit`](../../deploy/livekit/README.md)
 first. Put its URL/key/secret in the root `.env`, then configure a separate worker token
@@ -227,20 +159,14 @@ ACME certificate on the origin hop.
 > ... }` block in `docker/Caddyfile`; Caddy then issues via HTTP-01 / TLS-ALPN-01
 > directly (requires ports 80/443 reachable and the domain pointing at the host).
 
-Add `--profile bot` to the command if you also run the bot.
-
 ## Operations
 
 ```bash
 # logs
 docker compose logs -f gateway
-docker compose logs -f opencode-bot
 
 # rebuild + restart after a code change
 docker compose up -d --build gateway frontend
-
-# rotate the bot's model API key (edit .env, then)
-docker compose --profile bot up -d --force-recreate opencode-bot
 
 # back up the database
 docker compose exec postgres pg_dump -U cheers cheers | gzip > cheers-$(date +%F).sql.gz
@@ -250,7 +176,7 @@ docker compose down
 docker compose down -v && rm -rf data/     # DELETES all data
 ```
 
-Persistent data lives under `./data/` (PostgreSQL, RustFS objects, bot state).
+Persistent data lives under `./data/` (PostgreSQL and RustFS objects).
 
 ## Troubleshooting
 
@@ -258,7 +184,5 @@ Persistent data lives under `./data/` (PostgreSQL, RustFS objects, bot state).
 |---|---|
 | Gateway exits immediately, logs mention JWT | `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` missing or malformed in `.env`. Regenerate (step 2); keep the full multi-line PEM, quoted. |
 | Browser: login fails with a CORS error | `CORS_ALLOWED_ORIGINS` does not include the origin you're loading the UI from. Set it to that origin (step 3). |
-| `opencode-bot` restarts in a loop | Started without `OPENCODE_BOT_TOKEN`. Mint a token (step 6) and set it, or don't start the `bot` profile. |
-| Bot is online but every prompt errors | `OPENCODE_OPENAI_API_KEY` missing or wrong for the endpoint. Check `api_key_set=true` in the bot log and that the key matches `OPENCODE_OPENAI_BASE_URL`. |
 | Image pulls are slow (mainland China) | Build with a mirror: `docker compose build --build-arg BASE_REGISTRY=docker.m.daocloud.io --build-arg NPM_REGISTRY=https://registry.npmmirror.com`. |
 | Port already in use | Change the `*_HOST_PORT` variables in `.env`. |

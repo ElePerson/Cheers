@@ -5,8 +5,8 @@
 面向**在本机以 host 守护进程方式**接入 ACP Agent（如 Codex、Claude）的用户 / 开发者。
 讲清楚：一个 bot 怎么配、token 放哪、多个 bot 怎么管、怎么排障。
 
-- 容器化部署（Docker 内置 OpenCode Bot）、在 UI 里创建 Bot 的完整流程，见
-  [AgentBridge 接入指南](AgentBridge接入指南.md)。本文聚焦**本地、从源码跑网关 + host 连接器**这条链路。
+- 在 UI 里创建 Bot 的完整流程见 [AgentBridge 接入指南](AgentBridge接入指南.md)。
+  本文聚焦**本地、从源码跑网关 + host 连接器**这条链路。
 - 名词：**网关 / Gateway**（Rust 后端，`server/`）、**连接器 / Connector**（`cce-acp-connector`，把
   ACP Agent 桥接到网关）、**ACP Agent**（`codex-acp` / `claude-agent-acp` 等子进程）。
 
@@ -376,7 +376,7 @@ $BIN run     --config <file>     # 前台运行（调试用，不守护）
 
 ## 9. 参考
 
-- [AgentBridge 接入指南](AgentBridge接入指南.md)：概念、UI 建 Bot、Docker 内置 OpenCode Bot、OpenClaw（遗留）
+- [AgentBridge 接入指南](AgentBridge接入指南.md)：概念、UI 建 Bot、OpenClaw（遗留）
 - [安装部署说明](安装部署说明.md)：整体部署、`.env`、迁移
 - [技术排查 Q&A](技术排查Q&A.md)：健康检查、日志、Bot 无回复
 - 连接器源码：`packages/cheers-acp-connector-rs/`（`examples/` 下有可直接改的模板）

@@ -5,6 +5,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useWindowDrag } from "@/hooks/useWindowDrag";
 import { LaneBoundsContext } from "@/hooks/useLaneWindow";
 import { ResizeGrip } from "@/components/ui/resize-grip";
+import type { SpawnKind } from "@/features/chat/workbench/laneSnap";
 
 // A NON-MODAL floating window (ViewBoard-style chrome): rounded elevated card,
 // no backdrop, so the chat + composer behind it stay fully usable. Draggable by
@@ -29,6 +30,7 @@ export function FloatingPanel({
   bodyClassName,
   headerExtra,
   collapsedSummary,
+  spawnKind,
   children,
 }: {
   title: ReactNode;
@@ -39,7 +41,8 @@ export function FloatingPanel({
   /** Default size of the card, e.g. "w-[640px]" or "w-[1024px] h-[85%]"
    *  (ignored once the window is resized or while collapsed). */
   className?: string;
-  /** Where the window sits before it is ever dragged (relative to its box). */
+  /** Where the window sits before it is ever dragged (relative to its box).
+   *  Ignored once auto-spawn or a persisted geom places the window. */
   defaultPosClassName?: string;
   bodyClassName?: string;
   /** Extra header controls, rendered between the title and the close button. */
@@ -49,6 +52,8 @@ export function FloatingPanel({
    *  the glance rows so clicking a signal expands straight to the full view.
    *  When omitted, collapsed is just a bare title chip. */
   collapsedSummary?: (expand: () => void) => ReactNode;
+  /** Bias first-open placement inside the work lane (fill when alone). */
+  spawnKind?: SpawnKind;
   children: ReactNode;
 }) {
   const isMobile = useIsMobile();
@@ -59,7 +64,11 @@ export function FloatingPanel({
     storageKey,
     !isMobile,
     getBounds ?? undefined,
-    !isMobile && getBounds != null
+    {
+      snap: !isMobile && getBounds != null,
+      spawnKind: !isMobile && getBounds != null ? spawnKind : undefined,
+      open: true,
+    }
   );
   // Minimized = just the title bar (a compact chip you can park anywhere).
   const [collapsed, setCollapsed] = useState(

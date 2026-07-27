@@ -167,7 +167,10 @@ function ViewBoardDrawerImpl({
   // snaps it to the lane's grid zones. Minimal collapses to a content-height
   // glance card that keeps its dragged spot. Closed keeps it mounted (hidden) so
   // board state survives. Mobile keeps the overlay-sheet.
-  const { float, drag } = useLaneWindow("cheers.float.viewboard");
+  const { float, drag } = useLaneWindow("cheers.float.viewboard", {
+    open,
+    spawnKind: "viewboard",
+  });
 
   // NB: no `flex` here — the shell toggles display via `open ? "flex" : "hidden"`,
   // and `cn` runs tailwind-merge: a hardcoded `flex` in this chrome would win the

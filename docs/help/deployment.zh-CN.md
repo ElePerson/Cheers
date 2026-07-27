@@ -117,11 +117,9 @@ docker compose up -d
 ```
 
 - UI：`http://localhost` · API：`http://localhost:8000` · 健康检查：`/health`
-- 可选的智能体 bot 放在 Compose profile 中：
-  `docker compose --profile bot up -d opencode-bot`。
 - 生产 HTTPS（Caddy）：追加 `-f docker-compose.production.tls.yml`。
 
-**完整流程**（JWT、供应商/API key、bot token、TLS、运维、排查）：
+**完整流程**（JWT、TLS、运维、排查）：
 [docker-compose-deploy.zh-CN.md](docker-compose-deploy.zh-CN.md) /
 [English](docker-compose-deploy.md)。
 

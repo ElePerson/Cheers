@@ -79,6 +79,23 @@ F0 foundation → F1 human picker → F2 bot handoff → F3 suggested context.
 
 ## Near-Term Plans
 
+### Next priorities (2026 H2)
+
+Product focus after the Passkey / iOS friends / desktop updater wave:
+
+1. **iOS App hardening** (native `apps/ios` is shipped; no longer deferred behind PWA) — tracking [#318](https://github.com/ElePerson/Cheers/issues/318)
+   - [ ] **UI** — spacing-first / HIG alignment, localization gaps, dense-list and decorative-divider cleanup.
+   - [ ] **Tracing** — end-to-end client/gateway correlation for login, push, realtime reconnect, and approval deep-links (so mobile regressions are diagnosable).
+   - [ ] **Policy & security** — App Store / privacy disclosures, remote-operations copy, AI-consent surfaces, session/trusted-device behavior parity with web/desktop.
+2. **macOS desktop — security & policy polish** — tracking [#319](https://github.com/ElePerson/Cheers/issues/319)
+   - [ ] Ship and keep in sync the same policy surfaces as web (privacy, support, remote operations, account deletion) inside the Tauri shell / About / Settings.
+   - [ ] Harden updater + signing UX (Gatekeeper notes, trusted feed, Settings → About → Check for updates).
+   - [ ] Connector/daemon security defaults (least privilege, clear remote-ops warnings).
+3. **Plugin / Workbench mechanism — integration tests & optimization** — tracking [#320](https://github.com/ElePerson/Cheers/issues/320)
+   - [ ] Integration-test matrix for official plugins + template installs (load, fs bridge, save/reload, permission denials).
+   - [ ] Performance / reliability pass (cold start, large boards, failure recovery).
+   - [ ] Document the plugin contract for third-party authors and keep examples green in CI.
+
 ### UI
 
 - [ ] Unify UI hover states.
@@ -98,10 +115,8 @@ F0 foundation → F1 human picker → F2 bot handoff → F3 suggested context.
 - [ ] DingTalk integration.
 - [x] PWA + Web Push: installable web app; approval requests and @mentions
       reach the approver's lock screen and deep-link back to the pending card.
-- [ ] iOS app — **deferred behind the PWA**: revisit only if mobile approval
-      usage proves the demand *and* a PWA hard limit (share sheet, widgets,
-      push reliability) actually bites.
-- [ ] Android app — same gate as iOS.
+- [x] iOS native app (v1 shipped) — **next:** UI / tracing / policy & security (see Next priorities).
+- [ ] Android app — same gate as historical mobile strategy; revisit after iOS hardening.
 
 ## Client Strategy & Boundaries
 
@@ -110,24 +125,26 @@ PWA/Web Push work; the guiding split: **the gateway is the control plane and
 sole source of truth; local machines are the data plane** (see
 [arch/ARCHITECTURE_OVERVIEW.md](arch/ARCHITECTURE_OVERVIEW.md)).
 
-### Mobile = consume + approve (PWA, not native)
+### Mobile = consume + approve (PWA + native iOS)
 
 The mobile jobs are: approve a blocked permission request, glance at running
-work, reply when mentioned. All three are covered by the PWA + Web Push
-pipeline (`frontend/src/sw.ts`, gateway `infra/web_push.rs`). Measured reality:
-message-path transport is 2–10 ms — the wait is model inference — so a native
-app buys no meaningful latency, only push/share/widget affordances. Build
-native only when a concrete PWA limit blocks a proven usage pattern.
+work, reply when mentioned. PWA + Web Push
+(`frontend/src/sw.ts`, gateway `infra/web_push.rs`) remains the universal
+path; native iOS (`apps/ios`) is now shipping for push reliability and
+deeper OS integration. Near-term work is hardening (UI / tracing /
+policy & security), not green-field feature parity races with desktop.
+Android stays gated until iOS hardening proves the native investment.
 
 ### Desktop = the chat shell + the connector's graphical home
 
-**Status: M0+M1 in progress (`apps/macos`, Tauri v2).** The desktop client
+**Status: shipping (`apps/macos`, Tauri v2; desktop-v0.1.x releases).** The desktop client
 hosts the SAME built frontend as the web deployment (chat shell included —
 no UI rewrite), adds tray residency + native notifications (WKWebView has no
 Web Push, so nudges arrive over the user-scoped WS), and differentiates as
-**the graphical home of the connector daemon**. Its value, in priority order:
+**the graphical home of the connector daemon**. Near-term focus shifts to
+**security & policy polish** (see Next priorities). Its value, in priority order:
 
-1. **Daemon lifecycle (M1, in progress)** — bundle `cce-acp-connector` as a
+1. **Daemon lifecycle** — bundle `cce-acp-connector` as a
    sidecar, start-with-app + revive on crash (the macOS answer to the
    systemd-linger pitfall), GUI start/stop/status/logs and TOML editing. This
    converts connector onboarding from ops work into "install an app", and is

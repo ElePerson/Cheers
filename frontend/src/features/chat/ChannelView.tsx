@@ -65,6 +65,7 @@ import { ViewBoardDrawer } from "./workbench/ViewBoardDrawer";
 import { LaneBoundsContext } from "@/hooks/useLaneWindow";
 import { LaneZones } from "./workbench/LaneZones";
 import { LaneResizer } from "./workbench/LaneResizer";
+import { LANE_TARGET, type SpawnKind } from "./workbench/laneSnap";
 import { ErrorDialog } from "@/components/ui/ErrorDialog";
 import { Banner } from "@/components/ui/banner";
 import { ErrorState } from "@/components/ui/error-state";
@@ -959,6 +960,38 @@ export function ChannelView({
       /* private mode — width just won't persist */
     }
   }, []);
+  // When a file-heavy instrument opens into a too-narrow lane, expand toward a
+  // reading-friendly target (clamped so chat keeps its floor). Mid-width desktop
+  // windows (just above md) otherwise crush the preview/editor strip.
+  const ensureLaneFor = useCallback(
+    (kind: SpawnKind) => {
+      const target = LANE_TARGET[kind];
+      const row = laneEl?.parentElement;
+      const rowW = row?.getBoundingClientRect().width ?? window.innerWidth;
+      // Adaptive chat floor: below ~1100px total, allow a tighter chat column so
+      // the lane can actually reach the reading target.
+      const minChat = rowW < 1100 ? 320 : 384;
+      const maxLane = Math.max(280, rowW - minChat);
+      const next = Math.min(Math.max(target, laneWidthRef.current), maxLane);
+      if (next <= laneWidthRef.current) return;
+      setLaneWidth(next);
+      laneWidthRef.current = next;
+      try {
+        localStorage.setItem("cheers.lane.width", String(next));
+      } catch {
+        /* ignore */
+      }
+    },
+    [laneEl]
+  );
+  const openInstrument = useCallback(
+    (kind: SpawnKind, toggleOrOpen: "open" | "toggle", currentlyOpen: boolean) => {
+      const willOpen = toggleOrOpen === "open" || !currentlyOpen;
+      if (willOpen) ensureLaneFor(kind);
+      return willOpen;
+    },
+    [ensureLaneFor]
+  );
   // The lane also resizes without a window resize event — collapsing the sidebar
   // reflows its width via CSS. Re-clamp the floating windows on any lane box
   // change so one can't get stranded in the lane's overflow-hidden clip.
@@ -1061,43 +1094,51 @@ export function ChannelView({
   } | null>(null);
   const openSessionsBoard = useCallback(() => {
     setVbMinimal(false);
+    openInstrument("viewboard", "open", true);
     setVbOpen(true);
     setFocusBoard((prev) => ({
       id: "sessions",
       nonce: (prev?.nonce ?? 0) + 1,
     }));
-  }, []);
+  }, [openInstrument]);
 
   // Add-context menu → open a side surface (untargeted) so the user can pick a
   // file to attach from its own panel.
   const browseWorkbench = useCallback(() => {
     setWbTarget(undefined);
+    openInstrument("workbench", "open", true);
     setWbOpen(true);
-  }, []);
+  }, [openInstrument]);
   const browseWorkspace = useCallback(() => {
     setWsInit({});
+    openInstrument("workspace", "open", true);
     setWsOpen(true);
-  }, []);
+  }, [openInstrument]);
   // A pending context chip → jump to where that resource actually lives: a
   // Workbench file (`fs.read`) opens the Workbench focused on it; a bot's
   // workspace file (`workspace.read`) opens the Remote workspace at that path.
-  const jumpToContextSource = useCallback((item: ContextItem) => {
-    if (item.verb === "fs.read") {
-      const path = item.params.path;
-      if (typeof path === "string") {
-        setWbTarget(path);
-        setWbOpen(true);
+  const jumpToContextSource = useCallback(
+    (item: ContextItem) => {
+      if (item.verb === "fs.read") {
+        const path = item.params.path;
+        if (typeof path === "string") {
+          setWbTarget(path);
+          openInstrument("workbench", "open", true);
+          setWbOpen(true);
+        }
+      } else if (item.verb === "workspace.read") {
+        const botId = item.params.bot_id;
+        const path = item.params.path;
+        setWsInit({
+          botId: typeof botId === "string" ? botId : undefined,
+          path: typeof path === "string" ? path : undefined,
+        });
+        openInstrument("workspace", "open", true);
+        setWsOpen(true);
       }
-    } else if (item.verb === "workspace.read") {
-      const botId = item.params.bot_id;
-      const path = item.params.path;
-      setWsInit({
-        botId: typeof botId === "string" ? botId : undefined,
-        path: typeof path === "string" ? path : undefined,
-      });
-      setWsOpen(true);
-    }
-  }, []);
+    },
+    [openInstrument]
+  );
 
   // Stable handlers for the memoized drawers so a streaming re-render of ChannelView
   // doesn't hand them fresh closures (which would defeat React.memo).
@@ -1197,6 +1238,7 @@ export function ChannelView({
         botLabels.get(senderBotId) || senderBotId.slice(0, 8);
       const openInbox = (fileId: string) => {
         setFilesFocus(fileId);
+        openInstrument("files", "open", true);
         setFilesOpen(true);
       };
       // 1) Strongest signal: a file THIS message attached (an inbox deliverable).
@@ -1213,6 +1255,7 @@ export function ChannelView({
           openInbox(r.file_id);
         } else if (r.store === "desk" && r.path) {
           setWbTarget(r.path);
+          openInstrument("workbench", "open", true);
           setWbOpen(true);
         } else if (r.store === "workspace" && r.bot_id && r.path) {
           // The workspace candidate is unprobed — verify the file actually exists on
@@ -1221,6 +1264,7 @@ export function ChannelView({
           try {
             await getWorkspaceFile(channel.channel_id, r.bot_id, r.path);
             setWsInit({ botId: r.bot_id, path: r.path });
+            openInstrument("workspace", "open", true);
             setWsOpen(true);
           } catch (e) {
             const offline = String(e).includes("offline");
@@ -1241,7 +1285,7 @@ export function ChannelView({
         );
       }
     },
-    [channel, botLabels],
+    [channel, botLabels, openInstrument],
   );
 
   // Resolve a `cheers:` locator (the DETERMINISTIC cousin of resolveAndOpenRef's
@@ -1259,11 +1303,13 @@ export function ChannelView({
       }
       if (loc.kind === "desk") {
         setWbTarget(loc.path);
+        openInstrument("workbench", "open", true);
         setWbOpen(true);
         return;
       }
       if (loc.kind === "inbox") {
         setFilesFocus(loc.fileId);
+        openInstrument("files", "open", true);
         setFilesOpen(true);
         return;
       }
@@ -1320,6 +1366,7 @@ export function ChannelView({
           path: resolved.path,
           line: resolved.kind === "file" ? loc.line : undefined,
         });
+        openInstrument("workspace", "open", true);
         setWsOpen(true);
       } catch (e) {
         const offline = String(e).includes("offline");
@@ -1330,7 +1377,7 @@ export function ChannelView({
         );
       }
     },
-    [channel, botLabels],
+    [channel, botLabels, openInstrument],
   );
 
   // A renderer plugin suggested a message (cheers:compose). Prefill only — the human
@@ -1676,7 +1723,10 @@ export function ChannelView({
           <button
             onClick={() => {
               setFilesFocus(undefined);
-              setFilesOpen((v) => !v);
+              setFilesOpen((v) => {
+                if (!v) openInstrument("files", "open", false);
+                return !v;
+              });
             }}
             title="Channel files"
             className={`flex items-center justify-center w-7 h-7 max-md:w-10 max-md:h-10 rounded-lg hover:bg-zinc-800 flex-shrink-0 ${
@@ -1690,7 +1740,10 @@ export function ChannelView({
           <button
             onClick={() => {
               setWsInit({});
-              setWsOpen((v) => !v);
+              setWsOpen((v) => {
+                if (!v) openInstrument("workspace", "open", false);
+                return !v;
+              });
             }}
             title="Remote workspace"
             className={`flex items-center justify-center w-7 h-7 max-md:w-10 max-md:h-10 rounded-lg hover:bg-zinc-800 flex-shrink-0 ${
@@ -1702,7 +1755,12 @@ export function ChannelView({
             <FolderTree className="w-4 h-4" />
           </button>
           <button
-            onClick={() => setVbOpen((v) => !v)}
+            onClick={() =>
+              setVbOpen((v) => {
+                if (!v) openInstrument("viewboard", "open", false);
+                return !v;
+              })
+            }
             title="ViewBoard — live plan / cost / sessions / audit (instrument plane)"
             className={`flex items-center justify-center w-7 h-7 max-md:w-10 max-md:h-10 rounded-lg hover:bg-zinc-800 flex-shrink-0 ${
               vbOpen
@@ -1715,7 +1773,10 @@ export function ChannelView({
           <button
             onClick={() => {
               setWbTarget(undefined);
-              setWbOpen((v) => !v);
+              setWbOpen((v) => {
+                if (!v) openInstrument("workbench", "open", false);
+                return !v;
+              });
             }}
             title="Workbench — file workspace"
             className={`flex items-center justify-center w-7 h-7 max-md:w-10 max-md:h-10 rounded-lg hover:bg-zinc-800 flex-shrink-0 ${
@@ -1746,7 +1807,9 @@ export function ChannelView({
           never strands a wide empty gutter on one side. */}
           <div
             className={`flex-1 min-w-0 flex flex-col ${
-              anyWorkOpen ? "md:min-w-[24rem]" : ""
+              // Tighter chat floor on mid-width desktops so the lane can reach a
+              // reading-friendly width; full 24rem once the window is wide enough.
+              anyWorkOpen ? "md:min-w-[20rem] min-[1100px]:min-w-[24rem]" : ""
             }`}
           >
             <div className="flex flex-col h-full w-full min-w-0 md:max-w-[52rem] md:mx-auto">
@@ -1938,7 +2001,7 @@ export function ChannelView({
             style={{ width: laneWidth }}
             className={
               anyWorkOpen
-                ? "max-md:contents md:relative md:shrink-0 md:min-w-[20rem] md:max-w-[calc(100%-24rem)] md:min-h-0 md:overflow-hidden"
+                ? "max-md:contents md:relative md:shrink-0 md:min-w-[16rem] md:max-w-[calc(100%-20rem)] min-[1100px]:max-w-[calc(100%-24rem)] md:min-h-0 md:overflow-hidden"
                 : "contents"
             }
           >

@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "cheers.labels" . | nindent 4 }}
     app.kubernetes.io/component: bot
-    cheers.dev/agent-type: {{ .Values.bot.agentType | quote }}
+    cheers.dev/agent-type: "codex"
 spec:
   replicas: {{ .Values.bot.replicaCount }}
   selector:
@@ -16,7 +16,7 @@ spec:
     metadata:
       labels:
         {{- include "cheers.selectorLabels" (dict "ctx" . "component" "bot") | nindent 8 }}
-        cheers.dev/agent-type: {{ .Values.bot.agentType | quote }}
+        cheers.dev/agent-type: "codex"
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -24,12 +24,11 @@ spec:
       {{- end }}
       containers:
         - name: bot
-          image: {{ include "cheers.image" (dict "ctx" . "repository" (include "cheers.bot.imageRepository" .) "tag" .Values.bot.image.tag) }}
+          image: {{ include "cheers.image" (dict "ctx" . "repository" .Values.bot.image.repository "tag" .Values.bot.image.tag) }}
           imagePullPolicy: {{ .Values.bot.image.pullPolicy }}
           env:
             - name: CHEERS_WS_BASE
               value: {{ default (printf "ws://%s:%v" (include "cheers.gateway.fullname" .) .Values.gateway.port) .Values.bot.wsBase | quote }}
-            {{- if eq .Values.bot.agentType "codex" }}
             - name: CHEERS_BOT_USERNAME
               value: {{ .Values.bot.username | quote }}
             - name: CHEERS_BOT_WORKSPACE_DIR
@@ -50,41 +49,17 @@ spec:
               value: {{ .Values.bot.codex.command | quote }}
             - name: CODEX_ACP_ARGS
               value: {{ join "," .Values.bot.codex.args | quote }}
-            {{- else }}
-            - name: OPENCODE_BOT_USERNAME
-              value: {{ .Values.bot.username | quote }}
-            - name: OPENCODE_WORKSPACE_DIR
-              value: {{ .Values.bot.workspaceDir | quote }}
-            - name: OPENCODE_STATE_DIR
-              value: {{ .Values.bot.stateDir | quote }}
-            - name: OPENCODE_PROMPT_TIMEOUT_MS
-              value: {{ .Values.bot.promptTimeoutMs | quote }}
-            - name: OPENCODE_REQUEST_TIMEOUT_MS
-              value: {{ .Values.bot.requestTimeoutMs | quote }}
-            - name: OPENCODE_ACP_COMMAND
-              value: {{ .Values.bot.opencode.command | quote }}
-            - name: OPENCODE_PROVIDER
-              value: {{ .Values.bot.opencode.provider | quote }}
-            - name: OPENCODE_MODEL
-              value: {{ .Values.bot.opencode.model | quote }}
-            - name: OPENCODE_OPENAI_BASE_URL
-              value: {{ .Values.bot.opencode.baseUrl | quote }}
-            - name: OPENCODE_NATIVE_PERMISSION_MODE
-              value: {{ .Values.bot.opencode.nativePermissionMode | quote }}
-            {{- end }}
-            - name: {{ include "cheers.bot.tokenKey" . }}
+            - name: {{ .Values.bot.token.key }}
               valueFrom:
                 secretKeyRef:
                   name: {{ default (include "cheers.secretName" .) .Values.bot.token.existingSecret }}
-                  key: {{ include "cheers.bot.tokenKey" . | quote }}
-            - name: {{ include "cheers.bot.apiKeyKey" . }}
+                  key: {{ .Values.bot.token.key | quote }}
+            - name: {{ .Values.bot.openaiApiKey.key }}
               valueFrom:
                 secretKeyRef:
                   name: {{ default (include "cheers.secretName" .) .Values.bot.openaiApiKey.existingSecret }}
-                  key: {{ include "cheers.bot.apiKeyKey" . | quote }}
-                  {{- if eq .Values.bot.agentType "codex" }}
+                  key: {{ .Values.bot.openaiApiKey.key | quote }}
                   optional: true
-                  {{- end }}
           volumeMounts:
             - name: bot-state
               mountPath: {{ .Values.bot.stateDir | quote }}

@@ -62,6 +62,16 @@ export class ApiError extends Error {
   }
 }
 
+// Tauri commands reject with plain strings, while browser APIs normally throw
+// Error objects. Preserve either form so native failures are not replaced by a
+// generic message. Do not stringify arbitrary objects: they may contain raw
+// response data that should not be shown to users.
+export function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  if (typeof error === "string" && error.trim()) return error.trim();
+  return fallback;
+}
+
 // thiserror prepends a machine "kind" to gateway error strings (see
 // server/src/errors.rs). Strip it so the toast reads as a plain sentence
 // instead of "bad request: …".

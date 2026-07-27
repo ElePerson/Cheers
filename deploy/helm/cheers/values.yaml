@@ -67,23 +67,16 @@ frontend:
     type: ClusterIP
     nodePort: "" # only when type=NodePort
 
-# ── Bot connector workload. Disabled by default because it requires a bot token
-#    secret. When enabled, it runs a separate ACP connector pod. Pick the agent
-#    with `agentType`: "opencode" (default; OpenAI-compatible, works with DeepSeek)
-#    or "codex" (`codex-acp`). Each agent reads a different env-var contract, so
-#    the pod template and the token/apiKey secret keys switch with agentType. ────
+# ── Optional Codex bot connector workload. Disabled by default because it
+#    requires a bot token secret. ──────────────────────────────────────────────
 bot:
   enabled: false
-  # "opencode" or "codex". Selects the image default, the entrypoint env-var
-  # contract, and the default token/apiKey secret keys below.
-  agentType: opencode
   image:
-    # Leave empty to default from agentType: cheers/opencode-bot or cheers/codex-bot.
-    repository: ""
+    repository: cheers/codex-bot
     tag: "" # defaults to .Chart.AppVersion
     pullPolicy: IfNotPresent
   replicaCount: 1
-  username: opencode
+  username: codex
   workspaceDir: /workspace
   stateDir: /app/state
   promptTimeoutMs: 900000
@@ -91,15 +84,6 @@ bot:
   permissionTimeoutMs: 900000
   # Defaults to the in-cluster gateway service. Override only for unusual routing.
   wsBase: ""
-  # ── OpenCode agent (agentType=opencode). OpenAI-compatible; the apiKey below is
-  #    REQUIRED. Defaults target DeepSeek. ──────────────────────────────────────
-  opencode:
-    command: opencode
-    provider: deepseek
-    model: "" # empty → "<provider>/deepseek-chat"; else "<provider>/<model>" or "prov/model"
-    baseUrl: https://api.deepseek.com
-    nativePermissionMode: ask # ask | allow | deny | reject
-  # ── Codex agent (agentType=codex). ──────────────────────────────────────────
   codex:
     command: codex-acp
     args: [] # e.g. ["--some-flag"]
@@ -111,21 +95,16 @@ bot:
     extraEnvAllow: []
   token:
     # Prefer an existing Secret in production:
-    #   kubectl create secret generic cheers-opencode-bot \
-    #     --from-literal=OPENCODE_BOT_TOKEN=agb_...
+    #   kubectl create secret generic cheers-codex-bot \
+    #     --from-literal=CHEERS_BOT_TOKEN=agb_...
     existingSecret: ""
-    # Env var the connector reads its Agent Bridge token from. Leave empty to
-    # default from agentType (OPENCODE_BOT_TOKEN / CHEERS_BOT_TOKEN).
-    key: ""
+    key: CHEERS_BOT_TOKEN
     # Dev-only convenience when secrets.create=true. Do not commit real tokens.
     value: ""
   openaiApiKey:
-    # OpenCode: REQUIRED (the model API key, e.g. a DeepSeek key). Codex: optional
-    # (Codex can use subscription auth from a HOME on the state volume instead).
+    # Optional: Codex can use subscription auth from HOME on the state volume.
     existingSecret: ""
-    # Leave empty to default from agentType
-    # (OPENCODE_OPENAI_API_KEY / OPENAI_API_KEY).
-    key: ""
+    key: OPENAI_API_KEY
     value: ""
   persistence:
     enabled: true

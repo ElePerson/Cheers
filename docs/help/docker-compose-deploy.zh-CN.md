@@ -89,72 +89,7 @@ gateway 才能签发的 token —— 见第 6 步）。
 curl -fsS http://localhost:8000/health && echo OK
 ```
 
-## 5.（可选）配置 OpenCode Bot 的模型供应商
-
-Bot 默认用 **DeepSeek**。在 `.env` 中：
-
-```dotenv
-OPENCODE_PROVIDER=deepseek
-OPENCODE_OPENAI_BASE_URL=https://api.deepseek.com
-OPENCODE_OPENAI_API_KEY=sk-你的-deepseek-key
-OPENCODE_MODEL=                     # 留空 → deepseek/deepseek-chat
-```
-
-改用 OpenAI（或其他 OpenAI 兼容端点）时，同时修改供应商、base URL、模型，并使用匹配的 key：
-
-```dotenv
-OPENCODE_PROVIDER=openai
-OPENCODE_OPENAI_BASE_URL=https://api.openai.com
-OPENCODE_OPENAI_API_KEY=sk-你的-openai-key
-OPENCODE_MODEL=gpt-4o
-```
-
-key 必须与端点匹配 —— 用 DeepSeek key 打 OpenAI base URL 会返回 401。
-
-## 6.（可选）创建 Bot 账号并签发 token
-
-Bot 通过绑定到某个 Bot 账号的 Agent Bridge token 向 gateway 认证。通过管理 API 创建账号并签发 token：
-
-```bash
-# a) 以 admin 登录，取得访问令牌
-TOKEN=$(curl -fsS -X POST http://localhost:8000/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"login":"admin","password":"'"$ADMIN_PASSWORD"'"}' \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
-
-# b) 创建 Bot 账号（scope "everyone" 表示任意频道可用）
-BOT_ID=$(curl -fsS -X POST http://localhost:8000/api/v1/bots \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"username":"opencode","display_name":"OpenCode","scope":"everyone"}' \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["bot_id"])')
-
-# c) 签发 Bot token（仅显示一次）
-curl -fsS -X POST "http://localhost:8000/api/v1/bots/$BOT_ID/token" \
-  -H "Authorization: Bearer $TOKEN" \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])'
-```
-
-把打印出的 token（`agb_...`）写入 `.env`：
-
-```dotenv
-OPENCODE_BOT_TOKEN=agb_...
-OPENCODE_BOT_USERNAME=opencode
-```
-
-## 7.（可选）启动 Bot
-
-```bash
-docker compose --profile bot up -d opencode-bot
-docker compose logs -f opencode-bot     # 关注 api_key_set=true
-```
-
-启动日志会打印解析后的配置，例如
-`model=deepseek/deepseek-chat ... api_key_set=true`。
-
-**使用：** 在 UI 中把 `opencode` Bot 加入某个频道（成员列表 → 添加 Bot），
-然后 @ 它：`@opencode 你好`。
-
-## 8.（可选）启动实时语音转写
+## 5.（可选）启动实时语音转写
 
 先按 [`deploy/livekit`](../../deploy/livekit/README.md) 部署小型 LiveKit 媒体栈，
 再在根目录 `.env` 中填写它的 URL、key、secret，并配置独立 Worker token 与
@@ -214,20 +149,14 @@ ACME 证书。
 > `caddy:2-alpine`，并删除 `docker/Caddyfile` 中的 `tls { dns cloudflare ... }`
 > 块，Caddy 会直接走 HTTP-01 / TLS-ALPN-01 签发（需 80/443 可达且域名指向本机）。
 
-若同时运行 Bot，命令追加 `--profile bot`。
-
 ## 运维
 
 ```bash
 # 日志
 docker compose logs -f gateway
-docker compose logs -f opencode-bot
 
 # 代码变更后重建并重启
 docker compose up -d --build gateway frontend
-
-# 轮换 Bot 的模型 API key（改 .env 后）
-docker compose --profile bot up -d --force-recreate opencode-bot
 
 # 备份数据库
 docker compose exec postgres pg_dump -U cheers cheers | gzip > cheers-$(date +%F).sql.gz
@@ -237,7 +166,7 @@ docker compose down
 docker compose down -v && rm -rf data/     # 会删除所有数据
 ```
 
-持久化数据位于 `./data/`（PostgreSQL、RustFS 对象、Bot 状态）。
+持久化数据位于 `./data/`（PostgreSQL、RustFS 对象）。
 
 ## 排查
 
@@ -245,7 +174,5 @@ docker compose down -v && rm -rf data/     # 会删除所有数据
 |---|---|
 | gateway 立即退出，日志提到 JWT | `.env` 中 `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` 缺失或格式错误。按第 2 步重新生成，保留完整多行 PEM 并加引号。 |
 | 浏览器登录报 CORS 错误 | `CORS_ALLOWED_ORIGINS` 未包含当前访问 UI 的来源。按第 3 步设置为该来源。 |
-| `opencode-bot` 反复重启 | 未设置 `OPENCODE_BOT_TOKEN` 就启动了。按第 6 步签发并填入 token，或不要启动 `bot` profile。 |
-| Bot 在线但每次提问都报错 | `OPENCODE_OPENAI_API_KEY` 缺失或与端点不匹配。检查 Bot 日志中的 `api_key_set=true`，并确认 key 与 `OPENCODE_OPENAI_BASE_URL` 匹配。 |
 | 拉取镜像很慢（中国大陆） | 用镜像源构建：`docker compose build --build-arg BASE_REGISTRY=docker.m.daocloud.io --build-arg NPM_REGISTRY=https://registry.npmmirror.com`。 |
 | 端口被占用 | 修改 `.env` 中的 `*_HOST_PORT` 变量。 |
