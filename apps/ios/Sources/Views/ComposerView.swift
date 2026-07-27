@@ -13,11 +13,16 @@ struct ComposerView: View {
     let clearTick: Int
     let placeholder: String
     let isSending: Bool
+    let streamingCount: Int
     let onSend: (String) async -> Bool
+    let onStopStreaming: () async -> Void
     let channelId: String
     let api: APIClient?
     var onChooseSession: () -> Void = {}
     var onModelSettings: () -> Void = {}
+    var onUploadFile: () -> Void = {}
+    var onBrowseFiles: () -> Void = {}
+    var onAddContext: () -> Void = {}
     /// "@" typeahead pool (group tokens + channel members) and the pick
     /// callback registering the selection for routing (ChatModel.pickedMentions).
     var mentionPool: [MentionCandidate] = []
@@ -31,11 +36,16 @@ struct ComposerView: View {
         clearTick: Int,
         placeholder: String,
         isSending: Bool,
+        streamingCount: Int = 0,
         onSend: @escaping (String) async -> Bool,
+        onStopStreaming: @escaping () async -> Void = {},
         channelId: String,
         api: APIClient?,
         onChooseSession: @escaping () -> Void = {},
         onModelSettings: @escaping () -> Void = {},
+        onUploadFile: @escaping () -> Void = {},
+        onBrowseFiles: @escaping () -> Void = {},
+        onAddContext: @escaping () -> Void = {},
         mentionPool: [MentionCandidate] = [],
         onMentionPicked: @escaping (MentionCandidate) -> Void = { _ in }
     ) {
@@ -43,17 +53,27 @@ struct ComposerView: View {
         self.clearTick = clearTick
         self.placeholder = placeholder
         self.isSending = isSending
+        self.streamingCount = streamingCount
         self.onSend = onSend
+        self.onStopStreaming = onStopStreaming
         self.channelId = channelId
         self.api = api
         self.onChooseSession = onChooseSession
         self.onModelSettings = onModelSettings
+        self.onUploadFile = onUploadFile
+        self.onBrowseFiles = onBrowseFiles
+        self.onAddContext = onAddContext
         self.mentionPool = mentionPool
         self.onMentionPicked = onMentionPicked
     }
 
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
+    }
+
+    private var showStop: Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isSending && streamingCount > 0
     }
 
     // MARK: @-mention typeahead
@@ -159,6 +179,10 @@ struct ComposerView: View {
     private var inputRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Menu {
+                Button { onUploadFile() } label: { Label("Upload file", systemImage: "paperclip") }
+                Button { onBrowseFiles() } label: { Label("Channel files", systemImage: "folder") }
+                Button { onAddContext() } label: { Label("Add context", systemImage: "link.badge.plus") }
+                Divider()
                 Button { onChooseSession() } label: { Label("Choose session", systemImage: "square.stack.3d.up") }
                 Button { onModelSettings() } label: { Label("Model & bot settings", systemImage: "slider.horizontal.3") }
             } label: {
@@ -184,6 +208,10 @@ struct ComposerView: View {
             dictationButton
 
             Button {
+                if showStop {
+                    Task { await onStopStreaming() }
+                    return
+                }
                 // Sending is an intentional completion point for a mobile
                 // draft. Clear focus first so UIKit reliably dismisses the
                 // software keyboard even while the network request is pending.
@@ -203,21 +231,21 @@ struct ComposerView: View {
                             .controlSize(.small)
                             .tint(.white)
                     } else {
-                        Image(systemName: "paperplane.fill")
+                        Image(systemName: showStop ? "stop.fill" : "paperplane.fill")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(canSend ? Color.white : Theme.textFaint)
+                            .foregroundStyle(canSend || showStop ? Color.white : Theme.textFaint)
                     }
                 }
                 .frame(width: 36, height: 36)
-                .background(canSend ? Theme.accent : Theme.bgSelected.opacity(0.5))
+                .background(showStop ? Theme.danger : (canSend ? Theme.accent : Theme.bgSelected.opacity(0.5)))
                 .clipShape(Circle())
                 .shadow(color: canSend ? Theme.accent.opacity(0.22) : .clear, radius: 5, y: 2)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
             }
-            .disabled(!canSend)
+            .disabled(!canSend && !showStop)
             .padding(.trailing, 2)
-            .accessibilityLabel(isSending ? "Sending message" : "Send message")
+            .accessibilityLabel(isSending ? "Sending message" : (showStop ? "Stop response" : "Send message"))
         }
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(

@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import os
+import UniformTypeIdentifiers
 
 private let timelinePerformanceSignposter = OSSignposter(
     subsystem: "app.cheers.ios",
@@ -14,6 +15,8 @@ enum ChannelPanel: String, Identifiable {
     case members = "Members"
     case viewboard = "ViewBoard"
     case workbench = "Workbench"
+    case remoteWorkspace = "Remote workspace"
+    case taskClaims = "Task claims"
     case settings = "Channel settings"
     var id: String { rawValue }
     var icon: String {
@@ -21,6 +24,8 @@ enum ChannelPanel: String, Identifiable {
         case .members: return "person.2"
         case .viewboard: return "rectangle.3.group"
         case .workbench: return "sidebar.right"
+        case .remoteWorkspace: return "externaldrive.connected.to.line.below"
+        case .taskClaims: return "checkmark.seal"
         case .settings: return "gearshape"
         }
     }
@@ -29,6 +34,8 @@ enum ChannelPanel: String, Identifiable {
         case .members: return "People and bots in this channel."
         case .viewboard: return "Live plan, cost, sessions and audit for this channel's agents (the instrument plane)."
         case .workbench: return "The channel's file workspace."
+        case .remoteWorkspace: return "Browse an agent's live workspace and Git state."
+        case .taskClaims: return "Pending proactive work proposals and monitoring settings."
         case .settings: return "Name, purpose, invites, membership and the danger zone."
         }
     }
@@ -71,6 +78,10 @@ struct ChatView: View {
     @State private var previewFile: MessageFileRef?
     @State private var showSessionSheet = false
     @State private var showModelSheet = false
+    @State private var showFileImporter = false
+    @State private var showChannelFiles = false
+    @State private var showResourceContext = false
+    @State private var isUploading = false
     @State private var voice: VoiceRoomModel
     @State private var reportTarget: MessageDto?
     @State private var blockTarget: MessageDto?
@@ -101,22 +112,29 @@ struct ChatView: View {
                 )
             }
             messageScroll
+            TaskClaimsPanelView(model: model)
             if let reply = model.replyTo {
                 replyBar(reply)
             }
             if let error = model.errorMessage {
                 errorBanner(error)
             }
+            pendingAttachmentBar
             ComposerView(
                 initialText: model.composerText,
                 clearTick: model.composerClearTick,
                 placeholder: composerPlaceholder,
                 isSending: model.isSending,
+                streamingCount: model.streamingMessageIds.count,
                 onSend: { draft in await model.send(draft: draft) },
+                onStopStreaming: { await model.stopAllTurns() },
                 channelId: model.channel.channelId,
                 api: app.api,
                 onChooseSession: { showSessionSheet = true },
                 onModelSettings: { showModelSheet = true },
+                onUploadFile: { showFileImporter = true },
+                onBrowseFiles: { showChannelFiles = true },
+                onAddContext: { showResourceContext = true },
                 mentionPool: model.mentionPool,
                 onMentionPicked: { candidate in
                     if !model.pickedMentions.contains(candidate) {
@@ -168,6 +186,12 @@ struct ChatView: View {
                 case .members:   MembersSheet(channel: model.channel)
                 case .viewboard: ViewBoardSheet(channelId: model.channel.channelId)
                 case .workbench: WorkbenchSheet(channelId: model.channel.channelId)
+                case .remoteWorkspace:
+                    RemoteWorkspaceSheet(
+                        channelId: model.channel.channelId,
+                        onAddContext: { model.addContext($0) }
+                    )
+                case .taskClaims: TaskClaimManagementSheet(model: model)
                 case .settings:  ChannelSettingsSheet(channel: model.channel)
                 }
             }
@@ -193,6 +217,28 @@ struct ChatView: View {
             ModelSettingsSheet(channelId: model.channel.channelId, bots: model.botMembers)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showChannelFiles) {
+            ChannelFilesSheet(
+                channelId: model.channel.channelId,
+                onAttach: { model.addPendingFile($0) },
+                onContext: { model.addContext(Self.fileContext($0)) }
+            )
+        }
+        .sheet(isPresented: $showResourceContext) {
+            ResourceContextSheet(
+                channelId: model.channel.channelId,
+                reply: model.replyTo,
+                onAdd: { model.addContext($0) }
+            )
+        }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            Task { await upload(url) }
         }
         .sheet(isPresented: Binding(
             get: { !model.pendingAIConsent.isEmpty },
@@ -222,6 +268,72 @@ struct ChatView: View {
         } message: {
             Text("Blocking removes any friendship and prevents direct messages in either direction.")
         }
+    }
+
+    @ViewBuilder
+    private var pendingAttachmentBar: some View {
+        if isUploading || !model.pendingFiles.isEmpty || !model.pendingContext.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    if isUploading { ProgressView().controlSize(.small) }
+                    ForEach(model.pendingFiles) { file in
+                        removableChip(file.originalFilename ?? "File", icon: "paperclip") {
+                            model.pendingFiles.removeAll { $0.fileId == file.fileId }
+                        }
+                    }
+                    ForEach(model.pendingContext) { item in
+                        removableChip(item.label, icon: "link") {
+                            model.pendingContext.removeAll { $0.id == item.id }
+                        }
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+            }
+            .background(Theme.bgApp)
+        }
+    }
+
+    private func removableChip(_ text: String, icon: String, remove: @escaping () -> Void) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+            Text(text).lineLimit(1)
+            Button(action: remove) { Image(systemName: "xmark.circle.fill") }
+                .accessibilityLabel("Remove \(text)")
+        }
+        .font(.caption)
+        .foregroundStyle(Theme.textSecondary)
+        .padding(.horizontal, 9).padding(.vertical, 6)
+        .background(Theme.bgRaised, in: Capsule())
+    }
+
+    private func upload(_ url: URL) async {
+        guard let api = app.api, !isUploading else { return }
+        isUploading = true
+        defer { isUploading = false }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?
+                .preferredMIMEType ?? "application/octet-stream"
+            let file = try await api.uploadFile(
+                channelId: model.channel.channelId,
+                filename: url.lastPathComponent,
+                contentType: type,
+                data: data
+            )
+            model.addPendingFile(file)
+        } catch {
+            model.errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private static func fileContext(_ file: MessageFileRef) -> ResourceContextItem {
+        ResourceContextItem(
+            id: "file:\(file.fileId)", verb: "channel.files.read",
+            params: ["file_id": .string(file.fileId)],
+            label: file.originalFilename ?? "File", kind: "file"
+        )
     }
 
     private func replyBar(_ reply: MessageDto) -> some View {
@@ -298,6 +410,12 @@ struct ChatView: View {
             Button { panel = .workbench } label: {
                 Label("Workbench", systemImage: "sidebar.right")
             }
+            Button { panel = .remoteWorkspace } label: {
+                Label("Remote workspace", systemImage: "externaldrive.connected.to.line.below")
+            }
+            Button { panel = .taskClaims } label: {
+                Label("Task claims", systemImage: "checkmark.seal")
+            }
             if !model.channel.isDM {
                 Button { panel = .settings } label: {
                     Label("Channel settings", systemImage: "gearshape")
@@ -325,7 +443,8 @@ struct ChatView: View {
             onForward: { forwardMessage = $0 },
             onFile: { previewFile = $0 },
             onReport: { reportTarget = $0 },
-            onBlock: { blockTarget = $0 }
+            onBlock: { blockTarget = $0 },
+            onStop: { message in Task { await model.stopTurn(msgId: message.msgId) } }
         )
         .overlay(alignment: .bottomTrailing) {
             if !atBottom || model.hasTrimmedNewer {
@@ -497,6 +616,7 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
     let onFile: (MessageFileRef) -> Void
     let onReport: (MessageDto) -> Void
     let onBlock: (MessageDto) -> Void
+    let onStop: (MessageDto) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -551,7 +671,8 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
                     onForward: self.parent.onForward,
                     onFile: self.parent.onFile,
                     onReport: self.parent.onReport,
-                    onBlock: self.parent.onBlock
+                    onBlock: self.parent.onBlock,
+                    onStop: self.parent.onStop
                 )
                 .environment(self.parent.app)
             }
@@ -675,6 +796,7 @@ private struct ChatTimelineRow: View {
     let onFile: (MessageFileRef) -> Void
     let onReport: (MessageDto) -> Void
     let onBlock: (MessageDto) -> Void
+    let onStop: (MessageDto) -> Void
 
     @ViewBuilder
     var body: some View {
@@ -717,6 +839,19 @@ private struct ChatTimelineRow: View {
                     onReport: { onReport(message) },
                     onBlock: { onBlock(message) }
                 )
+                if message.isBot, message.isPartial == true {
+                    Button { onStop(message) } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+                    .tint(Theme.danger)
+                    .padding(.leading, 58)
+                    .padding(.top, 3)
+                    .accessibilityHint("Stops this response and any bot-to-bot chain it started")
+                }
                 // Lazy durable timeline — toggle only; fetch on first expand.
                 if message.isBot, message.isPartial != true {
                     BotTracePanelView(channelId: channelId, msgId: message.msgId)
@@ -855,6 +990,150 @@ private struct ForwardSheet: View {
 
 // MARK: - File preview sheet
 
+private struct ChannelFilesSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let channelId: String
+    let onAttach: (MessageFileRef) -> Void
+    let onContext: (MessageFileRef) -> Void
+
+    @State private var files: [MessageFileRef] = []
+    @State private var isLoading = true
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView()
+                } else if let errorText {
+                    ContentUnavailableView("Could not load files", systemImage: "exclamationmark.triangle", description: Text(errorText))
+                } else if files.isEmpty {
+                    ContentUnavailableView("No channel files", systemImage: "folder", description: Text("Upload a file from the composer to start the library."))
+                } else {
+                    List(files) { file in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "doc")
+                                    .foregroundStyle(Theme.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(file.originalFilename ?? "File").lineLimit(1)
+                                    if let size = file.sizeBytes {
+                                        Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                                            .font(.caption).foregroundStyle(Theme.textSecondary)
+                                    }
+                                }
+                            }
+                            HStack {
+                                Button("Attach", systemImage: "paperclip") {
+                                    onAttach(file); dismiss()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                Button("Add to context", systemImage: "link") {
+                                    onContext(file); dismiss()
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            .font(.caption)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .navigationTitle("Channel files")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard let api = app.api else { isLoading = false; return }
+        do {
+            files = try await api.listChannelFiles(channelId: channelId)
+            errorText = nil
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        isLoading = false
+    }
+}
+
+private struct ResourceContextSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let channelId: String
+    let reply: MessageDto?
+    let onAdd: (ResourceContextItem) -> Void
+
+    @State private var files: [MessageFileRef] = []
+
+    private var quickItems: [ResourceContextItem] {
+        var items = [
+            ResourceContextItem(id: "plan", verb: "channel.plan.read", params: [:], label: "Plan", kind: "plan"),
+            ResourceContextItem(id: "activity", verb: "channel.activity.read", params: [:], label: "Recent decisions", kind: "activity"),
+            ResourceContextItem(id: "sessions", verb: "channel.sessions.read", params: [:], label: "Sessions", kind: "sessions"),
+            ResourceContextItem(id: "cost", verb: "channel.usage.read", params: [:], label: "Cost", kind: "cost"),
+        ]
+        if let reply, let seq = reply.channelSeq {
+            items.append(ResourceContextItem(
+                id: "msg:\(seq)", verb: "channel.messages.by-seq",
+                params: ["min_seq": .number(Double(seq)), "max_seq": .number(Double(seq))],
+                label: reply.senderName.map { "Reply to \($0)" } ?? "Message #\(seq)", kind: "message"
+            ))
+        }
+        return items
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Channel context") {
+                    ForEach(quickItems) { item in
+                        Button { onAdd(item); dismiss() } label: {
+                            Label(item.label, systemImage: icon(item.kind))
+                        }
+                    }
+                }
+                if !files.isEmpty {
+                    Section("Channel files") {
+                        ForEach(files) { file in
+                            Button {
+                                onAdd(ResourceContextItem(
+                                    id: "file:\(file.fileId)", verb: "channel.files.read",
+                                    params: ["file_id": .string(file.fileId)],
+                                    label: file.originalFilename ?? "File", kind: "file"
+                                ))
+                                dismiss()
+                            } label: {
+                                Label(file.originalFilename ?? "File", systemImage: "doc")
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Add context")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        }
+        .task {
+            guard let api = app.api else { return }
+            files = (try? await api.listChannelFiles(channelId: channelId)) ?? []
+        }
+    }
+
+    private func icon(_ kind: String) -> String {
+        switch kind {
+        case "plan": return "list.bullet.clipboard"
+        case "activity": return "clock.arrow.circlepath"
+        case "sessions": return "rectangle.stack"
+        case "cost": return "creditcard"
+        case "message": return "bubble.left"
+        default: return "link"
+        }
+    }
+}
+
 /// Attachment viewer: images render inline; everything else shows file info with
 /// a Share/Save action. Bytes are Bearer-fetched (the URLs can't carry a header).
 private struct FilePreviewSheet: View {
@@ -957,6 +1236,9 @@ private struct SessionSheet: View {
 
     @State private var sessionsByBot: [String: [SessionInfo]] = [:]
     @State private var isLoading = true
+    @State private var busyId: String?
+    @State private var closeTarget: (botId: String, session: SessionInfo)?
+    @State private var errorText: String?
 
     var body: some View {
         NavigationStack {
@@ -973,19 +1255,61 @@ private struct SessionSheet: View {
                             Text("No sessions").font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
                         }
                         ForEach(sessions) { s in
-                            row(title: s.tag + (s.isPrimary == true ? " · primary" : ""), subtitle: s.status, selected: selectedSessionId == s.sessionId) {
-                                selectedSessionId = s.sessionId; dismiss()
+                            HStack {
+                                Button {
+                                    selectedSessionId = s.sessionId; dismiss()
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(s.tag + (s.isPrimary == true ? " · primary" : ""))
+                                            .font(.system(size: 15)).foregroundStyle(Theme.textBody)
+                                        Text(sessionSubtitle(s)).font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                                    }
+                                }
+                                Spacer()
+                                if busyId == s.sessionId { ProgressView().controlSize(.small) }
+                                else if selectedSessionId == s.sessionId { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }
+                                Menu {
+                                    if s.isPrimary != true {
+                                        Button("Make primary", systemImage: "star") {
+                                            Task { await makePrimary(botId: bot.memberId, session: s) }
+                                        }
+                                    }
+                                    Button("Close session", systemImage: "xmark.circle", role: .destructive) {
+                                        closeTarget = (bot.memberId, s)
+                                    }
+                                } label: { Image(systemName: "ellipsis.circle").foregroundStyle(Theme.textSecondary) }
                             }
+                            .frame(minHeight: 44)
                         }
                     }
                 }
+                if let errorText { Section { Text(errorText).foregroundStyle(Theme.danger) } }
             }
             .navigationTitle("Session")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        ForEach(bots, id: \.memberId) { bot in
+                            Button(bot.name) { Task { await create(botId: bot.memberId) } }
+                        }
+                    } label: { Image(systemName: "plus") }
+                    .disabled(bots.isEmpty || busyId != nil)
+                    .accessibilityLabel("Create session")
+                }
+            }
             .overlay { if isLoading && sessionsByBot.isEmpty { ProgressView() } }
         }
         .task { await load() }
+        .confirmationDialog("Close this session?", isPresented: Binding(
+            get: { closeTarget != nil }, set: { if !$0 { closeTarget = nil } }
+        )) {
+            Button("Close session", role: .destructive) { Task { await closeSelected() } }
+            Button("Cancel", role: .cancel) { closeTarget = nil }
+        } message: {
+            Text("The session will disappear from this channel and can no longer receive messages.")
+        }
     }
 
     private func row(title: String, subtitle: String?, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -1014,6 +1338,44 @@ private struct SessionSheet: View {
             for await (botId, sessions) in group { sessionsByBot[botId] = sessions }
         }
         isLoading = false
+    }
+
+    private func sessionSubtitle(_ session: SessionInfo) -> String {
+        let status = session.status ?? "active"
+        guard let raw = session.lastUsedAt, let date = TimeFormat.parse(raw) else { return status }
+        return "\(status) · \(date.formatted(.relative(presentation: .named)))"
+    }
+
+    private func create(botId: String) async {
+        guard let api = app.api else { return }
+        busyId = botId; errorText = nil
+        defer { busyId = nil }
+        do {
+            let created = try await api.createSession(channelId: channelId, botId: botId)
+            await load()
+            selectedSessionId = created.sessionId
+        } catch { errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription }
+    }
+
+    private func makePrimary(botId: String, session: SessionInfo) async {
+        guard let api = app.api else { return }
+        busyId = session.sessionId; errorText = nil
+        defer { busyId = nil }
+        do {
+            try await api.setPrimarySession(channelId: channelId, botId: botId, sessionId: session.sessionId)
+            await load()
+        } catch { errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription }
+    }
+
+    private func closeSelected() async {
+        guard let target = closeTarget, let api = app.api else { return }
+        closeTarget = nil; busyId = target.session.sessionId; errorText = nil
+        defer { busyId = nil }
+        do {
+            try await api.closeSession(channelId: channelId, botId: target.botId, sessionId: target.session.sessionId)
+            if selectedSessionId == target.session.sessionId { selectedSessionId = nil }
+            await load()
+        } catch { errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription }
     }
 }
 
