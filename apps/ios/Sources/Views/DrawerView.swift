@@ -25,6 +25,7 @@ struct DrawerView: View {
             footer
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
     private var searchField: some View {
@@ -33,7 +34,7 @@ struct DrawerView: View {
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.textMuted)
             TextField("Search conversations", text: $query)
-                .font(.system(size: 15))
+                .font(.body)
                 .foregroundStyle(Theme.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -65,7 +66,7 @@ struct DrawerView: View {
         HStack(spacing: 10) {
             workspaceGlyph
             Text(shell.selectedWorkspace?.name ?? "All conversations")
-                .font(.system(size: 17, weight: .bold))
+                .font(.headline)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
             Image(systemName: "chevron.down")
@@ -153,7 +154,7 @@ struct DrawerView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 11, weight: .bold))
+            .font(.caption2.weight(.bold))
             .tracking(0.7)
             .foregroundStyle(Theme.textSecondary)
             .padding(.horizontal, 18)
@@ -184,7 +185,7 @@ struct DrawerView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
                 Text(row.channel.displayName)
-                    .font(.system(size: 15))
+                    .font(.body)
                     .foregroundStyle(Theme.textBody)
                     .lineLimit(1)
                 Spacer(minLength: 6)

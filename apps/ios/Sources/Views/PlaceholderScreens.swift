@@ -1,18 +1,5 @@
 import SwiftUI
 
-// Channel-info is a simple secondary screen for v1. Friends lives in
-// FriendsView.swift; Notifications / Fleet in ActivityView / AgentsView.
-
-struct ChannelInfoView: View {
-    let channel: ChannelDto
-
-    var body: some View {
-        ScreenScaffold(title: channel.displayName) {
-            ComingSoon(icon: "info.circle", text: "Channel info")
-        }
-    }
-}
-
 /// New channel (name + text/voice + public/private → POST /channels) or New DM
 /// (pick a bot → POST /channels/dm). On success it opens the new conversation.
 struct NewConversationSheet: View {
@@ -177,34 +164,6 @@ struct NewConversationSheet: View {
                 busy = false
             }
         }
-    }
-}
-
-/// A channel header instrument panel (ViewBoard / Workbench / files). Full
-/// boards are a follow-up; this names the panel and its purpose so the ⋯ menu
-/// matches the web channel header.
-struct ChannelPanelSheet: View {
-    let panel: ChannelPanel
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Capsule().fill(Theme.bgSelected).frame(width: 38, height: 5).padding(.top, 8)
-            Image(systemName: panel.icon)
-                .font(.system(size: 34))
-                .foregroundStyle(Theme.accent)
-                .padding(.top, 8)
-            Text(panel.rawValue)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-            Text(panel.blurb)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.bgSurface)
     }
 }
 

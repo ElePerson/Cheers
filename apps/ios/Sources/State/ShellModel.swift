@@ -9,7 +9,6 @@ enum Route: Hashable {
     case fleet
     case friends
     case settings
-    case channelInfo(ChannelDto)
 }
 
 /// Drawer-first navigation state: the open/closed drawer, the selected workspace

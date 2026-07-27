@@ -177,6 +177,13 @@ struct APIClient: Sendable {
         return try decode(type, from: try await send(request))
     }
 
+    @discardableResult
+    func putJSON<B: Encodable, T: Decodable>(_ path: String, body: B, as type: T.Type) async throws -> T {
+        let data = try JSONEncoder().encode(body)
+        let request = try makeRequest("PUT", path, body: data)
+        return try decode(type, from: try await send(request))
+    }
+
     func postEmpty(_ path: String) async throws {
         let request = try makeRequest("POST", path, body: Data("{}".utf8))
         _ = try await send(request)
@@ -545,6 +552,55 @@ struct APIClient: Sendable {
         try await getJSON("/workspaces/personal", as: WorkspaceDto.self)
     }
 
+    func updateWorkspace(workspaceId: String, name: String) async throws -> WorkspaceDto {
+        struct Body: Encodable { let name: String }
+        return try await patchJSON(
+            "/workspaces/\(workspaceId)", body: Body(name: name), as: WorkspaceDto.self
+        )
+    }
+
+    func deleteWorkspace(workspaceId: String) async throws {
+        try await deleteEmpty("/workspaces/\(workspaceId)")
+    }
+
+    func leaveWorkspace(workspaceId: String) async throws {
+        try await postEmpty("/workspaces/\(workspaceId)/leave")
+    }
+
+    func listWorkspaceMembers(workspaceId: String) async throws -> [WorkspaceMemberDto] {
+        try await getJSON("/workspaces/\(workspaceId)/members", as: [WorkspaceMemberDto].self)
+    }
+
+    func inviteWorkspaceMember(workspaceId: String, identifier: String, role: String) async throws {
+        struct Body: Encodable { let identifier: String; let role: String }
+        _ = try await postJSON(
+            "/workspaces/\(workspaceId)/invite",
+            body: Body(identifier: identifier, role: role),
+            as: JSONValue.self
+        )
+    }
+
+    func setWorkspaceMemberRole(workspaceId: String, userId: String, role: String) async throws {
+        struct Body: Encodable { let role: String }
+        _ = try await patchJSON(
+            "/workspaces/\(workspaceId)/members/\(userId)",
+            body: Body(role: role),
+            as: JSONValue.self
+        )
+    }
+
+    func removeWorkspaceMember(workspaceId: String, userId: String) async throws {
+        try await deleteEmpty("/workspaces/\(workspaceId)/members/\(userId)")
+    }
+
+    func listAuthSessions() async throws -> [AuthSessionSummary] {
+        try await getJSON("/auth/sessions", as: [AuthSessionSummary].self)
+    }
+
+    func revokeAuthSession(sessionId: String) async throws {
+        try await deleteEmpty("/auth/sessions/\(sessionId)")
+    }
+
     func listChannels(workspaceId: String?) async throws -> [ChannelDto] {
         var query: [URLQueryItem] = []
         if let workspaceId {
@@ -707,6 +763,45 @@ struct APIClient: Sendable {
         )
     }
 
+    func listTaskClaims(channelId: String, status: String? = nil) async throws -> [TaskClaimDto] {
+        var query: [URLQueryItem] = []
+        if let status { query.append(URLQueryItem(name: "status", value: status)) }
+        return try await getJSON(
+            "/channels/\(channelId)/task-claims", query: query,
+            as: TaskClaimsResponse.self
+        ).claims
+    }
+
+    func cancelTaskClaim(channelId: String, claimId: String) async throws {
+        _ = try await postJSON(
+            "/channels/\(channelId)/task-claims/\(claimId)/cancel",
+            body: [String: String](), as: JSONValue.self
+        )
+    }
+
+    func botMonitoring(channelId: String, botId: String) async throws -> BotMonitoringDto {
+        try await getJSON(
+            "/channels/\(channelId)/bots/\(botId)/monitoring",
+            as: BotMonitoringDto.self
+        )
+    }
+
+    func updateBotMonitoring(
+        channelId: String, botId: String, update: BotMonitoringUpdate
+    ) async throws -> BotMonitoringDto {
+        try await putJSON(
+            "/channels/\(channelId)/bots/\(botId)/monitoring", body: update,
+            as: BotMonitoringDto.self
+        )
+    }
+
+    func cancelMessage(channelId: String, msgId: String) async throws {
+        _ = try await postJSON(
+            "/channels/\(channelId)/messages/\(msgId)/cancel",
+            body: [String: String](), as: JSONValue.self
+        )
+    }
+
     // MARK: Files
 
     /// Raw file bytes (Bearer-authed). `download` serves the original; otherwise
@@ -714,6 +809,91 @@ struct APIClient: Sendable {
     func fileData(fileId: String, download: Bool = true) async throws -> Data {
         let request = try makeRequest("GET", "/files/\(fileId)/\(download ? "download" : "preview")")
         return try await send(request)
+    }
+
+    func listChannelFiles(channelId: String) async throws -> [MessageFileRef] {
+        try await getJSON("/channels/\(channelId)/files", as: [MessageFileRef].self)
+    }
+
+    func uploadFile(
+        channelId: String, filename: String, contentType: String, data: Data
+    ) async throws -> MessageFileRef {
+        var request = try makeRequest("POST", "/files", query: [
+            URLQueryItem(name: "channel_id", value: channelId),
+            URLQueryItem(name: "filename", value: filename),
+            URLQueryItem(name: "content_type", value: contentType),
+        ], body: data)
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        return try decode(MessageFileRef.self, from: try await send(request))
+    }
+
+    func listWorkbenchTemplates() async throws -> [WorkbenchTemplateRow] {
+        try await getJSON("/workbench/templates", as: [WorkbenchTemplateRow].self)
+    }
+
+    // MARK: Remote workspace
+
+    func listRemoteWorkspaceBots(channelId: String) async throws -> [RemoteWorkspaceBot] {
+        try await getJSON(
+            "/channels/\(channelId)/workspace/bots", as: RemoteWorkspaceBotsResponse.self
+        ).bots
+    }
+
+    func remoteWorkspaceTree(
+        channelId: String, botId: String, path: String = "", root: String? = nil
+    ) async throws -> RemoteWorkspaceTree {
+        var query = [URLQueryItem(name: "bot_id", value: botId), URLQueryItem(name: "path", value: path)]
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        return try await getJSON(
+            "/channels/\(channelId)/workspace/tree", query: query, as: RemoteWorkspaceTree.self
+        )
+    }
+
+    func remoteWorkspaceFile(
+        channelId: String, botId: String, path: String, root: String? = nil
+    ) async throws -> RemoteWorkspaceFile {
+        var query = [URLQueryItem(name: "bot_id", value: botId), URLQueryItem(name: "path", value: path)]
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        return try await getJSON(
+            "/channels/\(channelId)/workspace/file", query: query, as: RemoteWorkspaceFile.self
+        )
+    }
+
+    func writeRemoteWorkspaceFile(
+        channelId: String, botId: String, path: String, root: String?,
+        content: String, ifMatch: String?
+    ) async throws -> RemoteWorkspaceWriteResult {
+        var query = [URLQueryItem(name: "bot_id", value: botId), URLQueryItem(name: "path", value: path)]
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        var request = try makeRequest(
+            "PUT", "/channels/\(channelId)/workspace/file", query: query,
+            body: Data(content.utf8)
+        )
+        request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        if let ifMatch { request.setValue(ifMatch, forHTTPHeaderField: "If-Match") }
+        return try decode(RemoteWorkspaceWriteResult.self, from: try await send(request))
+    }
+
+    func remoteGitStatus(
+        channelId: String, botId: String, path: String = "", root: String? = nil
+    ) async throws -> RemoteGitStatus {
+        var query = [URLQueryItem(name: "bot_id", value: botId), URLQueryItem(name: "path", value: path)]
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        return try await getJSON(
+            "/channels/\(channelId)/workspace/git/status", query: query, as: RemoteGitStatus.self
+        )
+    }
+
+    func remoteGitDiff(
+        channelId: String, botId: String, path: String = "", staged: Bool = false,
+        root: String? = nil
+    ) async throws -> RemoteGitDiff {
+        var query = [URLQueryItem(name: "bot_id", value: botId), URLQueryItem(name: "path", value: path)]
+        if staged { query.append(URLQueryItem(name: "staged", value: "true")) }
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        return try await getJSON(
+            "/channels/\(channelId)/workspace/git/diff", query: query, as: RemoteGitDiff.self
+        )
     }
 
     // MARK: Approvals (ACP permission resolution)
@@ -950,6 +1130,24 @@ extension APIClient {
         try await getJSON("/channels/\(channelId)/bots/\(botId)/sessions", as: SessionListResponse.self).sessions
     }
 
+    func createSession(channelId: String, botId: String) async throws -> CreateSessionResponse {
+        try await postJSON(
+            "/channels/\(channelId)/bots/\(botId)/sessions",
+            body: [String: String](), as: CreateSessionResponse.self
+        )
+    }
+
+    func closeSession(channelId: String, botId: String, sessionId: String) async throws {
+        try await deleteEmpty("/channels/\(channelId)/bots/\(botId)/sessions/\(sessionId)")
+    }
+
+    func setPrimarySession(channelId: String, botId: String, sessionId: String) async throws {
+        _ = try await postJSON(
+            "/channels/\(channelId)/bots/\(botId)/sessions/\(sessionId)/primary",
+            body: [String: String](), as: OkResponse.self
+        )
+    }
+
     func sessionControls(channelId: String, botId: String) async throws -> SessionControls {
         try await getJSON("/channels/\(channelId)/bots/\(botId)/session-controls", as: SessionControls.self)
     }
@@ -963,6 +1161,23 @@ extension APIClient {
             "/channels/\(channelId)/bots/\(botId)/sessions/\(sessionId)/config-option",
             body: SetConfigOptionRequest(configId: configId, value: value),
             as: OkResponse.self
+        )
+    }
+
+    func botPermissions(botId: String) async throws -> BotPermissionsDto {
+        try await getJSON("/bots/\(botId)/permissions", as: BotPermissionsDto.self)
+    }
+
+    func setBotPosture(botId: String, mode: String) async throws {
+        _ = try await putJSON(
+            "/bots/\(botId)/permissions/posture", body: ["permission_mode": mode], as: OkResponse.self
+        )
+    }
+
+    func setBotConfigOption(botId: String, configId: String, value: String) async throws {
+        _ = try await putJSON(
+            "/bots/\(botId)/permissions/config-option",
+            body: SetConfigOptionRequest(configId: configId, value: value), as: OkResponse.self
         )
     }
 }

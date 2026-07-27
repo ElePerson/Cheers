@@ -20,11 +20,10 @@ struct AppShellView: View {
     /// every tap and scroll. `@GestureState` auto-resets on cancellation.
     @GestureState private var dragOffset: CGFloat = 0
 
-    private let drawerWidth: CGFloat = 336
-
     var body: some View {
         @Bindable var shell = shell
         GeometryReader { geo in
+        let drawerWidth = min(336, max(0, geo.size.width - 44))
         ZStack(alignment: .leading) {
             NavigationStack(path: $shell.path) {
                 ChatRootView(convo: convo)
@@ -32,6 +31,7 @@ struct AppShellView: View {
                         destination(for: route)
                     }
             }
+            .accessibilityHidden(drawerVisible)
             // Left-edge grab strip: only at the ROOT chat (path empty) while the
             // drawer is closed. On pushed screens the same edge gesture must mean
             // the native swipe-back pop — one gesture, one meaning per depth.
@@ -40,15 +40,15 @@ struct AppShellView: View {
                     .frame(width: 18)
                     .frame(maxHeight: .infinity)
                     .contentShape(Rectangle())
-                    .gesture(edgeOpenGesture)
+                    .gesture(edgeOpenGesture(drawerWidth: drawerWidth))
             }
 
             if drawerVisible {
                 Color.black
-                    .opacity(0.5 * progress)
+                    .opacity(0.5 * progress(drawerWidth: drawerWidth))
                     .ignoresSafeArea()
                     .onTapGesture { closeDrawer() }
-                    .gesture(dragCloseGesture)
+                    .gesture(dragCloseGesture(drawerWidth: drawerWidth))
                     // Belt-and-braces: a backdrop that is only mid-drag must never
                     // be able to eat taps meant for the chat underneath.
                     .allowsHitTesting(shell.drawerOpen)
@@ -60,8 +60,10 @@ struct AppShellView: View {
                 .background(Theme.bgSurface)
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .ignoresSafeArea(edges: .vertical)
-                .offset(x: offsetX)
+                .offset(x: offsetX(drawerWidth: drawerWidth))
                 .shadow(color: .black.opacity(drawerVisible ? 0.4 : 0), radius: 24, x: 12)
+                .allowsHitTesting(drawerVisible)
+                .accessibilityHidden(!drawerVisible)
         }
         .onChange(of: shell.path.count) { _, newCount in
             // Popped back to the root chat: if this navigation started in the
@@ -71,6 +73,11 @@ struct AppShellView: View {
                     shell.handleReturnToRoot()
                 }
             }
+        }
+        .onChange(of: geo.size.width) {
+            // A partially presented fixed-width drawer can otherwise survive
+            // rotation and leave clipped controls visible in landscape.
+            shell.closeDrawer()
         }
         .task {
             convo.attach(app)
@@ -96,8 +103,9 @@ struct AppShellView: View {
     // MARK: Drawer geometry
 
     /// 0 (closed) → 1 (fully open), including any in-progress drag.
-    private var progress: CGFloat {
-        max(0, min(1, (offsetX + drawerWidth) / drawerWidth))
+    private func progress(drawerWidth: CGFloat) -> CGFloat {
+        guard drawerWidth > 0 else { return 0 }
+        return max(0, min(1, (offsetX(drawerWidth: drawerWidth) + drawerWidth) / drawerWidth))
     }
 
     private var drawerVisible: Bool {
@@ -105,7 +113,7 @@ struct AppShellView: View {
     }
 
     /// Drawer x-origin: -drawerWidth (hidden) → 0 (shown), plus live drag.
-    private var offsetX: CGFloat {
+    private func offsetX(drawerWidth: CGFloat) -> CGFloat {
         let base: CGFloat = shell.drawerOpen ? 0 : -drawerWidth
         return max(-drawerWidth, min(0, base + dragOffset))
     }
@@ -118,7 +126,7 @@ struct AppShellView: View {
 
     // MARK: Gestures
 
-    private var edgeOpenGesture: some Gesture {
+    private func edgeOpenGesture(drawerWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .updating($dragOffset) { value, state, _ in
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
@@ -132,7 +140,7 @@ struct AppShellView: View {
             }
     }
 
-    private var dragCloseGesture: some Gesture {
+    private func dragCloseGesture(drawerWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .updating($dragOffset) { value, state, _ in
                 guard value.translation.width < 0 else { return }
@@ -159,8 +167,6 @@ struct AppShellView: View {
             FriendsView()
         case .settings:
             SettingsView()
-        case .channelInfo(let channel):
-            ChannelInfoView(channel: channel)
         }
     }
 }
