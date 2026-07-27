@@ -96,7 +96,13 @@ async fn post(server: &str, path: &str, body: Value) -> Result<AuthOutcome, Stri
         .json(&body)
         .send()
         .await
-        .map_err(|_| "Could not reach the Cheers server".to_string())?;
+        .map_err(|error| {
+            // The OAuth handoff runs in native reqwest rather than WKWebView.
+            // Keep its transport diagnosis (TLS, DNS, timeout, connection)
+            // visible to the UI; the request body and its secrets are not part
+            // of reqwest's Display output.
+            format!("Could not reach the Cheers server: {error}")
+        })?;
     if !response.status().is_success() {
         let status = response.status();
         let detail = response

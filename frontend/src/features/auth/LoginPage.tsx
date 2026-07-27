@@ -17,6 +17,7 @@ import {
 import { useAuthStore } from "@/stores/authStore";
 import { onOAuthHandoff } from "@/lib/oauthCallback";
 import { getPasskey } from "@/lib/webauthn";
+import { errorMessage } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -55,7 +56,7 @@ export default function LoginPage() {
     setLoading(true);
     void exchangeOAuthHandoff(code)
       .then(completeOutcome)
-      .catch((error) => toast.error(error instanceof Error ? error.message : "OAuth login failed"))
+      .catch((error) => toast.error(errorMessage(error, "OAuth login failed")))
       .finally(() => setLoading(false));
   // completeOutcome only reads stable router/store bindings.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -317,7 +318,7 @@ export default function LoginPage() {
                     setLoading(true);
                     void startOAuth("apple").catch((error) => {
                       setLoading(false);
-                      toast.error(error instanceof Error ? error.message : "Apple sign-in failed");
+                      toast.error(errorMessage(error, "Apple sign-in failed"));
                     });
                   }}
                 >
@@ -335,7 +336,7 @@ export default function LoginPage() {
                     setLoading(true);
                     void startOAuth("google").catch((error) => {
                       setLoading(false);
-                      toast.error(error instanceof Error ? error.message : "Google sign-in failed");
+                      toast.error(errorMessage(error, "Google sign-in failed"));
                     });
                   }}
                 >

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { exchangeOAuthHandoff } from "@/api/auth";
+import { errorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/authStore";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -40,7 +41,7 @@ export default function OAuthCallbackPage() {
         sessionStorage.removeItem("cheers.oauth_redirect");
         navigate(redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/chat", { replace: true });
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Sign-in failed"));
+      .catch((reason) => setError(errorMessage(reason, "Sign-in failed")));
   }, [navigate, params, setAuth]);
 
   return (

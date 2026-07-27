@@ -249,6 +249,13 @@ pub async fn start(
     .execute(&state.db)
     .await?;
 
+    tracing::info!(
+        %transaction_id,
+        %provider,
+        client = client.as_str(),
+        "OAuth authorization started"
+    );
+
     let mut url = Url::parse(authorization_endpoint)
         .map_err(|e| AppError::Internal(format!("OAuth endpoint URL: {e}")))?;
     {
@@ -329,11 +336,24 @@ async fn complete_callback(
     .await?
     .ok_or_else(|| AppError::Unauthorized("OAuth state is invalid or expired".into()))?;
     let transaction_id: String = row.try_get("transaction_id")?;
-    let _client =
+    let client =
         auth_sessions::ClientType::parse(Some(row.try_get::<String, _>("client_type")?.as_str()))?;
+    tracing::info!(
+        %transaction_id,
+        %provider,
+        client = client.as_str(),
+        "OAuth provider callback claimed"
+    );
     let return_uri: String = row.try_get("redirect_uri")?;
     let context: Value = row.try_get("context_json")?;
     if let Some(error) = provider_error {
+        tracing::warn!(
+            %transaction_id,
+            %provider,
+            client = client.as_str(),
+            provider_error = %error_code(&error),
+            "OAuth provider returned an error"
+        );
         let _ = sqlx::query("UPDATE auth_transactions SET status = 'failed', updated_at = NOW() WHERE transaction_id = $1 AND status = 'consumed'")
             .bind(&transaction_id).execute(&state.db).await;
         return Ok(oauth_return_redirect(
@@ -393,6 +413,12 @@ async fn complete_callback(
     .bind(crypto::sha256_hex(&handoff))
     .execute(&state.db)
     .await?;
+    tracing::info!(
+        %transaction_id,
+        %provider,
+        client = client.as_str(),
+        "OAuth provider callback verified; awaiting handoff"
+    );
     let target = context["return_uri"].as_str().unwrap_or(&return_uri);
     Ok(oauth_return_redirect(target, "code", &handoff).into_response())
 }
@@ -759,16 +785,31 @@ pub async fn handoff(
         .map(|value| auth_sessions::ClientType::parse(Some(value)))
         .transpose()?;
     let mut tx = state.db.begin().await?;
-    let row = sqlx::query("UPDATE auth_transactions SET status = 'consumed', consumed_at = NOW(), updated_at = NOW() WHERE handoff_code_hash = $1 AND status = 'verified' AND consumed_at IS NULL AND expires_at > NOW() AND ($2::VARCHAR IS NULL OR client_type = $2) RETURNING user_id, client_type, context_json")
+    let row = sqlx::query("UPDATE auth_transactions SET status = 'consumed', consumed_at = NOW(), updated_at = NOW() WHERE handoff_code_hash = $1 AND status = 'verified' AND consumed_at IS NULL AND expires_at > NOW() AND ($2::VARCHAR IS NULL OR client_type = $2) RETURNING transaction_id, user_id, client_type, context_json")
         .bind(crypto::sha256_hex(&body.code))
         .bind(requested_client.map(|client| client.as_str()))
-        .fetch_optional(&mut *tx).await?.ok_or_else(|| AppError::Unauthorized("handoff code is invalid, expired, already used, or belongs to another client".into()))?;
+        .fetch_optional(&mut *tx).await?;
+    let Some(row) = row else {
+        tracing::warn!(
+            requested_client = requested_client.map(|client| client.as_str()),
+            "OAuth handoff rejected"
+        );
+        return Err(AppError::Unauthorized(
+            "handoff code is invalid, expired, already used, or belongs to another client".into(),
+        ));
+    };
     tx.commit().await?;
+    let transaction_id: String = row.try_get("transaction_id")?;
     let user_id: String = row.try_get("user_id")?;
     let stored_client: String = row.try_get("client_type")?;
     let client = requested_client.unwrap_or(auth_sessions::ClientType::parse(Some(
         stored_client.as_str(),
     ))?);
+    tracing::info!(
+        %transaction_id,
+        client = client.as_str(),
+        "OAuth handoff accepted"
+    );
     let context: Value = row.try_get("context_json")?;
     let user = auth_domain::load_auth_user(&state.db, &user_id).await?;
     let presented =
@@ -789,6 +830,11 @@ pub async fn handoff(
             &user_id,
         )
         .await?;
+        tracing::info!(
+            %transaction_id,
+            client = client.as_str(),
+            "OAuth handoff requires a second factor"
+        );
         return Ok(Json(json!({
             "status": "factor_required",
             "transaction_id": factor.transaction_id,
@@ -809,6 +855,11 @@ pub async fn handoff(
     let refresh = session.refresh_token.clone();
     let csrf = session.csrf_token.clone();
     let response = auth::session_response(&user, session, client)?;
+    tracing::info!(
+        %transaction_id,
+        client = client.as_str(),
+        "OAuth login finalized"
+    );
     Ok(if client == auth_sessions::ClientType::Web {
         auth::response_with_session_cookies(response, Some(&refresh), Some(&csrf))
     } else {
