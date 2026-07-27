@@ -131,11 +131,9 @@ docker compose up -d
 ```
 
 - UI: `http://localhost` · API: `http://localhost:8000` · health: `/health`
-- The optional agent bot is behind a Compose profile:
-  `docker compose --profile bot up -d opencode-bot`.
 - Production HTTPS via Caddy: add `-f docker-compose.production.tls.yml`.
 
-**Full walkthrough** (JWT, provider/API key, bot token, TLS, operations,
+**Full walkthrough** (JWT, TLS, operations,
 troubleshooting): [docker-compose-deploy.md](docker-compose-deploy.md) /
 [中文](docker-compose-deploy.zh-CN.md).
 

@@ -92,7 +92,7 @@ helm upgrade --install cheers deploy/helm/cheers -n cheers --create-namespace \
   --set-file secrets.jwtPublicKey=/tmp/jwt_pub.pem
 ```
 
-The bot image (`cheers/codex-bot` / `cheers/opencode-bot`) is **not** published
+The bot image (`cheers/codex-bot`) is **not** published
 to GHCR — build it locally if you enable `bot.enabled`.
 
 ## Production

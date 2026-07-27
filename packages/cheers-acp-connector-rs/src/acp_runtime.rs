@@ -326,32 +326,10 @@ impl RuntimeAdapter for RuntimeAcpAdapter {
                 .unwrap_or("unknown"),
             "initialized ACP agent (runtime transport)"
         );
-        if let Some(method) = preferred_auth_method(&response, &self.config.env) {
-            tracing::info!(
-                account = %self.account_id,
-                method_id = %method.id,
-                "ACP agent requires authenticate; calling it"
-            );
-            if let Err(e) = self
-                .request(
-                    "authenticate",
-                    json!({ "methodId": method.id }),
-                    self.request_timeout_ms(),
-                )
-                .await
-            {
-                let _ = self.stop().await;
-                let hint = method
-                    .description
-                    .as_deref()
-                    .or(method.name.as_deref())
-                    .unwrap_or(method.id.as_str());
-                return Err(anyhow::anyhow!(
-                    "ACP authenticate({}) failed: {e}. Complete agent auth: {hint}",
-                    method.id
-                ));
-            }
-        }
+        // Advertising authMethods does not mean the agent needs to authenticate
+        // now. Existing Codex/Claude subscription sessions are loaded by the
+        // agent itself. Defer authenticate until session/new explicitly returns
+        // an authentication error, which RuntimeContext already recovers.
         self.initialize_response = Some(response.clone());
         Ok(response)
     }
