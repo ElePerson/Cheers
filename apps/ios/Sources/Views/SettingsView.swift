@@ -16,6 +16,8 @@ struct SettingsView: View {
     @State private var showDeleteAccount = false
     @State private var showWorkspaceAdmin = false
     @State private var showAccountSessions = false
+    @State private var showProfileEdit = false
+    @State private var showSwitchServerConfirm = false
 
     var body: some View {
         List {
@@ -39,6 +41,17 @@ struct SettingsView: View {
         } message: {
             Text("This revokes your sessions on this server.")
         }
+        .confirmationDialog(
+            "Switch server?",
+            isPresented: $showSwitchServerConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Switch server", role: .destructive) {
+                app.switchServer()
+            }
+        } message: {
+            Text("Signs you out and lets you pick a different server URL on the next login.")
+        }
         .sheet(isPresented: $showChangePassword) {
             ChangePasswordSheet()
         }
@@ -58,6 +71,7 @@ struct SettingsView: View {
             }
         }
         .sheet(isPresented: $showAccountSessions) { AccountSessionsSheet() }
+        .sheet(isPresented: $showProfileEdit) { ProfileEditSheet() }
     }
 
     private var displayName: String {
@@ -68,27 +82,29 @@ struct SettingsView: View {
 
     private var profileSection: some View {
         Section {
-            HStack(spacing: 14) {
-                AvatarView(seedId: app.session?.userId ?? "?", name: displayName, size: 52)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    if let username = app.session?.username {
-                        Text(username)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.textMuted)
+            Button { showProfileEdit = true } label: {
+                HStack(spacing: 14) {
+                    AvatarView(seedId: app.session?.userId ?? "?", name: displayName, size: 52)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(displayName)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        if let username = app.session?.username {
+                            Text(username)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        Text("Edit profile")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.accent)
                     }
-                    Text(app.session?.role ?? "member")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.botBadgeText)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Theme.botBadgeBg)
-                        .clipShape(Capsule())
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.textFaint)
                 }
+                .padding(.vertical, 4)
             }
-            .padding(.vertical, 4)
             .listRowBackground(Theme.bgSurface)
 
             LabeledContent {
@@ -136,10 +152,16 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.textMuted)
             }
             .listRowBackground(Theme.bgSurface)
+
+            Button { showSwitchServerConfirm = true } label: {
+                Text("Switch server")
+                    .foregroundStyle(Theme.accent)
+            }
+            .listRowBackground(Theme.bgSurface)
         } header: {
             sectionHeader("Server")
         } footer: {
-            Text("To switch servers, sign out and sign back in with a different server URL.")
+            Text("Switching servers signs you out. Tokens belong to one server.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textFaint)
         }
@@ -232,8 +254,20 @@ struct SettingsView: View {
             }
             .listRowBackground(Theme.bgSurface)
 
+            Link(destination: AppModel.termsURL) {
+                Label("Terms", systemImage: "doc.text")
+                    .foregroundStyle(Theme.textBody)
+            }
+            .listRowBackground(Theme.bgSurface)
+
             Link(destination: AppModel.supportURL) {
                 Label("Help & Support", systemImage: "questionmark.circle")
+                    .foregroundStyle(Theme.textBody)
+            }
+            .listRowBackground(Theme.bgSurface)
+
+            Link(destination: AppModel.accountDeletionURL) {
+                Label("Account deletion", systemImage: "person.crop.circle.badge.minus")
                     .foregroundStyle(Theme.textBody)
             }
             .listRowBackground(Theme.bgSurface)
@@ -261,6 +295,89 @@ struct SettingsView: View {
         Task {
             await app.logout()
             isSigningOut = false
+        }
+    }
+}
+
+// MARK: - Profile edit
+
+private struct ProfileEditSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var displayName = ""
+    @State private var statusEmoji = ""
+    @State private var statusText = ""
+    @State private var bio = ""
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if isLoading {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else {
+                    Section {
+                        TextField("Display name", text: $displayName)
+                        TextField("Status emoji", text: $statusEmoji)
+                            .textInputAutocapitalization(.never)
+                        TextField("Status text", text: $statusText)
+                        TextField("Bio", text: $bio, axis: .vertical)
+                            .lineLimit(3...6)
+                    }
+                    if let errorText {
+                        Section {
+                            Text(errorText).foregroundStyle(Theme.danger)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Edit profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(isLoading || isSaving)
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let me = try await app.api?.getMe()
+            displayName = me?.displayName ?? app.session?.displayName ?? ""
+            statusEmoji = me?.statusEmoji ?? ""
+            statusText = me?.statusText ?? ""
+            bio = me?.bio ?? ""
+        } catch {
+            errorText = error.localizedDescription
+            displayName = app.session?.displayName ?? ""
+        }
+    }
+
+    private func save() async {
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            let me = try await app.api?.updateMe(
+                displayName: displayName,
+                bio: bio,
+                statusText: statusText,
+                statusEmoji: statusEmoji
+            )
+            app.applyProfileDisplayName(me?.displayName ?? displayName)
+            dismiss()
+        } catch {
+            errorText = error.localizedDescription
         }
     }
 }
@@ -596,7 +713,7 @@ private struct AIConsentSettingsSheet: View {
 
 // MARK: - Workspace administration
 
-private struct WorkspaceAdminSheet: View {
+struct WorkspaceAdminSheet: View {
     private enum Confirmation: Identifiable {
         case remove(WorkspaceMemberDto), leave, delete
         var id: String {

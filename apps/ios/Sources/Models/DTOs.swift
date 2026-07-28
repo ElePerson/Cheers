@@ -460,6 +460,28 @@ struct StoredAIConsent: Decodable, Identifiable {
     }
 }
 
+struct MeProfileDto: Decodable {
+    let userId: String
+    let username: String
+    let displayName: String?
+    let role: String?
+    let avatarURL: String?
+    let bio: String?
+    let statusText: String?
+    let statusEmoji: String?
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case displayName = "display_name"
+        case role
+        case avatarURL = "avatar_url"
+        case bio
+        case statusText = "status_text"
+        case statusEmoji = "status_emoji"
+    }
+}
+
 struct BlockedUserDto: Decodable, Identifiable {
     let userId: String
     let username: String

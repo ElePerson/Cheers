@@ -49,7 +49,7 @@ E2EE、workbench/ViewBoard 体系、管理后台（跳转 Web）。
 | 维度 | 决策 | 理由 |
 | --- | --- | --- |
 | 代码库 | Expo (React Native)，`apps/mobile/`，TypeScript | 既定战略；iOS+Android 一份代码；React 团队 |
-| 导航模型 | 抽屉优先（Claude App 风格）：Chats 是唯一主界面；左侧抽屉承载工作区、频道及 Activity / Agents / 好友 / 设置入口 —— **无底部 Tab 栏** | 一个干净的聊天主面；全部导航收在一次边缘滑动之后 |
+| 导航模型 | 抽屉优先（Claude App 风格）：Chats 是唯一主界面；左侧抽屉承载工作区、频道及 Activity / Fleet / 好友 / 设置入口 —— **无底部 Tab 栏** | 一个干净的聊天主面；全部导航收在一次边缘滑动之后 |
 | 工作区切换 | Chats 左侧滑出抽屉（边缘滑动/菜单键）：顶部工作区条、中间频道列表、底部功能行 | Telegram/Claude App 抽屉模式；取代 Web 的左侧 rail；扁平 "All" 列表仍是主页 |
 | 移动端审批 | 内联紧凑卡 → 根级 Approval bottom sheet | 360pt 气泡里塞不下 radio；sheet 同时是推送深链落点 |
 | 推送传输 | **Expo Push Service**，Rust 侧 `PushTransport` trait 封装 | 唯一让自托管网关无需 APNs/FCM 凭据即有推送的方案 |
@@ -255,6 +255,11 @@ payload 最小化**：推送只带 `{type, channel_id, request_id?, deep_link}` 
 
 ### 7.1 导航
 
+> **跨端 IA 锁定：** 目的地与 Settings 嵌套见
+> [CLIENT_NAV_IA.zh-CN.md](./CLIENT_NAV_IA.zh-CN.md)（与 Mac/web 共享）。
+> 移动端保留抽屉呈现；主入口标签收敛为 **Activity · Fleet · Friends · Settings**
+> （主入口不用 “Agents” 这个名字 —— Fleet 为规范名）。
+
 ```
 Root（登录门）
 ├─ Login 栈
@@ -262,7 +267,7 @@ Root（登录门）
    └─ 左侧抽屉（边缘滑动 / 带角标的菜单键）— 唯一导航中枢
       ├─ 顶部：工作区条（All · Personal · <工作区> · +）
       ├─ 中间：所选工作区的频道与 DM
-      └─ 底部：Activity（收件箱，角标）· Agents（fleet）· 好友 ·
+      └─ 底部：Activity（收件箱，角标）· Fleet · 好友 ·
                个人资料与设置 · New chat
 根级 sheet：Approval · 新建聊天 · Session 选择 ·
             Model 选择 · 转发选择 · 附件查看器
@@ -271,8 +276,8 @@ Root（登录门）
 - **Chats 是 Telegram 模型**：跨工作区一张扁平列表（每行带小工作区 chip），
   含 DM —— `apps/ios` 已验证。Slack 的工作区优先层级为典型的 2–4 个工作区
   多加了一层导航。
-- **Activity ≠ Agents。** Activity 回答「什么在等*我*」（审批置顶 —— 它是
-  推送落点）；Agents 回答「我的 bot 在*做什么*」（可观测性）。合并会把批准
+- **Activity ≠ Fleet。** Activity 回答「什么在等*我*」（审批置顶 —— 它是
+  推送落点）；Fleet 回答「我的 bot 在*做什么*」（可观测性 + 创建/管理）。合并会把批准
   动作埋进监控界面。邀请并入 Activity —— 一个收件箱，不设独立通知铃铛。
 - **工作区切换 —— 左侧抽屉**（Telegram / Claude App 模式）：在 Chats 列表
   **从左边缘滑入**（或点头部菜单键）滑出抽屉覆盖列表，右侧残留内容压暗。
@@ -283,7 +288,7 @@ Root（登录门）
   2. **频道与 DM 列表**（所选工作区的），带未读/@ badge —— 点频道即关抽屉
      直达该聊天。选 `All` 则主列表显示跨工作区扁平收件箱。
   3. **底部导航与设置**，保持紧凑：一行并排 chip 承载剩余顶层入口
-     （**Activity** 带待审批角标、**Agents**、**好友**），其下窄页脚放
+     （**Activity** 带待审批角标、**Fleet**、**好友**），其下窄页脚放
      个人头像、设置和醒目的 **New chat** 按钮。
   主界面**没有底部 Tab 栏、没有悬浮按钮** —— 抽屉是 App 唯一的导航中枢，
   同时取代 Web 的 rail 和常规移动端 Tab。主 Chats 列表保持跨工作区扁平

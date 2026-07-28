@@ -1,42 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Radar, Inbox, RefreshCw, Bot as BotIcon } from "lucide-react";
+import { ArrowLeft, Radar, Inbox, RefreshCw, Bot as BotIcon, Wand2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Avatar } from "@/components/ui/avatar";
 import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SurfaceSpinner } from "@/components/ui/spinner";
+import { Button } from "@/components/ui/button";
 import { getFleet, type FleetApproval, type FleetBot } from "@/api/fleet";
 import { listWorkspaces, getPersonalWorkspace } from "@/api/workspaces";
 import { useFleetLive } from "./useFleetLive";
-import { PermissionCard } from "@/features/chat/PermissionCard";
 import { useChatStore } from "@/stores/chatStore";
-import { useAuthStore } from "@/stores/authStore";
-import type { Message } from "@/types";
+import { useActivityUiStore } from "@/stores/activityUiStore";
+import { BotOnboardingWizard } from "@/features/bots/BotOnboardingWizard";
 
-// Fleet view (docs/design/FLEET_VIEW.md): the workspace-level mission control.
-// Zone A answers "who is waiting on me?" (the caller's approval inbox);
-// Zone B answers "what is my fleet doing?" (bot roster with live status/cost).
+// Fleet view: workspace bot roster + create/manage.
+// Approvals live in Activity (`docs/arch/CLIENT_NAV_IA.md`); this page deep-links.
 
 const POLL_MS = 30_000;
 
 /** DM channels have empty names — render a readable label instead of "#". */
 function channelLabel(name: string): string {
   return name.trim() ? `#${name}` : "Direct message";
-}
-
-/** Wrap a fleet approval as the Message shape PermissionCard renders. */
-function toCardMessage(a: FleetApproval, botName?: string): Message {
-  return {
-    msg_id: a.message_id,
-    sender_id: a.bot_id,
-    sender_type: "bot",
-    sender_name: botName,
-    content: "",
-    created_at: a.created_at,
-    msg_type: "permission",
-    content_data: a.content_data,
-  };
 }
 
 function StatusChip({ bot }: { bot: FleetBot }) {
@@ -115,7 +100,7 @@ function BotRow({ bot }: { bot: FleetBot }) {
 
 export default function FleetPage() {
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const requestActivityOpen = useActivityUiStore((s) => s.requestOpen);
   const {
     workspaces,
     personalWorkspace,
@@ -149,6 +134,7 @@ export default function FleetPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const refresh = useCallback(async (workspaceId: string, quiet = false) => {
     if (!quiet) setRefreshing(true);
@@ -190,14 +176,7 @@ export default function FleetPage() {
     if (activeWsId) refresh(activeWsId, true);
   });
 
-  const botName = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const b of bots) m.set(b.bot_id, b.bot_name);
-    return m;
-  }, [bots]);
-
-  const actionable = approvals.filter((a) => a.actionable);
-  const watchOnly = approvals.filter((a) => !a.actionable);
+  const actionableCount = approvals.filter((a) => a.actionable).length;
 
   const botsByChannel = useMemo(() => {
     const groups = new Map<string, { name: string; bots: FleetBot[] }>();
@@ -235,6 +214,10 @@ export default function FleetPage() {
         <Radar className="w-4 h-4 text-indigo-400" />
         <h1 className="text-lg font-semibold">Fleet</h1>
         <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" onClick={() => setWizardOpen(true)}>
+            <Wand2 className="w-3.5 h-3.5" />
+            Add bot
+          </Button>
           {wsOptions.length > 1 && (
             <Select
               value={activeWsId ?? ""}
@@ -273,59 +256,24 @@ export default function FleetPage() {
                 </p>
               )}
 
-              {/* ── Zone A: approvals ─────────────────────────────────── */}
-              <section>
-                <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
-                  Waiting on you
-                </h2>
-                {actionable.length === 0 ? (
-                  <EmptyState
-                    icon={Inbox}
-                    title="No approvals waiting"
-                    hint="When an agent asks for permission, it lands here."
-                  />
-                ) : (
-                  <ul className="space-y-3">
-                    {actionable.map((a) => (
-                      <li key={a.message_id}>
-                        <p className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
-                          {channelLabel(a.channel_name)}
-                        </p>
-                        <PermissionCard
-                          message={toCardMessage(a, botName.get(a.bot_id))}
-                          channelId={a.channel_id}
-                          currentUserId={user?.user_id}
-                          approverOverride
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {watchOnly.length > 0 && (
-                  <div className="mt-5">
-                    <h3 className="text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
-                      Pending in your channels (not yours to answer)
-                    </h3>
-                    <ul className="space-y-2">
-                      {watchOnly.map((a) => (
-                        <li key={a.message_id}>
-                          <p className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
-                            {channelLabel(a.channel_name)}
-                          </p>
-                          <PermissionCard
-                            message={toCardMessage(a, botName.get(a.bot_id))}
-                            channelId={a.channel_id}
-                            currentUserId={user?.user_id}
-                            approverOverride={false}
-                          />
-                        </li>
-                      ))}
-                    </ul>
+              {/* Approvals moved to Activity — compact deep link only. */}
+              {actionableCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => requestActivityOpen()}
+                  className="w-full flex items-center gap-3 rounded-xl border border-amber-900/50 bg-amber-950/30 px-4 py-3 text-left hover:bg-amber-950/50 transition-colors"
+                >
+                  <Inbox className="w-4 h-4 text-amber-300 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-zinc-100">
+                      {actionableCount} waiting on you
+                    </p>
+                    <p className="text-xs text-zinc-400">Review in Activity</p>
                   </div>
-                )}
-              </section>
+                </button>
+              )}
 
-              {/* ── Zone B: bot roster ────────────────────────────────── */}
+              {/* ── Bot roster ──────────────────────────────────────── */}
               <section>
                 <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
                   Bots
@@ -334,7 +282,7 @@ export default function FleetPage() {
                   <EmptyState
                     icon={BotIcon}
                     title="No bots in this workspace"
-                    hint="Add a bot to a channel and it shows up here."
+                    hint="Add a bot here, then connect it on the machine that will run it."
                   />
                 ) : (
                   <div className="space-y-5">
@@ -357,6 +305,16 @@ export default function FleetPage() {
           )}
         </div>
       </div>
+
+      {wizardOpen && (
+        <BotOnboardingWizard
+          bots={[]}
+          onClose={() => setWizardOpen(false)}
+          onDone={() => {
+            if (activeWsId) void refresh(activeWsId);
+          }}
+        />
+      )}
     </div>
   );
 }

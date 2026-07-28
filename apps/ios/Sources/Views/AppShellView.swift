@@ -159,8 +159,8 @@ struct AppShellView: View {
     @ViewBuilder
     private func destination(for route: Route) -> some View {
         switch route {
-        case .notifications:
-            NotificationsView(activity: activity)
+        case .activity:
+            ActivityView(activity: activity)
         case .fleet:
             FleetView(activity: activity)
         case .friends:

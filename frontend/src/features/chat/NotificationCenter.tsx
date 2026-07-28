@@ -1,11 +1,13 @@
-import { useState } from "react";
-import { Bell } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bell, Shield } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import toast from "react-hot-toast";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useNotificationStore } from "@/stores/notificationStore";
+import { useActivityUiStore } from "@/stores/activityUiStore";
 import { useChatStore } from "@/stores/chatStore";
+import { useAuthStore } from "@/stores/authStore";
 import { listWorkspaces } from "@/api/workspaces";
 import { listChannels, listDms } from "@/api/channels";
 import {
@@ -14,9 +16,10 @@ import {
   notificationKey,
   type NotificationItem,
 } from "@/api/notifications";
+import { getFleet, getFleetBadge, type FleetApproval } from "@/api/fleet";
+import { PermissionCard } from "@/features/chat/PermissionCard";
+import type { Message } from "@/types";
 
-// After accepting an invite the rail (workspaces) and the sidebar (channels of the
-// selected workspace) can both change, so re-pull them the same way ChatLayout does.
 async function refreshLists() {
   try {
     useChatStore.getState().setWorkspaces(await listWorkspaces());
@@ -43,13 +46,68 @@ function label(n: NotificationItem): string {
   return n.kind === "channel_invite" ? `#${n.title}` : n.title;
 }
 
-/** Bell button + dropdown inbox of pending invitations (workspace + channel). */
-export function NotificationCenter() {
-  const [open, setOpen] = useState(false);
+function toCardMessage(a: FleetApproval, botName?: string): Message {
+  return {
+    msg_id: a.message_id,
+    sender_id: a.bot_id,
+    sender_type: "bot",
+    sender_name: botName,
+    content: "",
+    created_at: a.created_at,
+    msg_type: "permission",
+    content_data: a.content_data,
+  };
+}
+
+/** Activity rail control — approvals + invites (`docs/arch/CLIENT_NAV_IA.md`). */
+export function ActivityCenter() {
+  const open = useActivityUiStore((s) => s.open);
+  const setOpen = useActivityUiStore((s) => s.setOpen);
   const [busy, setBusy] = useState<string | null>(null);
+  const [approvals, setApprovals] = useState<FleetApproval[]>([]);
+  const [approvalCount, setApprovalCount] = useState(0);
   const items = useNotificationStore((s) => s.items);
   const remove = useNotificationStore((s) => s.remove);
-  const count = items.length;
+  const selectedWorkspaceId = useChatStore((s) => s.selectedWorkspaceId);
+  const user = useAuthStore((s) => s.user);
+  const inviteCount = items.length;
+  const badge = inviteCount + approvalCount;
+
+  useEffect(() => {
+    let alive = true;
+    const loadBadge = () =>
+      getFleetBadge()
+        .then((r) => alive && setApprovalCount(r.count))
+        .catch(() => {});
+    loadBadge();
+    const t = window.setInterval(loadBadge, 60_000);
+    window.addEventListener("focus", loadBadge);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+      window.removeEventListener("focus", loadBadge);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!open || !selectedWorkspaceId) {
+      if (open && !selectedWorkspaceId) setApprovals([]);
+      return;
+    }
+    let alive = true;
+    void getFleet(selectedWorkspaceId)
+      .then((res) => {
+        if (!alive) return;
+        setApprovals(res.approvals.filter((a) => a.actionable));
+        setApprovalCount(res.approvals.filter((a) => a.actionable).length);
+      })
+      .catch(() => {
+        if (alive) setApprovals([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, selectedWorkspaceId]);
 
   async function act(n: NotificationItem, accept: boolean) {
     const key = notificationKey(n);
@@ -67,71 +125,112 @@ export function NotificationCenter() {
     }
   }
 
+  const empty = approvals.length === 0 && items.length === 0;
+
   return (
     <>
       <button
         onClick={() => setOpen(true)}
-        title="Notifications"
+        title="Activity — approvals & invites"
         className="relative w-8 h-8 max-md:w-11 max-md:h-11 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 flex items-center justify-center transition-colors"
       >
         <Bell className="w-4 h-4" />
-        {count > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">
-            {count}
+        {badge > 0 && (
+          <span
+            className={`absolute -top-0.5 -right-0.5 min-w-[18px] px-1.5 py-0.5 rounded-full text-white text-[10px] font-bold flex items-center justify-center ${
+              approvalCount > 0 ? "bg-amber-600" : "bg-indigo-600"
+            }`}
+          >
+            {badge}
           </span>
         )}
       </button>
 
       {open && (
-        <Dialog title="Notifications" onClose={() => setOpen(false)}>
-          <div className="space-y-2">
-            {items.length === 0 && (
+        <Dialog title="Activity" onClose={() => setOpen(false)}>
+          <div className="space-y-5">
+            {empty && (
               <EmptyState
                 icon={Bell}
-                title="No notifications"
-                hint="Channel invites and alerts appear here."
+                title="Nothing waiting"
+                hint="Approvals and channel invites appear here."
               />
             )}
-            {items.map((n) => {
-              const key = notificationKey(n);
-              return (
-                <div
-                  key={key}
-                  className="flex items-center gap-3 rounded-lg bg-zinc-800/40 px-3 py-2"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-zinc-200 truncate">
-                      {n.kind === "channel_invite"
-                        ? "Channel invite"
-                        : "Workspace invite"}{" "}
-                      · {label(n)}
-                    </p>
-                    <p className="text-[11px] text-zinc-400">
-                      Role {n.role}
-                      {n.invited_by ? ` · from ${n.invited_by}` : ""}
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    loading={busy === key}
-                    onClick={() => void act(n, true)}
-                  >
-                    Accept
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy === key}
-                    onClick={() => void act(n, false)}
-                  >
-                    Decline
-                  </Button>
-                </div>
-              );
-            })}
+
+            {approvals.length > 0 && (
+              <section className="space-y-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                  <Shield className="w-3 h-3 text-amber-400" />
+                  Needs approval
+                </h3>
+                <ul className="space-y-3">
+                  {approvals.map((a) => (
+                    <li key={a.message_id}>
+                      <p className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
+                        {a.channel_name.trim() ? `#${a.channel_name}` : "Direct message"}
+                      </p>
+                      <PermissionCard
+                        message={toCardMessage(a)}
+                        channelId={a.channel_id}
+                        currentUserId={user?.user_id}
+                        approverOverride
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {items.length > 0 && (
+              <section className="space-y-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                  Invites
+                </h3>
+                {items.map((n) => {
+                  const key = notificationKey(n);
+                  return (
+                    <div
+                      key={key}
+                      className="flex items-center gap-3 rounded-lg bg-zinc-800/40 px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-zinc-200 truncate">
+                          {n.kind === "channel_invite"
+                            ? "Channel invite"
+                            : "Workspace invite"}{" "}
+                          · {label(n)}
+                        </p>
+                        <p className="text-[11px] text-zinc-400">
+                          Role {n.role}
+                          {n.invited_by ? ` · from ${n.invited_by}` : ""}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        loading={busy === key}
+                        onClick={() => void act(n, true)}
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy === key}
+                        onClick={() => void act(n, false)}
+                      >
+                        Decline
+                      </Button>
+                    </div>
+                  );
+                })}
+              </section>
+            )}
           </div>
         </Dialog>
       )}
     </>
   );
 }
+
+/** @deprecated Use ActivityCenter — kept for any stray imports. */
+export const NotificationCenter = ActivityCenter;

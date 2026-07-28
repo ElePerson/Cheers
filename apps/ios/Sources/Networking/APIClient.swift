@@ -406,6 +406,50 @@ struct APIClient: Sendable {
         try await getJSON("/users/me/ai-consents", as: [StoredAIConsent].self)
     }
 
+    func getMe() async throws -> MeProfileDto {
+        try await getJSON("/users/me", as: MeProfileDto.self)
+    }
+
+    func updateMe(
+        displayName: String?,
+        bio: String?,
+        statusText: String?,
+        statusEmoji: String?
+    ) async throws -> MeProfileDto {
+        struct Body: Encodable {
+            let displayName: String?
+            let bio: String?
+            let statusText: String?
+            let statusEmoji: String?
+            enum CodingKeys: String, CodingKey {
+                case displayName = "display_name"
+                case bio
+                case statusText = "status_text"
+                case statusEmoji = "status_emoji"
+            }
+        }
+        return try await patchJSON(
+            "/users/me",
+            body: Body(
+                displayName: displayName,
+                bio: bio,
+                statusText: statusText,
+                statusEmoji: statusEmoji
+            ),
+            as: MeProfileDto.self
+        )
+    }
+
+    func uploadUserAvatar(data: Data, contentType: String) async throws -> String {
+        struct Resp: Decodable {
+            let avatarURL: String
+            enum CodingKeys: String, CodingKey { case avatarURL = "avatar_url" }
+        }
+        var request = try makeRequest("POST", "/users/me/avatar", body: data)
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        return try decode(Resp.self, from: try await send(request)).avatarURL
+    }
+
     func grantAIConsent(channelId: String, disclosure: AIDataDisclosure) async throws {
         _ = try await postJSON(
             "/channels/\(channelId)/bots/\(disclosure.botId)/ai-consent",
