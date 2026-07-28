@@ -532,6 +532,9 @@ function ExternalIdentitiesCard() {
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't start Google link");
+    } finally {
+      // Tauri opens an external browser and returns immediately; clear busy so
+      // canceling OAuth doesn't leave the control stuck on “Opening…”.
       setBusy(null);
     }
   }

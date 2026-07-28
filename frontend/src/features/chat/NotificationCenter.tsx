@@ -59,6 +59,18 @@ function toCardMessage(a: FleetApproval, botName?: string): Message {
   };
 }
 
+function workspaceIdsFromStore(): string[] {
+  const { workspaces, personalWorkspace } = useChatStore.getState();
+  const ids = workspaces.map((w) => w.workspace_id);
+  if (
+    personalWorkspace &&
+    !ids.includes(personalWorkspace.workspace_id)
+  ) {
+    ids.unshift(personalWorkspace.workspace_id);
+  }
+  return [...new Set(ids)];
+}
+
 /** Activity rail control — approvals + invites (`docs/arch/CLIENT_NAV_IA.md`). */
 export function ActivityCenter() {
   const open = useActivityUiStore((s) => s.open);
@@ -68,10 +80,16 @@ export function ActivityCenter() {
   const [approvalCount, setApprovalCount] = useState(0);
   const items = useNotificationStore((s) => s.items);
   const remove = useNotificationStore((s) => s.remove);
-  const selectedWorkspaceId = useChatStore((s) => s.selectedWorkspaceId);
+  const workspaces = useChatStore((s) => s.workspaces);
+  const personalWorkspace = useChatStore((s) => s.personalWorkspace);
   const user = useAuthStore((s) => s.user);
   const inviteCount = items.length;
   const badge = inviteCount + approvalCount;
+
+  const refreshBadge = () =>
+    getFleetBadge()
+      .then((r) => setApprovalCount(r.count))
+      .catch(() => {});
 
   useEffect(() => {
     let alive = true;
@@ -89,25 +107,40 @@ export function ActivityCenter() {
     };
   }, []);
 
+  // Load actionable approvals across every workspace the caller can see —
+  // the badge is global (`/fleet/badge`), so the dialog must match.
   useEffect(() => {
-    if (!open || !selectedWorkspaceId) {
-      if (open && !selectedWorkspaceId) setApprovals([]);
+    if (!open) return;
+    let alive = true;
+    const ids = workspaceIdsFromStore();
+    if (ids.length === 0) {
+      setApprovals([]);
       return;
     }
-    let alive = true;
-    void getFleet(selectedWorkspaceId)
-      .then((res) => {
-        if (!alive) return;
-        setApprovals(res.approvals.filter((a) => a.actionable));
-        setApprovalCount(res.approvals.filter((a) => a.actionable).length);
-      })
-      .catch(() => {
-        if (alive) setApprovals([]);
-      });
+    void Promise.all(
+      ids.map((id) =>
+        getFleet(id).catch(() => ({ approvals: [] as FleetApproval[], bots: [] }))
+      )
+    ).then((results) => {
+      if (!alive) return;
+      const seen = new Set<string>();
+      const merged: FleetApproval[] = [];
+      for (const res of results) {
+        for (const a of res.approvals) {
+          if (!a.actionable || seen.has(a.message_id)) continue;
+          seen.add(a.message_id);
+          merged.push(a);
+        }
+      }
+      setApprovals(merged);
+      // Keep the rail badge on the global count — never overwrite it with a
+      // per-workspace slice.
+      void refreshBadge();
+    });
     return () => {
       alive = false;
     };
-  }, [open, selectedWorkspaceId]);
+  }, [open, workspaces, personalWorkspace]);
 
   async function act(n: NotificationItem, accept: boolean) {
     const key = notificationKey(n);

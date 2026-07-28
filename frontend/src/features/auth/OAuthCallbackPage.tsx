@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { exchangeOAuthHandoff } from "@/api/auth";
 import { errorMessage } from "@/api/client";
@@ -9,11 +9,15 @@ export default function OAuthCallbackPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
-  const token = useAuthStore((state) => state.token);
   const [error, setError] = useState<string | null>(null);
   const [linkedMessage, setLinkedMessage] = useState<string | null>(null);
+  // One-shot: setAuth updates the store while `code` is still in the URL, which
+  // would re-fire this effect and burn the already-consumed handoff.
+  const handledRef = useRef(false);
 
   useEffect(() => {
+    if (handledRef.current) return;
+
     const providerError = params.get("error");
     const linked = params.get("linked");
     const code = params.get("code");
@@ -21,6 +25,7 @@ export default function OAuthCallbackPage() {
     // In-session provider link (Settings → Google) returns `linked=google`
     // instead of a login handoff code.
     if (linked) {
+      handledRef.current = true;
       const label = linked === "google" ? "Google" : linked;
       setLinkedMessage(`${label} linked to your account.`);
       const redirect =
@@ -38,6 +43,7 @@ export default function OAuthCallbackPage() {
     }
 
     if (providerError || !code) {
+      handledRef.current = true;
       setError(
         providerError === "access_denied"
           ? "Sign-in was cancelled."
@@ -45,6 +51,8 @@ export default function OAuthCallbackPage() {
       );
       return;
     }
+
+    handledRef.current = true;
     void exchangeOAuthHandoff(code)
       .then((outcome) => {
         if (outcome.status === "factor_required" || outcome.requires_2fa) {
@@ -69,7 +77,7 @@ export default function OAuthCallbackPage() {
         navigate(redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/chat", { replace: true });
       })
       .catch((reason) => setError(errorMessage(reason, "Sign-in failed")));
-  }, [navigate, params, setAuth, token]);
+  }, [navigate, params, setAuth]);
 
   return (
     <div className="h-full bg-zinc-950 flex items-center justify-center p-6 text-zinc-100">

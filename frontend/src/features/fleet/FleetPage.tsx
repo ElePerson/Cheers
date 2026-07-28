@@ -335,7 +335,12 @@ export default function FleetPage() {
               {actionableCount > 0 && (
                 <button
                   type="button"
-                  onClick={() => requestActivityOpen()}
+                  onClick={() => {
+                    // ActivityCenter lives in the chat shell rail — open the
+                    // dialog via the shared store, then land on /chat so it mounts.
+                    requestActivityOpen();
+                    navigate("/chat");
+                  }}
                   className="w-full flex items-center gap-3 rounded-xl border border-amber-900/50 bg-amber-950/30 px-4 py-3 text-left hover:bg-amber-950/50 transition-colors"
                 >
                   <Inbox className="w-4 h-4 text-amber-300 shrink-0" />

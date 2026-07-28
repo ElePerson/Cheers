@@ -308,7 +308,8 @@ pub async fn link_start(
     let provider = provider_name(&provider_path)?;
     if provider != "google" {
         return Err(AppError::BadRequest(
-            "only Google supports in-session OAuth linking; use Sign in with Apple for Apple".into(),
+            "only Google supports in-session OAuth linking; use Sign in with Apple for Apple"
+                .into(),
         ));
     }
     auth_sessions::require_recent_auth(&state.db, &claims.sub, &claims.sid).await?;
@@ -320,7 +321,9 @@ pub async fn link_start(
     .fetch_optional(&state.db)
     .await?;
     if linked.is_some() {
-        return Err(AppError::Conflict("Google is already linked to this account".into()));
+        return Err(AppError::Conflict(
+            "Google is already linked to this account".into(),
+        ));
     }
 
     let client = auth_sessions::ClientType::parse(body.client.as_deref())?;
