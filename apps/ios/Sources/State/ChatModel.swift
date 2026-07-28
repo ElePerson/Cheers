@@ -379,14 +379,19 @@ final class ChatModel {
         let interval = chatPerformanceSignposter.beginInterval("SendMessage")
         defer { chatPerformanceSignposter.endInterval("SendMessage", interval) }
         if let draft { composerText = draft }
-        let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (!text.isEmpty || !pendingFiles.isEmpty), !isSending, let api = app?.api else { return false }
+        let typed = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Gateway requires non-empty content; fall back to attachment names (web parity).
+        guard let content = ComposerAttachmentSupport.messageContent(
+            draft: typed,
+            filenames: pendingFiles.map { $0.originalFilename ?? "file" }
+        ), !isSending, let api = app?.api else { return false }
         isSending = true
         defer { isSending = false }
-        // Only keep mentions whose "@label" token still survives in the text,
-        // then split them: real members → mention_ids, group tokens →
-        // mention_names (the server expands @all/@bots/… into members).
-        let survivors = pickedMentions.filter { text.contains("@\($0.label)") }
+        // Only keep mentions whose "@label" token still survives in the *typed*
+        // draft (not the filename fallback), then split them: real members →
+        // mention_ids, group tokens → mention_names (the server expands
+        // @all/@bots/… into members).
+        let survivors = pickedMentions.filter { typed.contains("@\($0.label)") }
         var seen = Set<String>()
         let ids = survivors.filter { $0.kind != .group && seen.insert($0.id).inserted }.map(\.id)
         seen.removeAll()
@@ -395,7 +400,7 @@ final class ChatModel {
             let sent = try await api.sendMessage(
                 channelId: channel.channelId,
                 SendMessageRequest(
-                    content: text,
+                    content: content,
                     replyToMsgId: replyTo?.msgId,
                     fileIds: pendingFiles.isEmpty ? nil : pendingFiles.map(\.fileId),
                     mentionIds: ids.isEmpty ? nil : ids,

@@ -18,6 +18,9 @@ struct ComposerView: View {
     let onStopStreaming: () async -> Void
     let channelId: String
     let api: APIClient?
+    /// True when ChatView has pending uploaded files (or context) ready to send
+    /// with an empty draft — enables the send button for attachment-only messages.
+    let hasPendingAttachments: Bool
     var onChooseSession: () -> Void = {}
     var onModelSettings: () -> Void = {}
     var onUploadFile: () -> Void = {}
@@ -41,6 +44,7 @@ struct ComposerView: View {
         onStopStreaming: @escaping () async -> Void = {},
         channelId: String,
         api: APIClient?,
+        hasPendingAttachments: Bool = false,
         onChooseSession: @escaping () -> Void = {},
         onModelSettings: @escaping () -> Void = {},
         onUploadFile: @escaping () -> Void = {},
@@ -58,6 +62,7 @@ struct ComposerView: View {
         self.onStopStreaming = onStopStreaming
         self.channelId = channelId
         self.api = api
+        self.hasPendingAttachments = hasPendingAttachments
         self.onChooseSession = onChooseSession
         self.onModelSettings = onModelSettings
         self.onUploadFile = onUploadFile
@@ -68,7 +73,8 @@ struct ComposerView: View {
     }
 
     private var canSend: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
+        let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return (hasText || hasPendingAttachments) && !isSending
     }
 
     private var showStop: Bool {

@@ -106,6 +106,12 @@ should use HTTPS.
 
 ## Feature notes
 
+- **Composer attachments:** `+` → Upload file opens the system document picker;
+  files upload via `POST /files`, show as pending chips, and send with
+  `file_ids`. Attachment-only sends fall back to the filename(s) as message
+  content (gateway requires non-empty text — same as web). Channel files /
+  Add context remain separate menu actions. No Photo Library permission is
+  requested; the document picker is enough for MVP.
 - **Conversation list:** flat list across all workspaces (workspace shown as a
   chip) plus DMs, sorted by last activity; unread badges from the gateway's
   `unread_count` plus live socket bumps; pull-to-refresh; last-message preview
@@ -122,10 +128,8 @@ should use HTTPS.
   expiry; rejected refresh tokens, REST 401s, or socket `auth_err` sign the user
   out locally. Logout also calls `POST /auth/logout` to revoke server-side.
 
-## Not yet implemented
+## Follow-ups
 
-File **upload** is not implemented yet (download/preview works). Since the last
-update the app gained a mention picker, actionable approval
-cards, workspace switching, channel management (settings, member roles, direct
-+ link invites), and the five-board ViewBoard (Plan/Cost/Sessions/Audit/Activity
-— four boards ride the gateway's WS `resource_req` verbs). See the repo roadmap.
+Multi-file pick in one gesture, richer in-composer photo gallery, and Workbench
+desk writes from iOS remain optional polish — not required for the chat MVP.
+See [#352](https://github.com/ElePerson/Cheers/issues/352).

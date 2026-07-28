@@ -114,8 +114,10 @@ Block submission until all items below are evidenced for production:
 - For internet-facing bot connectors, ACP capability delegation is required and
   connectors use a minimal environment allowlist and bounded workspace roots.
 - A release candidate has passed the gateway test suite and a real-device smoke
-  test: login, logout, session expiry, websocket reconnect, a file upload and
-  download, push opt-in/out, Apple sign-in/link/revoke, and direct account deletion.
+  test: login, logout, session expiry, websocket reconnect, **composer file
+  upload** (document picker → pending chip → send with `file_ids`) plus open /
+  download of the attachment, push opt-in/out, Apple sign-in/link/revoke, and
+  direct account deletion.
 - `tocheers@icloud.com` has an owner and a tested response process. Account
   deletion requests must be verified and tracked.
 

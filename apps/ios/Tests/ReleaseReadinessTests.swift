@@ -49,4 +49,17 @@ final class ReleaseReadinessTests: XCTestCase {
 
         XCTAssertEqual(channel.displayName, "Unknown participant")
     }
+
+    func testAttachmentOnlyMessageUsesFilenameFallback() {
+        XCTAssertEqual(
+            ComposerAttachmentSupport.messageContent(draft: "  hello  ", filenames: ["a.png"]),
+            "hello"
+        )
+        XCTAssertEqual(
+            ComposerAttachmentSupport.messageContent(draft: "   ", filenames: ["notes.pdf", "shot.png"]),
+            "notes.pdf, shot.png"
+        )
+        XCTAssertNil(ComposerAttachmentSupport.messageContent(draft: "", filenames: []))
+        XCTAssertNil(ComposerAttachmentSupport.messageContent(draft: "  ", filenames: ["  ", ""]))
+    }
 }

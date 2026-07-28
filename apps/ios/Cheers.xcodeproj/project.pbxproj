@@ -65,6 +65,7 @@
 		CE1000000000000000000001 /* ServerIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000011 /* ServerIdentity.swift */; };
 		CE1000000000000000000002 /* ReleaseReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000012 /* ReleaseReadinessTests.swift */; };
 		CE1000000000000000000003 /* AuthenticationAccessibilityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000013 /* AuthenticationAccessibilityUITests.swift */; };
+		CE1000000000000000000004 /* ComposerAttachmentSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000016 /* ComposerAttachmentSupport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -147,6 +148,7 @@
 		CE1000000000000000000013 /* AuthenticationAccessibilityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationAccessibilityUITests.swift; sourceTree = "<group>"; };
 		CE1000000000000000000014 /* CheersTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CheersTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE1000000000000000000015 /* CheersUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CheersUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CE1000000000000000000016 /* ComposerAttachmentSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerAttachmentSupport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -218,6 +220,7 @@
 			children = (
 				CE0000000000000000000102 /* Theme.swift */,
 				CE1000000000000000000011 /* ServerIdentity.swift */,
+				CE1000000000000000000016 /* ComposerAttachmentSupport.swift */,
 				CE0000000000000000000103 /* KeychainStore.swift */,
 				CE000000000000000000011F /* PushRouter.swift */,
 				CE0000000000000000000425 /* PasskeyController.swift */,
@@ -456,6 +459,7 @@
 				CE0000000000000000000201 /* CheersApp.swift in Sources */,
 				CE0000000000000000000202 /* Theme.swift in Sources */,
 				CE1000000000000000000001 /* ServerIdentity.swift in Sources */,
+				CE1000000000000000000004 /* ComposerAttachmentSupport.swift in Sources */,
 				CE0000000000000000000203 /* KeychainStore.swift in Sources */,
 				CE0000000000000000000204 /* DTOs.swift in Sources */,
 				CE0000000000000000000205 /* APIClient.swift in Sources */,

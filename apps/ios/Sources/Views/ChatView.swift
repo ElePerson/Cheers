@@ -130,6 +130,7 @@ struct ChatView: View {
                 onStopStreaming: { await model.stopAllTurns() },
                 channelId: model.channel.channelId,
                 api: app.api,
+                hasPendingAttachments: !model.pendingFiles.isEmpty,
                 onChooseSession: { showSessionSheet = true },
                 onModelSettings: { showModelSheet = true },
                 onUploadFile: { showFileImporter = true },
@@ -237,8 +238,16 @@ struct ChatView: View {
             allowedContentTypes: [.item],
             allowsMultipleSelection: false
         ) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            Task { await upload(url) }
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                Task { await upload(url) }
+            case .failure(let error):
+                // User cancel is reported as a Cocoa cancel error — stay quiet.
+                let ns = error as NSError
+                if ns.domain == NSCocoaErrorDomain, ns.code == NSUserCancelledError { return }
+                model.errorMessage = error.localizedDescription
+            }
         }
         .sheet(isPresented: Binding(
             get: { !model.pendingAIConsent.isEmpty },
@@ -310,10 +319,8 @@ struct ChatView: View {
         guard let api = app.api, !isUploading else { return }
         isUploading = true
         defer { isUploading = false }
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
-            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            let data = try ComposerAttachmentSupport.readUploadData(from: url)
             let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?
                 .preferredMIMEType ?? "application/octet-stream"
             let file = try await api.uploadFile(
@@ -323,6 +330,9 @@ struct ChatView: View {
                 data: data
             )
             model.addPendingFile(file)
+        } catch let error as ComposerAttachmentError {
+            if case .cancelled = error { return }
+            model.errorMessage = error.errorDescription
         } catch {
             model.errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
