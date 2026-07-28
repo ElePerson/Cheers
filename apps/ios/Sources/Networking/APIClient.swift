@@ -368,6 +368,14 @@ struct APIClient: Sendable {
         try await deleteEmpty("/users/me/external-identities/apple")
     }
 
+    func externalIdentityStatus(provider: String) async throws -> ExternalIdentityStatusDto {
+        try await getJSON("/users/me/external-identities/\(provider)", as: ExternalIdentityStatusDto.self)
+    }
+
+    func unlinkExternalIdentity(provider: String) async throws {
+        try await deleteEmpty("/users/me/external-identities/\(provider)")
+    }
+
     func deleteAccount(currentPassword: String?, apple: AppleAuthorizationPayload?) async throws {
         try await postEmptyJSON(
             "/users/me/delete",

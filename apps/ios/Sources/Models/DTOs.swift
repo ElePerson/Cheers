@@ -375,6 +375,25 @@ struct AppleIdentityStatus: Decodable {
     }
 }
 
+/// Shared shape for GET `/users/me/external-identities/{apple|google}`.
+struct ExternalIdentityStatusDto: Decodable {
+    let provider: String
+    let linked: Bool
+    let displayName: String?
+    let email: String?
+    let hasPassword: Bool
+    let canUnlink: Bool
+    let recentAuthentication: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case provider, linked, email
+        case displayName = "display_name"
+        case hasPassword = "has_password"
+        case canUnlink = "can_unlink"
+        case recentAuthentication = "recent_authentication"
+    }
+}
+
 struct AppleChallenge: Decodable {
     let challengeId: String
     let nonce: String

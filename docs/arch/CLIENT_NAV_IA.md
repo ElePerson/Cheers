@@ -142,9 +142,9 @@ Use this as the implementation order for #355:
 8. [x] Document exceptions: Connector, About extras, admin sections, optional All conversations.
 
 Remaining polish (not blocking the IA lock):
-- iOS avatar upload parity with desktop Profile.
-- Desktop Fleet bot detail / token issuance (still reachable historically via BotsManager; primary create is Fleet).
-- Google identity management on iOS Settings (Apple already present).
+- [x] iOS avatar upload parity with desktop Profile.
+- [x] Desktop Fleet bot detail / token issuance (primary create + manage on Fleet).
+- [x] Google identity management on iOS Settings (status + unlink; link via login).
 
 ---
 

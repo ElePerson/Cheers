@@ -1,6 +1,7 @@
 import SwiftUI
 import AuthenticationServices
 import CryptoKit
+import PhotosUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
@@ -11,6 +12,7 @@ struct SettingsView: View {
     @State private var showTwoFactor = false
     @State private var showPasskeys = false
     @State private var showAppleAccount = false
+    @State private var showGoogleAccount = false
     @State private var showBlockedUsers = false
     @State private var showAIConsents = false
     @State private var showDeleteAccount = false
@@ -62,6 +64,7 @@ struct SettingsView: View {
             PasskeySettingsView()
         }
         .sheet(isPresented: $showAppleAccount) { AppleAccountSheet() }
+        .sheet(isPresented: $showGoogleAccount) { GoogleAccountSheet() }
         .sheet(isPresented: $showBlockedUsers) { BlockedUsersSheet() }
         .sheet(isPresented: $showAIConsents) { AIConsentSettingsSheet() }
         .sheet(isPresented: $showDeleteAccount) { DeleteAccountSheet() }
@@ -208,6 +211,12 @@ struct SettingsView: View {
             }
             .listRowBackground(Theme.bgSurface)
 
+            Button { showGoogleAccount = true } label: {
+                Label("Google account", systemImage: "g.circle")
+                    .foregroundStyle(Theme.textBody)
+            }
+            .listRowBackground(Theme.bgSurface)
+
             Button { showBlockedUsers = true } label: {
                 Label("Blocked users", systemImage: "hand.raised")
                     .foregroundStyle(Theme.textBody)
@@ -309,8 +318,11 @@ private struct ProfileEditSheet: View {
     @State private var statusEmoji = ""
     @State private var statusText = ""
     @State private var bio = ""
+    @State private var avatarURL: URL?
+    @State private var pickerItem: PhotosPickerItem?
     @State private var isLoading = true
     @State private var isSaving = false
+    @State private var isUploadingAvatar = false
     @State private var errorText: String?
 
     var body: some View {
@@ -320,6 +332,27 @@ private struct ProfileEditSheet: View {
                     ProgressView().frame(maxWidth: .infinity)
                 } else {
                     Section {
+                        HStack(spacing: 14) {
+                            AvatarView(
+                                seedId: app.session?.userId ?? "?",
+                                name: displayName.isEmpty ? app.session?.username : displayName,
+                                size: 64,
+                                imageURL: avatarURL
+                            )
+                            VStack(alignment: .leading, spacing: 8) {
+                                PhotosPicker(selection: $pickerItem, matching: .images) {
+                                    Text(isUploadingAvatar ? "Uploading…" : "Change photo")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Theme.accent)
+                                }
+                                .disabled(isUploadingAvatar)
+                                Text("JPEG or PNG, used across Cheers clients.")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.textMuted)
+                            }
+                        }
+                        .padding(.vertical, 4)
+
                         TextField("Display name", text: $displayName)
                         TextField("Status emoji", text: $statusEmoji)
                             .textInputAutocapitalization(.never)
@@ -342,10 +375,14 @@ private struct ProfileEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { Task { await save() } }
-                        .disabled(isLoading || isSaving)
+                        .disabled(isLoading || isSaving || isUploadingAvatar)
                 }
             }
             .task { await load() }
+            .onChange(of: pickerItem) { _, item in
+                guard let item else { return }
+                Task { await uploadAvatar(from: item) }
+            }
         }
     }
 
@@ -358,10 +395,41 @@ private struct ProfileEditSheet: View {
             statusEmoji = me?.statusEmoji ?? ""
             statusText = me?.statusText ?? ""
             bio = me?.bio ?? ""
+            if let raw = me?.avatarURL, let url = URL(string: raw) {
+                avatarURL = url
+            }
         } catch {
             errorText = error.localizedDescription
             displayName = app.session?.displayName ?? ""
         }
+    }
+
+    private func uploadAvatar(from item: PhotosPickerItem) async {
+        isUploadingAvatar = true
+        defer {
+            isUploadingAvatar = false
+            pickerItem = nil
+        }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                errorText = "Could not read the selected photo."
+                return
+            }
+            let contentType = Self.imageContentType(for: data)
+            let urlString = try await app.api?.uploadUserAvatar(data: data, contentType: contentType)
+            if let urlString, let url = URL(string: urlString) {
+                avatarURL = url
+            }
+            errorText = nil
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private static func imageContentType(for data: Data) -> String {
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "image/png" }
+        if data.starts(with: [0x47, 0x49, 0x46]) { return "image/gif" }
+        return "image/jpeg"
     }
 
     private func save() async {
@@ -599,6 +667,85 @@ private struct AppleAccountSheet: View {
     private func unlink() async {
         do { try await app.api?.unlinkApple(); await load() }
         catch { errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription }
+    }
+}
+
+private struct GoogleAccountSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var status: ExternalIdentityStatusDto?
+    @State private var errorText: String?
+    @State private var isUnlinking = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let status {
+                    Section {
+                        Label(
+                            status.linked ? "Google account linked" : "Google account not linked",
+                            systemImage: status.linked ? "checkmark.shield" : "g.circle"
+                        )
+                        if status.linked {
+                            if let email = status.email, !email.isEmpty {
+                                Text(email).foregroundStyle(Theme.textSecondary)
+                            } else if let name = status.displayName, !name.isEmpty {
+                                Text(name).foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                    } footer: {
+                        if !status.linked {
+                            Text("Sign in with Google from the login screen to link this provider. In-session Google linking is not available yet.")
+                        }
+                    }
+
+                    if status.linked {
+                        Section {
+                            Button("Unlink Google", role: .destructive) {
+                                Task { await unlink() }
+                            }
+                            .disabled(isUnlinking || !status.canUnlink || !status.recentAuthentication)
+                        } footer: {
+                            if !status.canUnlink {
+                                Text("Add another sign-in method (password, Apple, or passkey) before unlinking Google.")
+                            } else if !status.recentAuthentication {
+                                Text("Sign in again recently to make this change.")
+                            } else {
+                                Text("Unlinking signs out other sessions and removes trusted devices.")
+                            }
+                        }
+                    }
+                } else {
+                    ProgressView()
+                }
+                if let errorText {
+                    Section { Text(errorText).foregroundStyle(Theme.danger) }
+                }
+            }
+            .navigationTitle("Google account")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        do {
+            status = try await app.api?.externalIdentityStatus(provider: "google")
+            errorText = nil
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func unlink() async {
+        isUnlinking = true
+        defer { isUnlinking = false }
+        do {
+            try await app.api?.unlinkExternalIdentity(provider: "google")
+            await load()
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
     }
 }
 
