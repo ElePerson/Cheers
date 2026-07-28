@@ -2,6 +2,7 @@ import SwiftUI
 import AuthenticationServices
 import CryptoKit
 import PhotosUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
@@ -386,6 +387,19 @@ private struct ProfileEditSheet: View {
         }
     }
 
+    private func resolveAvatarURL(_ raw: String?) -> URL? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let absolute = URL(string: raw), absolute.scheme != nil { return absolute }
+        guard let base = app.baseURL,
+              var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        comps.path = ""
+        comps.query = nil
+        comps.fragment = nil
+        return URL(string: raw, relativeTo: comps.url)?.absoluteURL
+    }
+
     private func load() async {
         isLoading = true
         defer { isLoading = false }
@@ -395,9 +409,7 @@ private struct ProfileEditSheet: View {
             statusEmoji = me?.statusEmoji ?? ""
             statusText = me?.statusText ?? ""
             bio = me?.bio ?? ""
-            if let raw = me?.avatarURL, let url = URL(string: raw) {
-                avatarURL = url
-            }
+            avatarURL = resolveAvatarURL(me?.avatarURL)
         } catch {
             errorText = error.localizedDescription
             displayName = app.session?.displayName ?? ""
@@ -411,25 +423,34 @@ private struct ProfileEditSheet: View {
             pickerItem = nil
         }
         do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
+            guard let jpeg = try await Self.jpegData(from: item) else {
                 errorText = "Could not read the selected photo."
                 return
             }
-            let contentType = Self.imageContentType(for: data)
-            let urlString = try await app.api?.uploadUserAvatar(data: data, contentType: contentType)
-            if let urlString, let url = URL(string: urlString) {
-                avatarURL = url
-            }
+            let urlString = try await app.api?.uploadUserAvatar(data: jpeg, contentType: "image/jpeg")
+            avatarURL = resolveAvatarURL(urlString)
             errorText = nil
         } catch {
             errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
     }
 
-    private static func imageContentType(for data: Data) -> String {
-        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "image/png" }
-        if data.starts(with: [0x47, 0x49, 0x46]) { return "image/gif" }
-        return "image/jpeg"
+    /// PhotosPicker's `Data` transferable is unreliable for HEIC/Live Photos;
+    /// decode via UIImage and re-encode JPEG so the gateway always accepts it.
+    private static func jpegData(from item: PhotosPickerItem) async throws -> Data? {
+        if let data = try await item.loadTransferable(type: Data.self),
+           let image = UIImage(data: data),
+           let jpeg = image.jpegData(compressionQuality: 0.88) {
+            return jpeg
+        }
+        // Fallback: some iOS versions only expose a file URL transferable.
+        if let url = try await item.loadTransferable(type: URL.self),
+           let data = try? Data(contentsOf: url),
+           let image = UIImage(data: data),
+           let jpeg = image.jpegData(compressionQuality: 0.88) {
+            return jpeg
+        }
+        return nil
     }
 
     private func save() async {
@@ -675,7 +696,8 @@ private struct GoogleAccountSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var status: ExternalIdentityStatusDto?
     @State private var errorText: String?
-    @State private var isUnlinking = false
+    @State private var isBusy = false
+    @State private var googleOAuth = GoogleOAuthSession()
 
     var body: some View {
         NavigationStack {
@@ -693,10 +715,6 @@ private struct GoogleAccountSheet: View {
                                 Text(name).foregroundStyle(Theme.textSecondary)
                             }
                         }
-                    } footer: {
-                        if !status.linked {
-                            Text("Sign in with Google from the login screen to link this provider. In-session Google linking is not available yet.")
-                        }
                     }
 
                     if status.linked {
@@ -704,14 +722,33 @@ private struct GoogleAccountSheet: View {
                             Button("Unlink Google", role: .destructive) {
                                 Task { await unlink() }
                             }
-                            .disabled(isUnlinking || !status.canUnlink || !status.recentAuthentication)
+                            .disabled(isBusy || !status.canUnlink || !status.recentAuthentication)
                         } footer: {
                             if !status.canUnlink {
                                 Text("Add another sign-in method (password, Apple, or passkey) before unlinking Google.")
                             } else if !status.recentAuthentication {
-                                Text("Sign in again recently to make this change.")
+                                Text("Sign in again (within the last 5 minutes) to make this change.")
                             } else {
                                 Text("Unlinking signs out other sessions and removes trusted devices.")
+                            }
+                        }
+                    } else {
+                        Section {
+                            Button {
+                                Task { await link() }
+                            } label: {
+                                if isBusy {
+                                    ProgressView()
+                                } else {
+                                    Text("Link Google")
+                                }
+                            }
+                            .disabled(isBusy || !status.recentAuthentication)
+                        } footer: {
+                            if !status.recentAuthentication {
+                                Text("Sign in again (within the last 5 minutes), then tap Link Google.")
+                            } else {
+                                Text("Opens Google sign-in and attaches that account to your current Cheers session.")
                             }
                         }
                     }
@@ -737,9 +774,40 @@ private struct GoogleAccountSheet: View {
         }
     }
 
+    private func link() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            guard let api = app.api else { throw APIError.unauthorized }
+            let started = try await api.startExternalIdentityOAuthLink(
+                provider: "google",
+                deviceName: UIDevice.current.name
+            )
+            guard let url = URL(string: started.authorizationURL) else {
+                throw APIError.http(status: 500, detail: "Invalid Google authorization URL.")
+            }
+            let callback = try await googleOAuth.authenticate(authorizationURL: url)
+            guard let comps = URLComponents(url: callback, resolvingAgainstBaseURL: false) else {
+                throw APIError.http(status: 401, detail: "Google link did not return a callback.")
+            }
+            if let err = comps.queryItems?.first(where: { $0.name == "error" })?.value {
+                throw APIError.http(status: 401, detail: err)
+            }
+            guard comps.queryItems?.first(where: { $0.name == "linked" })?.value == "google" else {
+                throw APIError.http(status: 401, detail: "Google link did not complete.")
+            }
+            await load()
+        } catch let oauthError as GoogleOAuthError {
+            if case .cancelled = oauthError { return }
+            errorText = oauthError.localizedDescription
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
     private func unlink() async {
-        isUnlinking = true
-        defer { isUnlinking = false }
+        isBusy = true
+        defer { isBusy = false }
         do {
             try await app.api?.unlinkExternalIdentity(provider: "google")
             await load()

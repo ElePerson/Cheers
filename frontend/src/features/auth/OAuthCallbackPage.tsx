@@ -9,13 +9,40 @@ export default function OAuthCallbackPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
+  const token = useAuthStore((state) => state.token);
   const [error, setError] = useState<string | null>(null);
+  const [linkedMessage, setLinkedMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const providerError = params.get("error");
+    const linked = params.get("linked");
     const code = params.get("code");
+
+    // In-session provider link (Settings → Google) returns `linked=google`
+    // instead of a login handoff code.
+    if (linked) {
+      const label = linked === "google" ? "Google" : linked;
+      setLinkedMessage(`${label} linked to your account.`);
+      const redirect =
+        sessionStorage.getItem("cheers.oauth_redirect") || "/settings/account";
+      sessionStorage.removeItem("cheers.oauth_redirect");
+      window.setTimeout(() => {
+        navigate(
+          redirect.startsWith("/") && !redirect.startsWith("//")
+            ? redirect
+            : "/settings/account",
+          { replace: true }
+        );
+      }, 600);
+      return;
+    }
+
     if (providerError || !code) {
-      setError(providerError === "access_denied" ? "Sign-in was cancelled." : "The sign-in callback is invalid.");
+      setError(
+        providerError === "access_denied"
+          ? "Sign-in was cancelled."
+          : "The sign-in callback is invalid."
+      );
       return;
     }
     void exchangeOAuthHandoff(code)
@@ -42,7 +69,7 @@ export default function OAuthCallbackPage() {
         navigate(redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/chat", { replace: true });
       })
       .catch((reason) => setError(errorMessage(reason, "Sign-in failed")));
-  }, [navigate, params, setAuth]);
+  }, [navigate, params, setAuth, token]);
 
   return (
     <div className="h-full bg-zinc-950 flex items-center justify-center p-6 text-zinc-100">
@@ -54,7 +81,14 @@ export default function OAuthCallbackPage() {
             Back to sign in
           </button>
         </div>
-      ) : <Spinner size={24} className="text-zinc-500" />}
+      ) : linkedMessage ? (
+        <div className="max-w-sm text-center">
+          <h1 className="text-lg font-semibold">Linked</h1>
+          <p className="mt-2 text-sm text-zinc-400">{linkedMessage}</p>
+        </div>
+      ) : (
+        <Spinner size={24} className="text-zinc-500" />
+      )}
     </div>
   );
 }

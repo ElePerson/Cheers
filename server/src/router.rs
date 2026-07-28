@@ -661,6 +661,10 @@ fn build_authed_routes(state: AppState) -> Router<AppState> {
                 .delete(api::external_identities::unlink),
         )
         .route(
+            "/api/v1/users/me/external-identities/:provider/oauth-start",
+            post(api::oauth::link_start),
+        )
+        .route(
             "/api/v1/users/me/delete",
             post(api::compliance::delete_account),
         )

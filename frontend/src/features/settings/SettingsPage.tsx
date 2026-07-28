@@ -28,6 +28,7 @@ import {
   getExternalIdentity,
   logout as logoutApi,
   unlinkExternalIdentity,
+  startExternalIdentityOAuthLink,
   type ExternalIdentityStatus,
 } from "@/api/auth";
 import {
@@ -514,6 +515,27 @@ function ExternalIdentitiesCard() {
     }
   }
 
+  async function linkGoogle(identity: ExternalIdentityStatus) {
+    if (!identity.recent_authentication) {
+      toast.error("Sign in again (within 5 minutes), then link Google.");
+      return;
+    }
+    setBusy("google");
+    try {
+      sessionStorage.setItem("cheers.oauth_redirect", "/settings/account");
+      const started = await startExternalIdentityOAuthLink("google");
+      if (isTauri()) {
+        const { invokeDesktop } = await import("@/lib/desktop");
+        await invokeDesktop("desktop_open_oauth_url", { url: started.authorization_url });
+      } else {
+        window.location.assign(started.authorization_url);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start Google link");
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="bg-zinc-900 rounded-xl p-6 mt-4">
       <p className="text-sm font-medium text-zinc-200 flex items-center gap-2">
@@ -540,7 +562,7 @@ function ExternalIdentitiesCard() {
                       : "Not linked"}
                   </p>
                 </div>
-                {identity.linked && (
+                {identity.linked ? (
                   <Button
                     variant="danger"
                     size="sm"
@@ -560,16 +582,29 @@ function ExternalIdentitiesCard() {
                   >
                     {busy === identity.provider ? "Removing…" : "Unlink"}
                   </Button>
-                )}
+                ) : identity.provider === "google" ? (
+                  <Button
+                    size="sm"
+                    disabled={busy !== null || !identity.recent_authentication}
+                    title={
+                      !identity.recent_authentication
+                        ? "Sign in again to make this change"
+                        : "Link Google"
+                    }
+                    onClick={() => void linkGoogle(identity)}
+                  >
+                    {busy === "google" ? "Opening…" : "Link"}
+                  </Button>
+                ) : null}
               </div>
             );
           })}
           {identities === null && <p className="text-xs text-zinc-500">Loading…</p>}
         </div>
       )}
-      {identities?.some((identity) => identity.linked && !identity.recent_authentication) && (
+      {identities?.some((identity) => !identity.recent_authentication) && (
         <p className="text-xs text-amber-400 mt-4">
-          Sign in again before changing a linked identity.
+          Sign in again before linking or unlinking an identity.
         </p>
       )}
     </div>

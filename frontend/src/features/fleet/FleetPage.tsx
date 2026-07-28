@@ -259,9 +259,22 @@ export default function FleetPage() {
     }
   }
 
-  function openBot(botId: string) {
-    void refreshCatalog(true);
-    setSelectedBotId(botId);
+  async function openBot(botId: string) {
+    try {
+      const [b, c] = await Promise.all([
+        listBots(),
+        listChannels(activeWsId ?? undefined).catch(() => [] as Channel[]),
+      ]);
+      setCatalog(b);
+      setChannels(c);
+      if (!b.some((bot) => bot.bot_id === botId)) {
+        toast.error("Couldn't open bot details — you may not manage this bot.");
+        return;
+      }
+      setSelectedBotId(botId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't open bot details");
+    }
   }
 
   return (

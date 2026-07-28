@@ -8,7 +8,7 @@
 use axum::{
     extract::{Path, Query, State},
     response::{IntoResponse, Redirect, Response},
-    Form, Json,
+    Extension, Form, Json,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{Duration, Utc};
@@ -296,6 +296,107 @@ pub async fn start(
     }))
 }
 
+/// Authenticated Google (or future provider) link: starts the same OAuth dance but
+/// records `link_user_id` so the callback attaches the provider to the signed-in
+/// account instead of creating a login handoff.
+pub async fn link_start(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::api::middleware::Claims>,
+    Path(provider_path): Path<String>,
+    Json(body): Json<StartRequest>,
+) -> Result<Json<StartResponse>, AppError> {
+    let provider = provider_name(&provider_path)?;
+    if provider != "google" {
+        return Err(AppError::BadRequest(
+            "only Google supports in-session OAuth linking; use Sign in with Apple for Apple".into(),
+        ));
+    }
+    auth_sessions::require_recent_auth(&state.db, &claims.sub, &claims.sid).await?;
+    let linked: Option<String> = sqlx::query_scalar(
+        "SELECT identity_id FROM auth_external_identities
+         WHERE user_id = $1 AND provider = 'google' LIMIT 1",
+    )
+    .bind(&claims.sub)
+    .fetch_optional(&state.db)
+    .await?;
+    if linked.is_some() {
+        return Err(AppError::Conflict("Google is already linked to this account".into()));
+    }
+
+    let client = auth_sessions::ClientType::parse(body.client.as_deref())?;
+    if client == auth_sessions::ClientType::Web && state.config.oauth_web_return_url.is_none() {
+        return Err(AppError::ServiceUnavailable(
+            "web OAuth is not configured".into(),
+        ));
+    }
+    let return_uri = return_uri(&state, client)?;
+    let config = google_config(&state)?;
+    let authorization_endpoint = "https://accounts.google.com/o/oauth2/v2/auth";
+    let provider_client_id = config.client_id.clone();
+    let provider_redirect_uri = config.redirect_uri.clone();
+
+    let transaction_id = Uuid::new_v4().to_string();
+    let state_secret = random_url_secret()?;
+    let nonce = random_url_secret()?;
+    let verifier = random_url_secret()?;
+    let context = json!({
+        "device_name": body.device_name,
+        "return_uri": return_uri,
+        "nonce": nonce,
+        "link_user_id": claims.sub,
+        "purpose": "link",
+    });
+    let encrypted_verifier = crypto::encrypt_secret(
+        &crypto::derive_master_key(
+            state.config.secret_store_key.as_deref(),
+            &state.config.jwt_private_key_pem,
+        ),
+        &verifier,
+    )
+    .map_err(|e| AppError::Internal(format!("encrypt OAuth verifier: {e}")))?;
+    let expires_at = Utc::now() + Duration::minutes(10);
+    sqlx::query(
+        "INSERT INTO auth_transactions
+         (transaction_id, kind, status, provider, client_type, redirect_uri,
+          state_hash, nonce_hash, pkce_verifier_hash, oauth_code_verifier_encrypted,
+          context_json, expires_at)
+         VALUES ($1, 'oauth', 'pending', $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+    )
+    .bind(&transaction_id)
+    .bind(provider)
+    .bind(client.as_str())
+    .bind(&provider_redirect_uri)
+    .bind(crypto::sha256_hex(&state_secret))
+    .bind(crypto::sha256_hex(&nonce))
+    .bind(crypto::sha256_hex(&verifier))
+    .bind(encrypted_verifier)
+    .bind(context)
+    .bind(expires_at)
+    .execute(&state.db)
+    .await?;
+
+    let mut url = Url::parse(authorization_endpoint)
+        .map_err(|e| AppError::Internal(format!("OAuth endpoint URL: {e}")))?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("client_id", &provider_client_id);
+        query.append_pair("redirect_uri", &provider_redirect_uri);
+        query.append_pair("response_type", "code");
+        query.append_pair("scope", "openid email profile");
+        query.append_pair("state", &state_secret);
+        query.append_pair("nonce", &nonce);
+        query.append_pair("code_challenge", &pkce_challenge(&verifier));
+        query.append_pair("code_challenge_method", "S256");
+        query.append_pair("access_type", "online");
+        query.append_pair("prompt", "select_account");
+    }
+    Ok(Json(StartResponse {
+        transaction_id,
+        authorization_url: url.to_string(),
+        expires_in: 600,
+    }))
+}
+
 pub async fn google_callback(
     State(state): State<AppState>,
     Query(query): Query<GoogleCallback>,
@@ -387,6 +488,43 @@ async fn complete_callback(
             "provider email is not verified".into(),
         ));
     }
+
+    // In-session link: attach this provider to the signed-in user, then return
+    // `linked=<provider>` (no login handoff).
+    if let Some(link_user_id) = context["link_user_id"].as_str() {
+        link_provider_to_user(
+            state,
+            provider,
+            &subject,
+            email.as_deref(),
+            name.as_deref(),
+            link_user_id,
+        )
+        .await?;
+        if provider == "apple" {
+            if let Some(token) = refresh_token.as_deref() {
+                persist_apple_refresh_token(state, &subject, link_user_id, token).await?;
+            }
+        }
+        let _ = sqlx::query(
+            "UPDATE auth_transactions
+             SET user_id = $2, status = 'verified', consumed_at = NULL, updated_at = NOW()
+             WHERE transaction_id = $1 AND status = 'consumed'",
+        )
+        .bind(&transaction_id)
+        .bind(link_user_id)
+        .execute(&state.db)
+        .await;
+        tracing::info!(
+            %transaction_id,
+            %provider,
+            client = client.as_str(),
+            "OAuth provider linked to existing session"
+        );
+        let target = context["return_uri"].as_str().unwrap_or(&return_uri);
+        return Ok(oauth_return_redirect(target, "linked", provider).into_response());
+    }
+
     let user_id = resolve_identity(
         state,
         provider,
@@ -421,6 +559,60 @@ async fn complete_callback(
     );
     let target = context["return_uri"].as_str().unwrap_or(&return_uri);
     Ok(oauth_return_redirect(target, "code", &handoff).into_response())
+}
+
+async fn link_provider_to_user(
+    state: &AppState,
+    provider: &str,
+    subject: &str,
+    email: Option<&str>,
+    name: Option<&str>,
+    user_id: &str,
+) -> Result<(), AppError> {
+    let issuer = if provider == "apple" {
+        APPLE_ISSUER
+    } else {
+        "https://accounts.google.com"
+    };
+    let existing = sqlx::query(
+        "SELECT DISTINCT user_id FROM auth_external_identities
+         WHERE provider = $1 AND issuer = $2 AND subject = $3",
+    )
+    .bind(provider)
+    .bind(issuer)
+    .bind(subject)
+    .fetch_all(&state.db)
+    .await?;
+    if existing.len() > 1 {
+        return Err(AppError::Conflict(
+            "provider identity is linked to multiple accounts; contact support".into(),
+        ));
+    }
+    if let Some(row) = existing.first() {
+        let owner: String = row.try_get("user_id")?;
+        if owner != user_id {
+            return Err(AppError::Conflict(
+                "provider identity is already linked to another account".into(),
+            ));
+        }
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO auth_external_identities
+         (identity_id, provider, issuer, provider_config_id, subject, user_id,
+          corp_id, display_name, email, profile)
+         VALUES ($1, $2, $3, 'web', $4, $5, $2, $6, $7, '{}'::jsonb)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(provider)
+    .bind(issuer)
+    .bind(subject)
+    .bind(user_id)
+    .bind(name)
+    .bind(email)
+    .execute(&state.db)
+    .await?;
+    Ok(())
 }
 
 fn error_code(value: &str) -> String {

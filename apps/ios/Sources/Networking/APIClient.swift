@@ -267,6 +267,27 @@ struct APIClient: Sendable {
         )
     }
 
+    /// Authenticated in-session Google link (returns the provider authorize URL).
+    func startExternalIdentityOAuthLink(
+        provider: String,
+        client: String = "ios",
+        deviceName: String?
+    ) async throws -> OAuthStartResponse {
+        struct Body: Encodable {
+            let client: String
+            let deviceName: String?
+            enum CodingKeys: String, CodingKey {
+                case client
+                case deviceName = "device_name"
+            }
+        }
+        return try await postJSON(
+            "/users/me/external-identities/\(provider)/oauth-start",
+            body: Body(client: client, deviceName: deviceName),
+            as: OAuthStartResponse.self
+        )
+    }
+
     func exchangeOAuthHandoff(
         code: String,
         client: String = "ios",
