@@ -129,3 +129,11 @@ update the app gained a mention picker, actionable approval
 cards, workspace switching, channel management (settings, member roles, direct
 + link invites), and the five-board ViewBoard (Plan/Cost/Sessions/Audit/Activity
 — four boards ride the gateway's WS `resource_req` verbs). See the repo roadmap.
+
+## App Store submission
+
+Version/build come from Xcode `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`
+(`Sources/Info.plist` substitutes them — do not hard-code a divergent
+`CFBundleShortVersionString`). Owner checklist, App Privacy (Audio / LiveKit),
+review-account notes, and Archive gates:
+[`docs/release/IOS_APP_STORE_SUBMISSION.md`](../../docs/release/IOS_APP_STORE_SUBMISSION.md).

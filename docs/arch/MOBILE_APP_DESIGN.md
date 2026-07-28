@@ -535,9 +535,15 @@ tokens (light / dark):
 
 ## 10. App Store Release Readiness
 
-Current branch status (2026-07-18): the SwiftUI target at `apps/ios/`
-builds for `generic/platform=iOS Simulator`, but it is **not yet ready for
-formal App Store submission**. The remaining release gates are:
+Canonical owner checklist:
+[`docs/release/IOS_APP_STORE_SUBMISSION.md`](../release/IOS_APP_STORE_SUBMISSION.md)
+(version alignment, App Privacy including **Audio Data** / Microphone + LiveKit,
+public URL verification, review account, Archive / APNs, and the iOS MVP smoke
+gate that does **not** require composer file upload).
+
+Current product status (2026-07-28): `apps/ios/` is a usable chat MVP (auth,
+channels, streaming WS, push, bots, LiveKit voice, account deletion). Formal
+submission is blocked mainly by **compliance / ops**, not missing core chat:
 
 - **Apple signing**: configure the real Apple Developer Team
   (`DEVELOPMENT_TEAM`) and production provisioning. The project currently uses
@@ -550,22 +556,23 @@ formal App Store submission**. The remaining release gates are:
   device registration and gateway APNs/relay support, but the iOS target still
   needs the capability/profile side.
 - **Production networking**: replace development/local API assumptions with a
-  production HTTPS base URL. Remove or tightly justify the current ATS
-  exceptions for `localhost` and `127.0.0.1` before the store build.
+  production HTTPS base URL. Keep ATS loopback exceptions only for local
+  development.
 - **Release archive validation**: run a signed Release archive for
   `generic/platform=iOS`, then validate/upload through Xcode Organizer or
-  `xcrun altool`/Transporter.
+  Transporter. Confirm Organizer version matches `MARKETING_VERSION` /
+  `CURRENT_PROJECT_VERSION` (`Info.plist` uses those build settings).
 - **Store metadata**: create the App Store Connect app record with the final
   name, subtitle, category, age rating, description, keywords, support URL,
   pricing, availability, and at least one valid screenshot per required device
   class.
-- **Privacy materials**: publish a privacy policy URL and complete App Store
-  privacy details for the actual data handled by Cheers (account data,
-  messages/content, device push tokens, diagnostics, and any analytics if
-  added).
-- **Review access**: provide Apple with a stable review environment, demo
-  account credentials, and notes for any server-side setup or role-specific
-  flows.
+- **Privacy materials**: keep `https://www.tocheers.com/privacy.html` in sync
+  with the binary (including microphone / LiveKit voice / dictation) and
+  complete App Store privacy details for account data, messages/content,
+  **Audio Data**, and device push tokens.
+- **Review access**: provide Apple with a stable production review account
+  (no MFA wall), demo channel data, and notes stating composer upload is not
+  in the iOS MVP.
 - **Account lifecycle**: if the app supports account creation, add an in-app
   account deletion path or documented equivalent that satisfies App Review
   Guideline 5.1.1.
