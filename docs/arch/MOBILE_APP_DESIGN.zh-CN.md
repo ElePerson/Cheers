@@ -448,9 +448,14 @@ dark-only `frontend/DESIGN.md` 体系的派生浅色版），以 NativeWind 语�
 
 ## 10. App Store 上架就绪清单
 
-当前分支状态（2026-07-18）：`apps/ios/` SwiftUI target 已能通过
-`generic/platform=iOS Simulator` 构建，但**还不能直接正式提交 App Store**。
-剩余发布门槛如下：
+权威 owner checklist：
+[`docs/release/IOS_APP_STORE_SUBMISSION.md`](../release/IOS_APP_STORE_SUBMISSION.md)
+（版本对齐、含 **Audio Data** / 麦克风 + LiveKit 的 App Privacy、公开 URL 核验、
+审核账号、Archive / APNs，以及**不要求** iOS composer 文件上传的 smoke 门禁）。
+
+产品状态（2026-07-28）：`apps/ios/` 已是可用的聊天 MVP（登录、频道、流式 WS、
+推送、Bot、LiveKit 语音、账号删除）。正式提审主要卡在**合规/运营**，不是缺半个
+聊天 App：
 
 - **Apple 签名**：配置真实 Apple Developer Team（`DEVELOPMENT_TEAM`）和生产
   provisioning。当前工程使用 automatic signing，但没有记录 team id。
@@ -460,18 +465,20 @@ dark-only `frontend/DESIGN.md` 体系的派生浅色版），以 NativeWind 语�
 - **APNs capability**：补齐生产推送 entitlement（`aps-environment`）以及匹配的
   App Store provisioning。当前分支已有设备注册和 gateway APNs/relay 支持，但
   iOS target 还缺 capability/profile 侧配置。
-- **生产网络**：把开发/本地 API 假设替换成生产 HTTPS base URL。Store build 前
-  移除或严格解释当前针对 `localhost` 和 `127.0.0.1` 的 ATS 例外。
+- **生产网络**：把开发/本地 API 假设替换成生产 HTTPS base URL。ATS 的
+  localhost 例外仅保留给本地开发。
 - **Release archive 验证**：对 `generic/platform=iOS` 做带签名的 Release
-  archive，然后通过 Xcode Organizer、`xcrun altool` 或 Transporter 验证/上传。
+  archive，然后通过 Xcode Organizer 或 Transporter 验证/上传。确认 Organizer
+  版本与 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` 一致（`Info.plist`
+  已改为引用这两项）。
 - **商店元数据**：在 App Store Connect 创建 App 记录，准备最终名称、副标题、
   分类、年龄分级、描述、关键词、支持 URL、价格、地区，以及每个必需设备类别
   至少一张有效截图。
-- **隐私材料**：发布隐私政策 URL，并按 Cheers 实际处理的数据填写 App Store
-  privacy details（账号数据、消息/内容、设备 push token、诊断信息，以及后续若
-  添加 analytics 也要披露）。
-- **审核访问**：为 Apple 提供稳定审核环境、demo account 凭据，以及任何服务端
-  配置或角色流程说明。
+- **隐私材料**：保持 `https://www.tocheers.com/privacy.html` 与二进制一致（含
+  麦克风 / LiveKit 语音 / 听写），并在 App Store privacy 中申报账号数据、
+  消息/内容、**Audio Data**、设备 push token。
+- **审核访问**：提供生产环境、无 MFA 墙的审核账号、可演示频道，并在 Review
+  Notes 写明 iOS MVP 未开放 composer 上传。
 - **账号生命周期**：如果 App 支持创建账号，需要提供 App 内账号删除路径，或符合
   App Review Guideline 5.1.1 的等效说明。
 - **生产运维**：上线带 TLS 的 gateway，配置 APNs 凭据或官方 relay，并执行
