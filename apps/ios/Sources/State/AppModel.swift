@@ -7,6 +7,7 @@ struct UserSession: Equatable {
     let displayName: String?
     let role: String
     let username: String?
+    let avatarURL: String?
 }
 
 /// Intermediate login step when the account has 2FA enabled.
@@ -38,6 +39,7 @@ final class AppModel {
         static let displayName = "display_name"
         static let role = "role"
         static let username = "username"
+        static let avatarURL = "avatar_url"
     }
 
     var serverURLString: String
@@ -76,7 +78,7 @@ final class AppModel {
             KeychainStore.remove(Keys.token)
             KeychainStore.remove(Keys.refreshToken)
             KeychainStore.remove(Keys.trustedDevice)
-            [Keys.serverURL, Keys.userId, Keys.displayName, Keys.role, Keys.username]
+            [Keys.serverURL, Keys.userId, Keys.displayName, Keys.role, Keys.username, Keys.avatarURL]
                 .forEach(defaults.removeObject(forKey:))
         }
         serverURLString = defaults.string(forKey: Keys.serverURL) ?? Self.defaultServerURL
@@ -86,7 +88,8 @@ final class AppModel {
                 userId: userId,
                 displayName: defaults.string(forKey: Keys.displayName),
                 role: defaults.string(forKey: Keys.role) ?? "member",
-                username: defaults.string(forKey: Keys.username)
+                username: defaults.string(forKey: Keys.username),
+                avatarURL: defaults.string(forKey: Keys.avatarURL)
             )
             _ = token // silence unused warning paths
         } else {
@@ -293,11 +296,13 @@ final class AppModel {
         defaults.set(role, forKey: Keys.role)
         defaults.set(response.username, forKey: Keys.username)
 
+        let persistedAvatarURL = session?.userId == userId ? session?.avatarURL : nil
         session = UserSession(
             userId: userId,
             displayName: response.displayName,
             role: role,
-            username: response.username
+            username: response.username,
+            avatarURL: persistedAvatarURL
         )
         lastSessionRefreshAt = Date()
         if socket.isAuthed {
@@ -400,17 +405,18 @@ final class AppModel {
         defaults.removeObject(forKey: Keys.displayName)
         defaults.removeObject(forKey: Keys.role)
         defaults.removeObject(forKey: Keys.username)
+        defaults.removeObject(forKey: Keys.avatarURL)
     }
 
     /// Clears the session and remembered server URL so Login shows the server field.
-    func switchServer() {
-        clearSession()
+    func switchServer() async {
+        await logout()
         serverURLString = Self.defaultServerURL
         UserDefaults.standard.removeObject(forKey: Keys.serverURL)
     }
 
-    /// Updates the in-memory + persisted display name after a profile save.
-    func applyProfileDisplayName(_ displayName: String?) {
+    /// Updates the in-memory + persisted profile fields used outside the edit sheet.
+    func applyProfile(displayName: String?, avatarURL: String?) {
         guard let session else { return }
         let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let next = (trimmed?.isEmpty == false) ? trimmed : nil
@@ -418,9 +424,28 @@ final class AppModel {
             userId: session.userId,
             displayName: next,
             role: session.role,
-            username: session.username
+            username: session.username,
+            avatarURL: avatarURL
         )
         UserDefaults.standard.set(next, forKey: Keys.displayName)
+        UserDefaults.standard.set(avatarURL, forKey: Keys.avatarURL)
+    }
+
+    func applyProfileAvatarURL(_ avatarURL: String?) {
+        applyProfile(displayName: session?.displayName, avatarURL: avatarURL)
+    }
+
+    func resolveServerResourceURL(_ raw: String?) -> URL? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let absolute = URL(string: raw), absolute.scheme != nil { return absolute }
+        guard let baseURL,
+              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return URL(string: raw, relativeTo: components.url)?.absoluteURL
     }
 
     // MARK: Socket

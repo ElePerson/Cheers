@@ -91,6 +91,12 @@ export function ActivityCenter() {
       .then((r) => setApprovalCount(r.count))
       .catch(() => {});
 
+  function approvalResolved(messageId: string) {
+    setApprovals((current) => current.filter((a) => a.message_id !== messageId));
+    setApprovalCount((current) => Math.max(0, current - 1));
+    void refreshBadge();
+  }
+
   useEffect(() => {
     let alive = true;
     const loadBadge = () =>
@@ -207,6 +213,7 @@ export function ActivityCenter() {
                         channelId={a.channel_id}
                         currentUserId={user?.user_id}
                         approverOverride
+                        onResolved={() => approvalResolved(a.message_id)}
                       />
                     </li>
                   ))}

@@ -19,6 +19,8 @@ interface Props {
    *  `actionable`, which also covers RESPOND grants the card's own
    *  owner+delegate check can't see). When set, skips that self-check. */
   approverOverride?: boolean;
+  /** Called after the gateway records a decision successfully. */
+  onResolved?: () => void;
 }
 
 function optId(o: PermissionOption): string {
@@ -73,6 +75,7 @@ export function PermissionCard({
   channelId,
   currentUserId,
   approverOverride,
+  onResolved,
 }: Props) {
   const data = (message.content_data ?? {}) as PermissionContentData;
   const botId = message.sender_id;
@@ -191,6 +194,7 @@ export function PermissionCard({
       // when the connector/session is gone (delivered:false). Surface that so the
       // collapsed "✓ Approved" isn't misread as "the agent acted on it".
       if (res && res.delivered === false) setUndelivered(true);
+      onResolved?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't resolve the approval");
     } finally {
