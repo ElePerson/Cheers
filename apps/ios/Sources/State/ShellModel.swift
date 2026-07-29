@@ -5,11 +5,10 @@ import Observation
 /// is the ROOT surface (not pushed) — the drawer switches `currentChannel`; these
 /// are the secondary screens the drawer/chat push on top of it.
 enum Route: Hashable {
-    case notifications
+    case activity
     case fleet
     case friends
     case settings
-    case channelInfo(ChannelDto)
 }
 
 /// Drawer-first navigation state: the open/closed drawer, the selected workspace
@@ -31,10 +30,10 @@ final class ShellModel {
     /// Single NavigationStack path for the whole shell (secondary screens only).
     var path: [Route] = []
 
-    /// Pending-approval count shown on the menu button + drawer Fleet chip.
+    /// Pending-approval count — Activity badge (+ optional menu badge).
     /// Owned by ActivityModel, which writes it as permission requests arrive/resolve.
     var pendingApprovals = 0
-    /// Pending-invite count shown on the drawer Notifications chip.
+    /// Pending-invite count — combined into the Activity badge with approvals.
     var pendingInvites = 0
 
     /// Team workspaces (from GET /workspaces) plus the personal workspace, if any.

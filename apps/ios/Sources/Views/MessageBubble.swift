@@ -56,6 +56,7 @@ struct SystemMessageView: View {
 // MARK: - Chat bubble (Telegram-style, design map §5.2b)
 
 struct MessageBubbleView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let message: MessageDto
     let isOwn: Bool
     let showSenderName: Bool
@@ -72,22 +73,87 @@ struct MessageBubbleView: View {
     var onTapFile: ((MessageFileRef) -> Void)? = nil
     var onReport: (() -> Void)? = nil
     var onBlock: (() -> Void)? = nil
+    @State private var copied = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             if isOwn {
-                Spacer(minLength: 60)
+                Spacer(minLength: dynamicTypeSize.isAccessibilitySize ? 8 : 60)
             } else {
                 avatarGutter
             }
-            bubble
+            VStack(alignment: isOwn ? .trailing : .leading, spacing: 1) {
+                bubble
+                if message.isBot, message.isPartial != true, !message.content.isEmpty {
+                    quickActions
+                }
+            }
             if !isOwn {
-                Spacer(minLength: 60)
+                Spacer(minLength: dynamicTypeSize.isAccessibilitySize ? 8 : 60)
             }
         }
         .padding(.horizontal, Theme.space3)
         .padding(.top, showAvatar ? Theme.space1 : 2)
         .padding(.bottom, isLastInGroup ? Theme.space2 : 2)
+    }
+
+    private var quickActions: some View {
+        HStack(spacing: 0) {
+            quickAction(copied ? "checkmark" : "doc.on.doc", label: copied ? "Copied" : "Copy text") {
+                UIPasteboard.general.string = message.content
+                NativeFeedback.selection()
+                copied = true
+                Task {
+                    try? await Task.sleep(for: .seconds(1.2))
+                    copied = false
+                }
+            }
+            if let onReply {
+                quickAction("arrowshape.turn.up.left", label: "Reply") {
+                    NativeFeedback.lightImpact()
+                    onReply()
+                }
+            }
+            if let onForward {
+                quickAction("arrowshape.turn.up.right", label: "Forward") {
+                    NativeFeedback.lightImpact()
+                    onForward()
+                }
+            }
+            if onReport != nil || onBlock != nil {
+                Menu {
+                    if let onReport {
+                        Button(role: .destructive) { onReport() } label: {
+                            Label("Report message", systemImage: "exclamationmark.bubble")
+                        }
+                    }
+                    if message.senderType == "user", let onBlock {
+                        Button(role: .destructive) { onBlock() } label: {
+                            Label("Block user", systemImage: "hand.raised")
+                        }
+                    }
+                } label: {
+                    quickActionLabel("ellipsis", label: "More message actions")
+                }
+            }
+        }
+        .foregroundStyle(Theme.textSecondary)
+        .padding(.horizontal, 2)
+    }
+
+    private func quickAction(_ systemName: String, label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            quickActionLabel(systemName, label: label)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func quickActionLabel(_ systemName: String, label: LocalizedStringKey) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 14, weight: .medium))
+            .frame(width: 38, height: 36)
+            .contentShape(Rectangle())
+            .accessibilityLabel(Text(label))
     }
 
     @ViewBuilder
@@ -210,6 +276,7 @@ struct MessageBubbleView: View {
             Text(formattedTime)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(Theme.textSecondary)
+                .dynamicTypeSize(...DynamicTypeSize.large)
         }
         .padding(.bottom, 1)
     }

@@ -45,6 +45,9 @@ struct RegisterView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.bgApp)
+            .safeAreaInset(edge: .bottom) {
+                registrationActionBar
+            }
             .navigationTitle("Create account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -79,11 +82,25 @@ struct RegisterView: View {
                 .font(.subheadline)
                 .foregroundStyle(Theme.textMuted)
                 .multilineTextAlignment(.center)
+
+            Text("Step 1: Verify your email · Step 2: Create your account")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
         }
     }
 
     private var registrationCard: some View {
         VStack(spacing: 16) {
+            if !openRegistration {
+                inputField(
+                    "Invitation token",
+                    text: $inviteToken,
+                    placeholder: "Paste the token from your invitation link",
+                    field: .inviteToken
+                )
+            }
+
             inputField(
                 "Username",
                 text: $username,
@@ -142,16 +159,11 @@ struct RegisterView: View {
             )
 
             secureInputField("Password", text: $password, field: .password, submitLabel: .next)
+            Text("Use at least 12 characters. A longer, unique passphrase is recommended.")
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             secureInputField("Confirm password", text: $passwordConfirmation, field: .passwordConfirmation, submitLabel: .done)
-
-            if !openRegistration {
-                inputField(
-                    "Invitation token",
-                    text: $inviteToken,
-                    placeholder: "Paste the token from your invitation link",
-                    field: .inviteToken
-                )
-            }
 
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.circle.fill")
@@ -160,22 +172,6 @@ struct RegisterView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityElement(children: .combine)
             }
-
-            Button(action: createAccount) {
-                HStack(spacing: 8) {
-                    if isBusy {
-                        ProgressView().controlSize(.small).tint(.white)
-                    }
-                    Text(isBusy ? "Creating account…" : "Create account")
-                        .font(.body.weight(.semibold))
-                }
-                .frame(maxWidth: .infinity, minHeight: 48)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .background(canCreateAccount ? Theme.accent : Theme.accent.opacity(0.5))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .disabled(!canCreateAccount || isBusy)
 
             Button("Already have an account? Sign in") { dismiss() }
                 .font(.footnote.weight(.medium))
@@ -189,6 +185,27 @@ struct RegisterView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1)
         }
+    }
+
+    private var registrationActionBar: some View {
+        Button(action: createAccount) {
+            HStack(spacing: 8) {
+                if isBusy {
+                    ProgressView().controlSize(.small).tint(.white)
+                }
+                Text(isBusy ? "Creating account…" : "Create account")
+                    .font(.body.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .background(canCreateAccount ? Theme.accent : Theme.accent.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .disabled(!canCreateAccount || isBusy)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 
     private func inputField(

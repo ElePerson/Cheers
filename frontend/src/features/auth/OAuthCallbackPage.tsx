@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { exchangeOAuthHandoff } from "@/api/auth";
 import { errorMessage } from "@/api/client";
@@ -10,14 +10,49 @@ export default function OAuthCallbackPage() {
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
   const [error, setError] = useState<string | null>(null);
+  const [linkedMessage, setLinkedMessage] = useState<string | null>(null);
+  // One-shot: setAuth updates the store while `code` is still in the URL, which
+  // would re-fire this effect and burn the already-consumed handoff.
+  const handledRef = useRef(false);
 
   useEffect(() => {
+    if (handledRef.current) return;
+
     const providerError = params.get("error");
+    const linked = params.get("linked");
     const code = params.get("code");
-    if (providerError || !code) {
-      setError(providerError === "access_denied" ? "Sign-in was cancelled." : "The sign-in callback is invalid.");
+
+    // In-session provider link (Settings → Google) returns `linked=google`
+    // instead of a login handoff code.
+    if (linked) {
+      handledRef.current = true;
+      const label = linked === "google" ? "Google" : linked;
+      setLinkedMessage(`${label} linked to your account.`);
+      const redirect =
+        sessionStorage.getItem("cheers.oauth_redirect") || "/settings/account";
+      sessionStorage.removeItem("cheers.oauth_redirect");
+      window.setTimeout(() => {
+        navigate(
+          redirect.startsWith("/") && !redirect.startsWith("//")
+            ? redirect
+            : "/settings/account",
+          { replace: true }
+        );
+      }, 600);
       return;
     }
+
+    if (providerError || !code) {
+      handledRef.current = true;
+      setError(
+        providerError === "access_denied"
+          ? "Sign-in was cancelled."
+          : "The sign-in callback is invalid."
+      );
+      return;
+    }
+
+    handledRef.current = true;
     void exchangeOAuthHandoff(code)
       .then((outcome) => {
         if (outcome.status === "factor_required" || outcome.requires_2fa) {
@@ -54,7 +89,14 @@ export default function OAuthCallbackPage() {
             Back to sign in
           </button>
         </div>
-      ) : <Spinner size={24} className="text-zinc-500" />}
+      ) : linkedMessage ? (
+        <div className="max-w-sm text-center">
+          <h1 className="text-lg font-semibold">Linked</h1>
+          <p className="mt-2 text-sm text-zinc-400">{linkedMessage}</p>
+        </div>
+      ) : (
+        <Spinner size={24} className="text-zinc-500" />
+      )}
     </div>
   );
 }

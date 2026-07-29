@@ -5,51 +5,30 @@ import SwiftUI
 /// Growing multiline composer pinned to the bottom of the chat screen.
 /// Visuals follow the web MessageComposer: raised capsule, strong border that
 /// turns indigo on focus, 32pt indigo send button.
-/// Composer "..." menu actions, mirroring the web MessageComposer controls
-/// (attach file, add context, choose session, model & bot settings).
-private enum ComposerAction: String, Identifiable {
-    case attach = "Attach file"
-    case context = "Add context"
-    case session = "Choose session"
-    case model = "Model & bot settings"
-    var id: String { rawValue }
-    var icon: String {
-        switch self {
-        case .attach: return "paperclip"
-        case .context: return "text.badge.plus"
-        case .session: return "square.stack.3d.up"
-        case .model: return "slider.horizontal.3"
-        }
-    }
-    var blurb: String {
-        switch self {
-        case .attach: return "Upload a file or pick an existing channel file to send."
-        case .context: return "Add Cheers resources (plan, decisions, files) as context for your next message."
-        case .session: return "Route this message to a specific bot session, or Auto by @mention."
-        case .model: return "Session mode and per-bot model settings for this channel."
-        }
-    }
-}
-
 struct ComposerView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Draft and keyboard focus live inside this leaf view. A keystroke now
     /// invalidates only the composer subtree, never the chat timeline.
     @State private var text: String
     let clearTick: Int
     let placeholder: String
     let isSending: Bool
+    let streamingCount: Int
     let onSend: (String) async -> Bool
+    let onStopStreaming: () async -> Void
     let channelId: String
     let api: APIClient?
     var onChooseSession: () -> Void = {}
     var onModelSettings: () -> Void = {}
+    var onUploadFile: () -> Void = {}
+    var onBrowseFiles: () -> Void = {}
+    var onAddContext: () -> Void = {}
     /// "@" typeahead pool (group tokens + channel members) and the pick
     /// callback registering the selection for routing (ChatModel.pickedMentions).
     var mentionPool: [MentionCandidate] = []
     var onMentionPicked: (MentionCandidate) -> Void = { _ in }
 
     @FocusState private var isFocused: Bool
-    @State private var action: ComposerAction?
     @State private var dictation = ComposerDictationController()
 
     init(
@@ -57,11 +36,16 @@ struct ComposerView: View {
         clearTick: Int,
         placeholder: String,
         isSending: Bool,
+        streamingCount: Int = 0,
         onSend: @escaping (String) async -> Bool,
+        onStopStreaming: @escaping () async -> Void = {},
         channelId: String,
         api: APIClient?,
         onChooseSession: @escaping () -> Void = {},
         onModelSettings: @escaping () -> Void = {},
+        onUploadFile: @escaping () -> Void = {},
+        onBrowseFiles: @escaping () -> Void = {},
+        onAddContext: @escaping () -> Void = {},
         mentionPool: [MentionCandidate] = [],
         onMentionPicked: @escaping (MentionCandidate) -> Void = { _ in }
     ) {
@@ -69,17 +53,27 @@ struct ComposerView: View {
         self.clearTick = clearTick
         self.placeholder = placeholder
         self.isSending = isSending
+        self.streamingCount = streamingCount
         self.onSend = onSend
+        self.onStopStreaming = onStopStreaming
         self.channelId = channelId
         self.api = api
         self.onChooseSession = onChooseSession
         self.onModelSettings = onModelSettings
+        self.onUploadFile = onUploadFile
+        self.onBrowseFiles = onBrowseFiles
+        self.onAddContext = onAddContext
         self.mentionPool = mentionPool
         self.onMentionPicked = onMentionPicked
     }
 
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
+    }
+
+    private var showStop: Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isSending && streamingCount > 0
     }
 
     // MARK: @-mention typeahead
@@ -136,11 +130,6 @@ struct ComposerView: View {
             transaction.disablesAnimations = true
             withTransaction(transaction) { text = "" }
         }
-        .sheet(item: $action) { action in
-            ComposerActionSheet(action: action)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-        }
     }
 
     private var mentionPicker: some View {
@@ -190,16 +179,19 @@ struct ComposerView: View {
     private var inputRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Menu {
-                Button { action = .attach } label: { Label("Attach file", systemImage: "paperclip") }
-                Button { action = .context } label: { Label("Add context", systemImage: "text.badge.plus") }
+                Button { onUploadFile() } label: { Label("Upload file", systemImage: "paperclip") }
+                Button { onBrowseFiles() } label: { Label("Channel files", systemImage: "folder") }
+                Button { onAddContext() } label: { Label("Add context", systemImage: "link.badge.plus") }
+                Divider()
                 Button { onChooseSession() } label: { Label("Choose session", systemImage: "square.stack.3d.up") }
                 Button { onModelSettings() } label: { Label("Model & bot settings", systemImage: "slider.horizontal.3") }
             } label: {
-                // 44pt hit target (HIG hard minimum), 32pt glyph footprint.
                 Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 44, height: 44)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(width: 34, height: 34)
+                    .background(.thinMaterial, in: Circle())
+                    .frame(width: Theme.hitMin, height: Theme.hitMin)
                     .contentShape(Rectangle())
             }
             .padding(.leading, 2)
@@ -216,6 +208,10 @@ struct ComposerView: View {
             dictationButton
 
             Button {
+                if showStop {
+                    Task { await onStopStreaming() }
+                    return
+                }
                 // Sending is an intentional completion point for a mobile
                 // draft. Clear focus first so UIKit reliably dismisses the
                 // software keyboard even while the network request is pending.
@@ -235,28 +231,29 @@ struct ComposerView: View {
                             .controlSize(.small)
                             .tint(.white)
                     } else {
-                        Image(systemName: "paperplane.fill")
+                        Image(systemName: showStop ? "stop.fill" : "paperplane.fill")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(canSend ? Color.white : Theme.textFaint)
+                            .foregroundStyle(canSend || showStop ? Color.white : Theme.textFaint)
                     }
                 }
-                .frame(width: 34, height: 34)
-                .background(canSend ? Theme.accent : Theme.bgSelected.opacity(0.5))
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .frame(width: 44, height: 44)   // 44pt hit target around the 34pt visual
+                .frame(width: 36, height: 36)
+                .background(showStop ? Theme.danger : (canSend ? Theme.accent : Theme.bgSelected.opacity(0.5)))
+                .clipShape(Circle())
+                .shadow(color: canSend ? Theme.accent.opacity(0.22) : .clear, radius: 5, y: 2)
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
             }
-            .disabled(!canSend)
+            .disabled(!canSend && !showStop)
             .padding(.trailing, 2)
-            .accessibilityLabel(isSending ? "Sending message" : "Send message")
+            .accessibilityLabel(isSending ? "Sending message" : (showStop ? "Stop response" : "Send message"))
         }
-        .background(Theme.bgRaised.opacity(0.8))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        // Borderless at rest (content-first); the accent ring appears only on focus.
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isFocused ? Theme.accentHover.opacity(0.6) : Color.clear, lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(isFocused ? Theme.accentHover.opacity(0.55) : Color.primary.opacity(0.08), lineWidth: 1)
         )
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .alert("Voice dictation", isPresented: Binding(
             get: { dictation.errorMessage != nil },
             set: { if !$0 { dictation.errorMessage = nil } }
@@ -489,33 +486,5 @@ private final class PCM16Accumulator: @unchecked Sendable {
             guard storage.count + converted.count <= 8 * 1024 * 1024 else { return }
             storage.append(converted)
         }
-    }
-}
-
-/// Placeholder detail for a composer action — the full pickers (file upload,
-/// context bundle, session/model) are a follow-up; this names the action and
-/// its purpose so the entry points match the web composer.
-private struct ComposerActionSheet: View {
-    let action: ComposerAction
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Capsule().fill(Theme.bgSelected).frame(width: 38, height: 5).padding(.top, 8)
-            Image(systemName: action.icon)
-                .font(.system(size: 34))
-                .foregroundStyle(Theme.accent)
-                .padding(.top, 8)
-            Text(action.rawValue)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-            Text(action.blurb)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.bgSurface)
     }
 }

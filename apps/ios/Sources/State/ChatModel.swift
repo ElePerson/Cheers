@@ -64,12 +64,20 @@ final class ChatModel {
     var selectedSessionId: String?
     /// Bot members of this channel — the session/model picker's candidate bots.
     private(set) var botMembers: [ChannelMemberDto] = []
+    private(set) var channelMembers: [ChannelMemberDto] = []
+    /// Pending proactive claims are a channel-level queue. They are not derived
+    /// from timeline cards because a confirmation message may be paged out or a
+    /// push may open the channel after it was created.
+    private(set) var pendingTaskClaims: [TaskClaimDto] = []
+    private(set) var taskClaimBusyId: String?
     /// Channel members (users + bots) as picker entries, group tokens included —
     /// the composer's @-mention pool.
     private(set) var mentionPool: [MentionCandidate] = MentionCandidate.groups
     /// Mentions the user has picked in the current draft. Routing source of
     /// truth: only entries whose "@label" token survives in the text are sent.
     var pickedMentions: [MentionCandidate] = []
+    var pendingFiles: [MessageFileRef] = []
+    var pendingContext: [ResourceContextItem] = []
 
     /// Bumped when the view should FOLLOW to the bottom — only honoured while the
     /// reader is already parked at the bottom. Incoming messages and streaming
@@ -87,6 +95,7 @@ final class ChatModel {
     /// memberId → display name, used to resolve senders on live WS frames
     /// (the gateway's `message`/`message_done` frames omit `sender_name`).
     @ObservationIgnored private var memberNames: [String: String] = [:]
+    @ObservationIgnored private var taskClaimPoll: Task<Void, Never>?
 
     init(channel: ChannelDto) {
         self.channel = channel
@@ -108,6 +117,7 @@ final class ChatModel {
             }
         }
         app.socket.subscribe(channelId: channel.channelId)
+        startTaskClaimPolling()
     }
 
     /// Keep a cached model's re-entry render bounded: a long scrollback session
@@ -125,6 +135,8 @@ final class ChatModel {
             app.removeSocketListener(listenerId)
         }
         listenerId = nil
+        taskClaimPoll?.cancel()
+        taskClaimPoll = nil
         if messages.count > Self.detachKeepCount {
             messages = Array(messages.suffix(Self.detachKeepCount))
             hasMoreBefore = true
@@ -271,6 +283,7 @@ final class ChatModel {
             uniquingKeysWith: { first, _ in first }
         )
         botMembers = members.filter { $0.memberType == "bot" }
+        channelMembers = members
         mentionPool = MentionCandidate.groups + members
             .filter { $0.memberType == "user" || $0.memberType == "bot" }
             .map { member in
@@ -367,7 +380,7 @@ final class ChatModel {
         defer { chatPerformanceSignposter.endInterval("SendMessage", interval) }
         if let draft { composerText = draft }
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending, let api = app?.api else { return false }
+        guard (!text.isEmpty || !pendingFiles.isEmpty), !isSending, let api = app?.api else { return false }
         isSending = true
         defer { isSending = false }
         // Only keep mentions whose "@label" token still survives in the text,
@@ -384,15 +397,19 @@ final class ChatModel {
                 SendMessageRequest(
                     content: text,
                     replyToMsgId: replyTo?.msgId,
+                    fileIds: pendingFiles.isEmpty ? nil : pendingFiles.map(\.fileId),
                     mentionIds: ids.isEmpty ? nil : ids,
                     mentionNames: names.isEmpty ? nil : names,
-                    sessionId: selectedSessionId
+                    sessionId: selectedSessionId,
+                    contextBundle: contextBundle
                 )
             )
             composerText = ""
             composerClearTick += 1
             pickedMentions = []
             replyTo = nil
+            pendingFiles = []
+            pendingContext = []
             upsert(sent)
             forceBottomTick += 1
             return true
@@ -402,11 +419,117 @@ final class ChatModel {
         }
     }
 
+    func addPendingFile(_ file: MessageFileRef) {
+        guard !pendingFiles.contains(where: { $0.fileId == file.fileId }) else { return }
+        pendingFiles.append(file)
+    }
+
+    func addContext(_ item: ResourceContextItem) {
+        guard !pendingContext.contains(where: { $0.id == item.id }) else { return }
+        pendingContext.append(item)
+    }
+
+    private var contextBundle: ResourceContextBundle? {
+        guard !pendingContext.isEmpty else { return nil }
+        return ResourceContextBundle(
+            origin: "human",
+            items: pendingContext.map { item in
+                var params = item.params
+                if params["channel_id"] == nil { params["channel_id"] = .string(channel.channelId) }
+                return ResourceContextWireItem(
+                    verb: item.verb, params: params, label: item.label, kind: item.kind
+                )
+            }
+        )
+    }
+
     func markRead() {
         guard let api = app?.api else { return }
         let channelId = channel.channelId
         Task {
             try? await api.markRead(channelId: channelId)
+        }
+    }
+
+    var streamingMessageIds: [String] {
+        messages.filter { $0.isBot && $0.isPartial == true }.map(\.msgId)
+    }
+
+    func stopTurn(msgId: String) async {
+        guard let api = app?.api else { return }
+        do {
+            try await api.cancelMessage(channelId: channel.channelId, msgId: msgId)
+        } catch {
+            report(error)
+        }
+    }
+
+    func stopAllTurns() async {
+        let ids = streamingMessageIds
+        await withTaskGroup(of: Void.self) { group in
+            for id in ids { group.addTask { await self.stopTurn(msgId: id) } }
+        }
+    }
+
+    func refreshTaskClaims() async {
+        guard let api = app?.api else { return }
+        do {
+            pendingTaskClaims = try await api.listTaskClaims(
+                channelId: channel.channelId, status: "pending"
+            )
+        } catch {
+            // Polling is best-effort; an explicit action reports its own error.
+        }
+    }
+
+    func resolveTaskClaim(_ claim: TaskClaimDto, decision: String) async {
+        guard let api = app?.api, taskClaimBusyId == nil else { return }
+        taskClaimBusyId = claim.claimId
+        defer { taskClaimBusyId = nil }
+        do {
+            try await api.resolveTaskClaim(
+                channelId: channel.channelId, claimId: claim.claimId, decision: decision
+            )
+            pendingTaskClaims.removeAll { $0.claimId == claim.claimId }
+        } catch {
+            report(error)
+            await refreshTaskClaims()
+        }
+    }
+
+    func cancelTaskClaim(_ claim: TaskClaimDto) async {
+        guard let api = app?.api, taskClaimBusyId == nil else { return }
+        taskClaimBusyId = claim.claimId
+        defer { taskClaimBusyId = nil }
+        do {
+            try await api.cancelTaskClaim(channelId: channel.channelId, claimId: claim.claimId)
+            pendingTaskClaims.removeAll { $0.claimId == claim.claimId }
+        } catch {
+            report(error)
+            await refreshTaskClaims()
+        }
+    }
+
+    var canManageTaskClaims: Bool {
+        let global = app?.session?.role ?? ""
+        if global == "admin" || global == "system_admin" { return true }
+        guard let me = app?.session?.userId else { return false }
+        let role = channelMembers.first {
+            $0.memberType == "user" && $0.memberId == me
+        }?.role
+        return role == "owner" || role == "admin"
+    }
+
+    private func startTaskClaimPolling() {
+        taskClaimPoll?.cancel()
+        taskClaimPoll = Task { [weak self] in
+            guard let self else { return }
+            await self.refreshTaskClaims()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled else { return }
+                await self.refreshTaskClaims()
+            }
         }
     }
 
@@ -426,6 +549,9 @@ final class ChatModel {
             followBottomTick += 1
             if message.senderId != app?.session?.userId {
                 markRead()
+            }
+            if message.msgType == "task_claim_confirmation" {
+                Task { await refreshTaskClaims() }
             }
         case .messageStream(let channelId, let msgId, let delta) where channelId == channel.channelId:
             if let index = messages.firstIndex(where: { $0.msgId == msgId }) {

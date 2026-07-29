@@ -71,6 +71,11 @@ enum JSONValue: Codable, Equatable, Hashable {
         return nil
     }
 
+    var objectValue: [String: JSONValue]? {
+        if case .object(let o) = self { return o }
+        return nil
+    }
+
     /// First non-empty string among the given keys (for `command ?? cmd`-style fallbacks).
     func firstString(_ keys: String...) -> String? {
         for key in keys {
@@ -370,6 +375,25 @@ struct AppleIdentityStatus: Decodable {
     }
 }
 
+/// Shared shape for GET `/users/me/external-identities/{apple|google}`.
+struct ExternalIdentityStatusDto: Decodable {
+    let provider: String
+    let linked: Bool
+    let displayName: String?
+    let email: String?
+    let hasPassword: Bool
+    let canUnlink: Bool
+    let recentAuthentication: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case provider, linked, email
+        case displayName = "display_name"
+        case hasPassword = "has_password"
+        case canUnlink = "can_unlink"
+        case recentAuthentication = "recent_authentication"
+    }
+}
+
 struct AppleChallenge: Decodable {
     let challengeId: String
     let nonce: String
@@ -452,6 +476,28 @@ struct StoredAIConsent: Decodable, Identifiable {
         case privacyURL = "privacy_url"
         case dataUse = "data_use"
         case policyVersion = "policy_version"
+    }
+}
+
+struct MeProfileDto: Decodable {
+    let userId: String
+    let username: String
+    let displayName: String?
+    let role: String?
+    let avatarURL: String?
+    let bio: String?
+    let statusText: String?
+    let statusEmoji: String?
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case displayName = "display_name"
+        case role
+        case avatarURL = "avatar_url"
+        case bio
+        case statusText = "status_text"
+        case statusEmoji = "status_emoji"
     }
 }
 
@@ -642,6 +688,46 @@ struct WorkspaceDto: Decodable, Identifiable, Hashable {
     }
 }
 
+struct WorkspaceMemberDto: Decodable, Identifiable, Hashable {
+    let userId: String
+    let username: String
+    let displayName: String?
+    let role: String
+    let status: String
+
+    var id: String { userId }
+    var name: String { displayName?.isEmpty == false ? displayName! : username }
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case displayName = "display_name"
+        case role, status
+    }
+}
+
+struct AuthSessionSummary: Decodable, Identifiable, Hashable {
+    let sessionId: String
+    let client: String
+    let deviceName: String?
+    let authenticatedAt: String
+    let lastSeenAt: String
+    let expiresAt: String
+    let current: Bool
+
+    var id: String { sessionId }
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case client
+        case deviceName = "device_name"
+        case authenticatedAt = "authenticated_at"
+        case lastSeenAt = "last_seen_at"
+        case expiresAt = "expires_at"
+        case current
+    }
+}
+
 // MARK: - Channels (server/src/api/channels.rs)
 
 struct ChannelDto: Decodable, Identifiable, Hashable {
@@ -666,6 +752,7 @@ struct ChannelDto: Decodable, Identifiable, Hashable {
     var isVoice: Bool { kind == "voice" }
     var displayName: String {
         if isDM, let peerName, !peerName.isEmpty { return peerName }
+        if isDM { return String(localized: "Unknown participant") }
         return name
     }
 
@@ -776,6 +863,94 @@ struct VoiceTranscriptSegment: Decodable, Identifiable, Hashable {
         case userId = "user_id"
         case text
         case finalizedAt = "finalized_at"
+    }
+}
+
+// MARK: - Proactive task claiming
+
+struct TaskClaimDto: Decodable, Identifiable, Hashable {
+    let claimId: String
+    let evaluationId: String
+    let channelId: String
+    let botId: String
+    let botName: String
+    let summary: String
+    let proposedAction: String
+    let confidence: Double
+    let impact: String
+    let status: String
+    let createdAt: String
+    let resolvedAt: String?
+    let executionMsgId: String?
+    let requesterId: String?
+    let sourceMessageId: String?
+    let confirmationMessageId: String?
+
+    var id: String { claimId }
+
+    enum CodingKeys: String, CodingKey {
+        case claimId = "claim_id"
+        case evaluationId = "evaluation_id"
+        case channelId = "channel_id"
+        case botId = "bot_id"
+        case botName = "bot_name"
+        case summary
+        case proposedAction = "proposed_action"
+        case confidence, impact, status
+        case createdAt = "created_at"
+        case resolvedAt = "resolved_at"
+        case executionMsgId = "execution_msg_id"
+        case requesterId = "requester_id"
+        case sourceMessageId = "source_message_id"
+        case confirmationMessageId = "confirmation_message_id"
+    }
+}
+
+struct TaskClaimsResponse: Decodable { let claims: [TaskClaimDto] }
+
+struct BotMonitoringDto: Codable, Hashable {
+    var channelId: String
+    var botId: String
+    var mode: String
+    var scope: String
+    var debounceSeconds: Int
+    var minIntervalSeconds: Int
+    var maxEvaluationsPerHour: Int
+    var batchSize: Int
+    var confidenceThreshold: Double
+    var policy: JSONValue?
+
+    enum CodingKeys: String, CodingKey {
+        case channelId = "channel_id"
+        case botId = "bot_id"
+        case mode, scope
+        case debounceSeconds = "debounce_seconds"
+        case minIntervalSeconds = "min_interval_seconds"
+        case maxEvaluationsPerHour = "max_evaluations_per_hour"
+        case batchSize = "batch_size"
+        case confidenceThreshold = "confidence_threshold"
+        case policy
+    }
+}
+
+struct BotMonitoringUpdate: Encodable {
+    let mode: String
+    let scope: String
+    let debounceSeconds: Int
+    let minIntervalSeconds: Int
+    let maxEvaluationsPerHour: Int
+    let batchSize: Int
+    let confidenceThreshold: Double
+    let policy: JSONValue
+
+    enum CodingKeys: String, CodingKey {
+        case mode, scope
+        case debounceSeconds = "debounce_seconds"
+        case minIntervalSeconds = "min_interval_seconds"
+        case maxEvaluationsPerHour = "max_evaluations_per_hour"
+        case batchSize = "batch_size"
+        case confidenceThreshold = "confidence_threshold"
+        case policy
     }
 }
 
@@ -1052,6 +1227,7 @@ struct SendMessageRequest: Encodable {
     /// members server-side — mirrors the web composer's mention_names split.
     var mentionNames: [String]? = nil
     var sessionId: String? = nil
+    var contextBundle: ResourceContextBundle? = nil
 
     enum CodingKeys: String, CodingKey {
         case content
@@ -1061,7 +1237,28 @@ struct SendMessageRequest: Encodable {
         case mentionIds = "mention_ids"
         case mentionNames = "mention_names"
         case sessionId = "session_id"
+        case contextBundle = "context_bundle"
     }
+}
+
+struct ResourceContextItem: Codable, Identifiable, Hashable {
+    let id: String
+    let verb: String
+    let params: [String: JSONValue]
+    let label: String
+    let kind: String
+}
+
+struct ResourceContextWireItem: Codable, Hashable {
+    let verb: String
+    let params: [String: JSONValue]
+    let label: String
+    let kind: String
+}
+
+struct ResourceContextBundle: Codable, Hashable {
+    let origin: String
+    let items: [ResourceContextWireItem]
 }
 
 // MARK: - Notifications / invites (server/src/api/notifications.rs)
@@ -1300,6 +1497,8 @@ struct SessionInfo: Decodable, Identifiable {
     let role: String?
     let isPrimary: Bool?
     let status: String?
+    let lastUsedAt: String?
+    let sessionConfig: JSONValue?
 
     var id: String { sessionId }
     var tag: String { role ?? String(sessionId.prefix(6)) }
@@ -1309,10 +1508,25 @@ struct SessionInfo: Decodable, Identifiable {
         case role
         case isPrimary = "is_primary"
         case status
+        case lastUsedAt = "last_used_at"
+        case sessionConfig = "session_config"
     }
 }
 
 struct SessionListResponse: Decodable { let sessions: [SessionInfo] }
+
+struct CreateSessionResponse: Decodable {
+    let sessionId: String
+    let role: String?
+    let cwd: String?
+    let additionalDirs: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case role, cwd
+        case additionalDirs = "additional_dirs"
+    }
+}
 
 struct ConfigChoice: Decodable, Identifiable {
     let value: String
@@ -1360,6 +1574,28 @@ struct SetConfigOptionRequest: Encodable {
         case configId = "config_id"
         case value
     }
+}
+
+struct BotPermissionsDto: Decodable {
+    let posture: BotPostureDto
+    let configOptions: BotConfigOptionsDto
+    enum CodingKeys: String, CodingKey { case posture; case configOptions = "config_options" }
+}
+
+struct BotPostureDto: Decodable {
+    let agentType: String
+    let permissionMode: String?
+    let allowedModes: [String]
+    enum CodingKeys: String, CodingKey {
+        case agentType = "agent_type"
+        case permissionMode = "permission_mode"
+        case allowedModes = "allowed_modes"
+    }
+}
+
+struct BotConfigOptionsDto: Decodable {
+    let advertised: [ConfigOption]
+    let desired: [String: String]
 }
 
 // MARK: - Permission audit (ViewBoard Audit board — server/src/api/approval.rs)
@@ -1646,6 +1882,119 @@ struct FsFile: Decodable {
         case path, content, version
     }
 }
+
+struct WorkbenchTemplateRow: Decodable, Identifiable {
+    let tplId: String
+    let title: String
+    let manifest: WorkbenchTemplateManifest
+    var id: String { tplId }
+
+    enum CodingKeys: String, CodingKey {
+        case tplId = "tpl_id"
+        case title, manifest
+    }
+}
+
+struct WorkbenchTemplateManifest: Codable, Identifiable {
+    let id: String
+    let title: String
+    let views: [WorkbenchTemplateView]
+    let seed: [String: JSONValue]?
+    let pin: [String]?
+}
+
+struct WorkbenchTemplateView: Codable, Identifiable {
+    let id: String
+    let title: String
+    let file: String
+    let lens: String
+    let config: JSONValue?
+}
+
+// MARK: - Remote workspace
+
+struct RemoteWorkspaceBotsResponse: Decodable { let bots: [RemoteWorkspaceBot] }
+
+struct RemoteWorkspaceBot: Decodable, Identifiable, Hashable {
+    let botId: String
+    let username: String
+    let displayName: String?
+    let online: Bool
+    let canRead: Bool
+    let canWrite: Bool
+    var id: String { botId }
+    var name: String { displayName?.isEmpty == false ? displayName! : username }
+
+    enum CodingKeys: String, CodingKey {
+        case botId = "bot_id"
+        case username
+        case displayName = "display_name"
+        case online
+        case canRead = "can_read"
+        case canWrite = "can_write"
+    }
+}
+
+struct RemoteWorkspaceTree: Decodable {
+    let root: String
+    let path: String
+    let entries: [RemoteWorkspaceEntry]
+}
+
+struct RemoteWorkspaceEntry: Decodable, Identifiable, Hashable {
+    let name: String
+    let path: String
+    let isDir: Bool
+    let sizeBytes: Int
+    var id: String { path }
+
+    enum CodingKeys: String, CodingKey {
+        case name, path
+        case isDir = "is_dir"
+        case sizeBytes = "size_bytes"
+    }
+}
+
+struct RemoteWorkspaceFile: Decodable {
+    let root: String
+    let path: String
+    let filename: String
+    let contentType: String
+    let sizeBytes: Int
+    let isText: Bool
+    let content: String?
+    let contentBase64: String
+    let etag: String
+
+    enum CodingKeys: String, CodingKey {
+        case root, path, filename, content, etag
+        case contentType = "content_type"
+        case sizeBytes = "size_bytes"
+        case isText = "is_text"
+        case contentBase64 = "content_b64"
+    }
+}
+
+struct RemoteWorkspaceWriteResult: Decodable { let path: String?; let etag: String }
+
+struct RemoteGitStatus: Decodable {
+    let repo: Bool?
+    let reason: String?
+    let raw: String?
+    let branch: String?
+    let upstream: String?
+    let ahead: Int?
+    let behind: Int?
+    let entries: [RemoteGitStatusEntry]?
+}
+
+struct RemoteGitStatusEntry: Decodable, Identifiable, Hashable {
+    let xy: String
+    let path: String
+    var id: String { "\(xy):\(path)" }
+}
+
+struct RemoteGitDiff: Decodable { let diff: String; let staged: Bool }
 
 // MARK: - Durable agent-trace timeline (docs/arch/TRACE_PERSISTENCE.md)
 

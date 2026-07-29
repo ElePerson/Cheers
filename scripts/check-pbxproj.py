@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+IOS_ROOT = REPO / "apps/ios"
 PROJ = REPO / "apps/ios/Cheers.xcodeproj/project.pbxproj"
 SOURCES = REPO / "apps/ios/Sources"
 
@@ -73,8 +74,9 @@ def main() -> int:
 
     # 3. Project references pointing at files that no longer exist. Only
     #    leaf-name matching is possible here (paths are group-relative), so
-    #    resolve by searching Sources/ — good enough to catch a stale rename.
-    on_disk = {p.name for p in SOURCES.rglob("*") if p.is_file()}
+    #    resolve across the whole iOS project. Test targets legitimately keep
+    #    Swift files under Tests/ and UITests/, outside the app's Sources/ tree.
+    on_disk = {p.name for p in IOS_ROOT.rglob("*") if p.is_file()}
     for line in text.splitlines():
         m = FILE_REF.match(line)
         if not m:
@@ -86,7 +88,7 @@ def main() -> int:
             continue
         if name not in on_disk:
             problems.append(
-                f"project references {name}, which is not on disk under Sources/\n"
+                f"project references {name}, which is not on disk under apps/ios/\n"
                 f"    → stale reference; remove it or restore the file."
             )
 

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Friends list, requests, add-by-UUID, and blocked users — mirrors web FriendsPage.
+/// Friends list, requests, exact username-or-ID lookup, and blocked users.
 struct FriendsView: View {
     @Environment(AppModel.self) private var app
     @Environment(ShellModel.self) private var shell
@@ -78,7 +78,7 @@ struct FriendsView: View {
     private var friendsList: some View {
         List {
             if friends.isEmpty {
-                Text("No friends yet. Use Add to find people by user ID.")
+                Text("No friends yet. Use Add to find people by username or user ID.")
                     .foregroundStyle(Theme.textSecondary)
             } else {
                 ForEach(friends) { friend in
@@ -184,10 +184,10 @@ struct FriendsView: View {
     private var addForm: some View {
         Form {
             Section {
-                TextField("User ID (UUID)", text: $addQuery)
+                TextField("Username or user ID", text: $addQuery)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(.body)
                 Button {
                     Task { await search() }
                 } label: {
@@ -195,7 +195,7 @@ struct FriendsView: View {
                 }
                 .disabled(isBusy || addQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             } footer: {
-                Text("Search matches an exact user ID only (same as the web Friends Add tab).")
+                Text("Enter an exact username or user ID. Email and partial-name search are not supported.")
             }
 
             if let hit = searchHit {
@@ -268,7 +268,7 @@ struct FriendsView: View {
             let results = try await api.searchUsers(query: q)
             searchHit = results.first
             if results.isEmpty {
-                errorText = String(localized: "No user found for that ID.")
+                errorText = String(localized: "No user found for that username or ID.")
             }
         } catch {
             errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription

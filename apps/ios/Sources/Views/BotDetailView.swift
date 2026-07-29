@@ -11,9 +11,14 @@ struct BotDetailView: View {
     @State private var displayName: String
     @State private var descriptionText: String
     @State private var status: BotStatusDto?
+    @State private var permissions: BotPermissionsDto?
+    @State private var postureSelection = ""
+    @State private var configSelections: [String: String] = [:]
+    @State private var governanceBusy = false
     @State private var isSaving = false
     @State private var isToggling = false
     @State private var showDeleteConfirm = false
+    @State private var showDisableConfirm = false
     @State private var showReconnect = false
     @State private var errorText: String?
 
@@ -73,6 +78,32 @@ struct BotDetailView: View {
                         }
                     }
 
+                    if let permissions {
+                        Section {
+                            LabeledContent("Agent type", value: permissions.posture.agentType)
+                            if !permissions.posture.allowedModes.isEmpty {
+                                Picker("Default mode", selection: $postureSelection) {
+                                    ForEach(permissions.posture.allowedModes, id: \.self) {
+                                        Text($0.capitalized).tag($0)
+                                    }
+                                }
+                                .onChange(of: postureSelection) {
+                                    guard !postureSelection.isEmpty,
+                                          postureSelection != permissions.posture.permissionMode else { return }
+                                    Task { await setPosture(postureSelection) }
+                                }
+                            }
+                            ForEach(permissions.configOptions.advertised) { option in
+                                governanceConfigPicker(option, desired: permissions.configOptions.desired)
+                            }
+                            if governanceBusy { ProgressView().controlSize(.small) }
+                        } header: {
+                            Text("Governance posture")
+                        } footer: {
+                            Text("These are owner-level defaults. The connector still enforces its local capability envelope.")
+                        }
+                    }
+
                     Section {
                         if isDisabled {
                             Button {
@@ -84,7 +115,7 @@ struct BotDetailView: View {
                             .disabled(isToggling)
                         } else {
                             Button(role: .destructive) {
-                                Task { await setDisabled(true) }
+                                showDisableConfirm = true
                             } label: {
                                 if isToggling { ProgressView() }
                                 else { Text("Disable bot") }
@@ -121,6 +152,18 @@ struct BotDetailView: View {
                 }
             }
             .confirmationDialog(
+                "Disable \(bot.name)?",
+                isPresented: $showDisableConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Disable bot", role: .destructive) {
+                    Task { await setDisabled(true) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This disconnects the bot and stops it from handling new work until it is enabled again.")
+            }
+            .confirmationDialog(
                 "Delete \(bot.name)?",
                 isPresented: $showDeleteConfirm,
                 titleVisibility: .visible
@@ -137,7 +180,11 @@ struct BotDetailView: View {
                     Task { await refreshStatus() }
                 }
             }
-            .task { await refreshStatus() }
+            .task {
+                async let live: Void = refreshStatus()
+                async let governance: Void = loadPermissions()
+                _ = await (live, governance)
+            }
         }
     }
 
@@ -147,6 +194,25 @@ struct BotDetailView: View {
             trimmed != (bot.displayName ?? "")
                 || descriptionText != (bot.description ?? "")
         )
+    }
+
+    @ViewBuilder
+    private func governanceConfigPicker(_ option: ConfigOption, desired: [String: String]) -> some View {
+        if let choices = option.options, !choices.isEmpty {
+            let optionId = option.optionId
+            let fallback = desired[optionId] ?? option.currentValue ?? ""
+            Picker(option.name ?? optionId, selection: Binding<String>(
+                get: { configSelections[optionId] ?? fallback },
+                set: { value in
+                    configSelections[optionId] = value
+                    Task { await setConfig(optionId, value: value) }
+                }
+            )) {
+                ForEach(choices) { choice in
+                    Text(choice.name ?? choice.value).tag(choice.value)
+                }
+            }
+        }
     }
 
     private var statusLine: String {
@@ -168,6 +234,38 @@ struct BotDetailView: View {
         } catch {
             // Non-fatal — profile actions still work.
         }
+    }
+
+    private func loadPermissions() async {
+        guard canManage, let api = app.api else { return }
+        do {
+            let value = try await api.botPermissions(botId: bot.botId)
+            permissions = value
+            postureSelection = value.posture.permissionMode ?? value.posture.allowedModes.first ?? ""
+            configSelections = value.configOptions.desired
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func setPosture(_ mode: String) async {
+        guard let api = app.api, !governanceBusy else { return }
+        governanceBusy = true; errorText = nil
+        defer { governanceBusy = false }
+        do {
+            try await api.setBotPosture(botId: bot.botId, mode: mode)
+            await loadPermissions()
+        } catch { errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription }
+    }
+
+    private func setConfig(_ id: String, value: String) async {
+        guard let api = app.api, !governanceBusy else { return }
+        governanceBusy = true; errorText = nil
+        defer { governanceBusy = false }
+        do {
+            try await api.setBotConfigOption(botId: bot.botId, configId: id, value: value)
+            await loadPermissions()
+        } catch { errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription }
     }
 
     private func saveProfile() async {

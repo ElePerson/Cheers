@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The navigation hub. Top: a compact workspace bar (long-press to switch).
 /// Middle: the selected workspace's channels and DMs. Bottom: a compact nav chip
-/// row (Notifications · Fleet · Friends) and a slim footer (profile/settings · New channel).
+/// row (Activity · Fleet · Friends) and a slim footer (profile/settings · New channel).
 struct DrawerView: View {
     @Environment(AppModel.self) private var app
     @Environment(ShellModel.self) private var shell
@@ -14,6 +14,7 @@ struct DrawerView: View {
     @State private var newAsDM = false
     @State private var showNew = false
     @State private var showNewWorkspace = false
+    @State private var showWorkspaceAdmin = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -25,6 +26,7 @@ struct DrawerView: View {
             footer
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
     private var searchField: some View {
@@ -33,7 +35,7 @@ struct DrawerView: View {
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.textMuted)
             TextField("Search conversations", text: $query)
-                .font(.system(size: 15))
+                .font(.body)
                 .foregroundStyle(Theme.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -49,35 +51,51 @@ struct DrawerView: View {
     // MARK: Workspace bar (compact — tap OR long-press to switch)
 
     /// One compact row: the current workspace glyph + name, a chevron hint, and
-    /// (for team workspaces) a settings gear. The chevron promises a dropdown, so
-    /// a plain **tap** must deliver one; **long-press** opens the same switcher as
-    /// a secondary affordance. No always-visible workspace strip, no subtitle.
+    /// (for team workspaces) a settings gear that opens Manage workspace. Tap/long-press
+    /// the name row opens the workspace switcher.
     private var workspaceBar: some View {
-        Menu {
-            workspaceMenu
-        } label: {
-            workspaceBarLabel
+        HStack(spacing: 4) {
+            Menu {
+                workspaceMenu
+            } label: {
+                workspaceBarLabel
+            }
+            .contextMenu { workspaceMenu }
+
+            if let ws = shell.selectedWorkspace,
+               shell.personalWorkspace?.workspaceId != ws.workspaceId {
+                Button {
+                    showWorkspaceAdmin = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Manage \(ws.name)")
+                .padding(.trailing, 8)
+            }
         }
-        .contextMenu { workspaceMenu }
+        .sheet(isPresented: $showWorkspaceAdmin) {
+            if let workspace = shell.selectedWorkspace {
+                WorkspaceAdminSheet(workspace: workspace)
+            }
+        }
     }
 
     private var workspaceBarLabel: some View {
         HStack(spacing: 10) {
             workspaceGlyph
             Text(shell.selectedWorkspace?.name ?? "All conversations")
-                .font(.system(size: 17, weight: .bold))
+                .font(.headline)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
             Image(systemName: "chevron.down")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.textMuted)
             Spacer(minLength: 8)
-            if let ws = shell.selectedWorkspace,
-               shell.personalWorkspace?.workspaceId != ws.workspaceId {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 16))
-                    .foregroundStyle(Theme.textMuted)
-            }
         }
         .padding(.horizontal, 18)
         .padding(.bottom, 10)
@@ -153,7 +171,7 @@ struct DrawerView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 11, weight: .bold))
+            .font(.caption2.weight(.bold))
             .tracking(0.7)
             .foregroundStyle(Theme.textSecondary)
             .padding(.horizontal, 18)
@@ -184,7 +202,7 @@ struct DrawerView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
                 Text(row.channel.displayName)
-                    .font(.system(size: 15))
+                    .font(.body)
                     .foregroundStyle(Theme.textBody)
                     .lineLimit(1)
                 Spacer(minLength: 6)
@@ -211,8 +229,14 @@ struct DrawerView: View {
 
     private var navChips: some View {
         HStack(spacing: 7) {
-            navChip("Notifications", systemName: "bell", route: .notifications, badge: shell.pendingInvites, badgeColor: Theme.accent)
-            navChip("Fleet", systemName: "dot.radiowaves.left.and.right", route: .fleet, badge: shell.pendingApprovals, badgeColor: Theme.warning)
+            navChip(
+                "Activity",
+                systemName: "bell.badge",
+                route: .activity,
+                badge: shell.pendingInvites + shell.pendingApprovals,
+                badgeColor: shell.pendingApprovals > 0 ? Theme.warning : Theme.accent
+            )
+            navChip("Fleet", systemName: "dot.radiowaves.left.and.right", route: .fleet)
             navChip("Friends", systemName: "person.2", route: .friends)
         }
         .padding(.horizontal, 12)

@@ -16,6 +16,9 @@ import {
   Trash2,
   ExternalLink,
   Info,
+  Server,
+  Laptop,
+  Shield,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore, useIsAdmin } from "@/stores/authStore";
@@ -25,8 +28,17 @@ import {
   getExternalIdentity,
   logout as logoutApi,
   unlinkExternalIdentity,
+  startExternalIdentityOAuthLink,
   type ExternalIdentityStatus,
 } from "@/api/auth";
+import {
+  listAuthSessions,
+  revokeAuthSession,
+  listAIConsents,
+  revokeAIConsent,
+  type AuthSessionSummary,
+  type StoredAIConsent,
+} from "@/api/accountSecurity";
 import { disablePush, enablePush, getPushStatus, type PushStatus } from "@/lib/push";
 import { getServerBase, isTauri, setServerBase } from "@/lib/serverConfig";
 import {
@@ -44,7 +56,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, SectionHead, MetaRow } from "@/components/ui/field";
-import { BotsManager } from "@/features/bots/BotsManager";
 import { CopyButton } from "@/features/bots/BotDetailPanel";
 import { WorkbenchManager } from "@/features/workbench/WorkbenchManager";
 import { AdminUsers } from "./AdminUsers";
@@ -55,6 +66,7 @@ import { PasskeyCard, TwoFactorCard } from "./SecurityCards";
 type SectionId =
   | "profile"
   | "bots"
+  | "server"
   | "connector"
   | "about"
   | "workbench"
@@ -73,6 +85,7 @@ const NAV: {
 }[] = [
   { id: "profile", label: "Profile", icon: User },
   { id: "bots", label: "Bots", icon: Bot },
+  { id: "server", label: "Server", icon: Server },
   { id: "connector", label: "Connector", icon: Plug, desktopOnly: true },
   { id: "about", label: "About", icon: Info, desktopOnly: true },
   { id: "workbench", label: "Workbench", icon: Blocks, adminOnly: true },
@@ -82,12 +95,10 @@ const NAV: {
   { id: "account", label: "Account", icon: LogOut },
 ];
 
-/** Desktop shell only: which Cheers server this app talks to. Switching
- * clears the session (tokens are per-server) and reboots into the picker. */
+/** Current API base + switch (Tauri). Web shows the origin when same-origin. */
 function ServerCard() {
   const logout = useAuthStore((s) => s.logout);
-  if (!isTauri()) return null;
-  const base = getServerBase();
+  const base = isTauri() ? getServerBase() : window.location.origin;
   return (
     <div className="bg-zinc-900 rounded-2xl p-6 mt-4">
       <div className="flex items-center justify-between gap-4">
@@ -97,20 +108,28 @@ function ServerCard() {
             {base ?? "same origin"}
           </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            // Order matters: drop the session first (the token belongs to the
-            // old server), then clear the base — reload lands on the picker.
-            logout();
-            setServerBase(null);
-            window.location.reload();
-          }}
-        >
-          Switch server
-        </Button>
+        {isTauri() && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              // Order matters: drop the session first (the token belongs to the
+              // old server), then clear the base — reload lands on the picker.
+              logout();
+              setServerBase(null);
+              window.location.reload();
+            }}
+          >
+            Switch server
+          </Button>
+        )}
       </div>
+      {!isTauri() && (
+        <p className="text-xs text-zinc-500 mt-3">
+          Web clients use this origin. Switch servers from the desktop app or by
+          opening a different gateway URL.
+        </p>
+      )}
     </div>
   );
 }
@@ -496,6 +515,30 @@ function ExternalIdentitiesCard() {
     }
   }
 
+  async function linkGoogle(identity: ExternalIdentityStatus) {
+    if (!identity.recent_authentication) {
+      toast.error("Sign in again (within 5 minutes), then link Google.");
+      return;
+    }
+    setBusy("google");
+    try {
+      sessionStorage.setItem("cheers.oauth_redirect", "/settings/account");
+      const started = await startExternalIdentityOAuthLink("google");
+      if (isTauri()) {
+        const { invokeDesktop } = await import("@/lib/desktop");
+        await invokeDesktop("desktop_open_oauth_url", { url: started.authorization_url });
+      } else {
+        window.location.assign(started.authorization_url);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start Google link");
+    } finally {
+      // Tauri opens an external browser and returns immediately; clear busy so
+      // canceling OAuth doesn't leave the control stuck on “Opening…”.
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="bg-zinc-900 rounded-xl p-6 mt-4">
       <p className="text-sm font-medium text-zinc-200 flex items-center gap-2">
@@ -522,7 +565,7 @@ function ExternalIdentitiesCard() {
                       : "Not linked"}
                   </p>
                 </div>
-                {identity.linked && (
+                {identity.linked ? (
                   <Button
                     variant="danger"
                     size="sm"
@@ -542,16 +585,29 @@ function ExternalIdentitiesCard() {
                   >
                     {busy === identity.provider ? "Removing…" : "Unlink"}
                   </Button>
-                )}
+                ) : identity.provider === "google" ? (
+                  <Button
+                    size="sm"
+                    disabled={busy !== null || !identity.recent_authentication}
+                    title={
+                      !identity.recent_authentication
+                        ? "Sign in again to make this change"
+                        : "Link Google"
+                    }
+                    onClick={() => void linkGoogle(identity)}
+                  >
+                    {busy === "google" ? "Opening…" : "Link"}
+                  </Button>
+                ) : null}
               </div>
             );
           })}
           {identities === null && <p className="text-xs text-zinc-500">Loading…</p>}
         </div>
       )}
-      {identities?.some((identity) => identity.linked && !identity.recent_authentication) && (
+      {identities?.some((identity) => !identity.recent_authentication) && (
         <p className="text-xs text-amber-400 mt-4">
-          Sign in again before changing a linked identity.
+          Sign in again before linking or unlinking an identity.
         </p>
       )}
     </div>
@@ -624,6 +680,7 @@ function LegalLinks() {
     ["Terms", "https://www.tocheers.com/terms.html"],
     ["Support", "https://www.tocheers.com/support.html"],
     ["Account deletion", "https://www.tocheers.com/account-deletion.html"],
+    ["Remote Operation Safety", "https://www.tocheers.com/remote-operations.html"],
   ] as const;
   return (
     <div className="flex flex-wrap gap-x-5 gap-y-2 px-1 mt-5">
@@ -638,6 +695,181 @@ function LegalLinks() {
           {label} <ExternalLink className="w-3 h-3" />
         </a>
       ))}
+    </div>
+  );
+}
+
+function DevicesSessionsCard() {
+  const [sessions, setSessions] = useState<AuthSessionSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    try {
+      setSessions(await listAuthSessions());
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't load sessions");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  async function revoke(session: AuthSessionSummary) {
+    setBusyId(session.session_id);
+    try {
+      await revokeAuthSession(session.session_id);
+      toast.success("Session revoked");
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't revoke session");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="bg-zinc-900 rounded-2xl p-6 mt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Laptop className="w-4 h-4 text-zinc-400" />
+        <p className="text-sm font-medium text-zinc-200">Devices and sessions</p>
+      </div>
+      {loading ? (
+        <p className="text-xs text-zinc-500">Loading…</p>
+      ) : sessions.length === 0 ? (
+        <p className="text-xs text-zinc-500">No active sessions.</p>
+      ) : (
+        <ul className="space-y-2">
+          {sessions.map((s) => (
+            <li
+              key={s.session_id}
+              className="flex items-center gap-3 rounded-lg bg-zinc-950/60 px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-zinc-200 truncate">
+                  {s.device_name || s.client}
+                  {s.current ? " · this device" : ""}
+                </p>
+                <p className="text-[11px] text-zinc-500">
+                  Last seen {new Date(s.last_seen_at).toLocaleString()}
+                </p>
+              </div>
+              {!s.current && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  loading={busyId === s.session_id}
+                  onClick={() => void revoke(s)}
+                >
+                  Revoke
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ExternalAIPermissionsCard() {
+  const [consents, setConsents] = useState<StoredAIConsent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    try {
+      setConsents(await listAIConsents());
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't load AI permissions");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  async function revoke(c: StoredAIConsent) {
+    const key = `${c.channel_id}:${c.bot_id}`;
+    setBusyKey(key);
+    try {
+      await revokeAIConsent(c.channel_id, c.bot_id);
+      toast.success("Permission revoked");
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't revoke");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  return (
+    <div className="bg-zinc-900 rounded-2xl p-6 mt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Shield className="w-4 h-4 text-zinc-400" />
+        <p className="text-sm font-medium text-zinc-200">External AI permissions</p>
+      </div>
+      {loading ? (
+        <p className="text-xs text-zinc-500">Loading…</p>
+      ) : consents.length === 0 ? (
+        <p className="text-xs text-zinc-500">
+          No stored consents. When a bot uses an external AI processor, agreements
+          appear here.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {consents.map((c) => {
+            const key = `${c.channel_id}:${c.bot_id}`;
+            return (
+              <li
+                key={key}
+                className="flex items-center gap-3 rounded-lg bg-zinc-950/60 px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-zinc-200 truncate">
+                    {c.bot_name}
+                    {c.provider_name ? ` · ${c.provider_name}` : ""}
+                  </p>
+                  <p className="text-[11px] text-zinc-500 truncate">
+                    #{c.channel_name} · policy {c.policy_version}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  loading={busyKey === key}
+                  onClick={() => void revoke(c)}
+                >
+                  Revoke
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function BotsMovedCard() {
+  const navigate = useNavigate();
+  return (
+    <div className="bg-zinc-900 rounded-2xl p-6">
+      <div className="flex items-center gap-2 mb-2">
+        <Bot className="w-4 h-4 text-indigo-300" />
+        <p className="text-sm font-medium text-zinc-200">Bots live in Fleet</p>
+      </div>
+      <p className="text-xs text-zinc-400 mb-4">
+        Create and manage bots from Fleet — the primary home for your agent roster.
+      </p>
+      <Button onClick={() => navigate("/fleet")}>Open Fleet</Button>
     </div>
   );
 }
@@ -896,7 +1128,16 @@ export default function SettingsPage() {
             </section>
           )}
 
-          {section === "bots" && <BotsManager />}
+          {section === "bots" && <BotsMovedCard />}
+
+          {section === "server" && (
+            <section>
+              <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-4">
+                Server
+              </h2>
+              <ServerCard />
+            </section>
+          )}
 
           {section === "connector" && <ConnectorManager />}
 
@@ -906,7 +1147,6 @@ export default function SettingsPage() {
                 About
               </h2>
               <AppUpdateCard />
-              <ServerCard />
               <LaunchAtLoginCard />
             </section>
           )}
@@ -930,6 +1170,10 @@ export default function SettingsPage() {
               <PasskeyCard />
 
               <ExternalIdentitiesCard />
+
+              <DevicesSessionsCard />
+
+              <ExternalAIPermissionsCard />
 
               {/* Desktop shell: also linked from About — keep a copy here so
                   Account remains a one-stop for signed-in session controls. */}

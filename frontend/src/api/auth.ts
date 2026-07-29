@@ -224,6 +224,20 @@ export async function unlinkExternalIdentity(
   return apiJson(`/users/me/external-identities/${provider}`, { method: "DELETE" });
 }
 
+/** Authenticated Google link: starts OAuth that returns `?linked=google` on success. */
+export async function startExternalIdentityOAuthLink(
+  provider: "google",
+  client: "web" | "macos" | "ios" = isTauri() ? "macos" : "web"
+): Promise<{ authorization_url: string }> {
+  return apiJson(`/users/me/external-identities/${provider}/oauth-start`, {
+    method: "POST",
+    body: JSON.stringify({
+      client,
+      device_name: isTauri() ? "Mac" : undefined,
+    }),
+  });
+}
+
 export async function deleteAccount(input: {
   confirmation: string;
   current_password?: string;

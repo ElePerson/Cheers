@@ -7,6 +7,7 @@ struct UserSession: Equatable {
     let displayName: String?
     let role: String
     let username: String?
+    let avatarURL: String?
 }
 
 /// Intermediate login step when the account has 2FA enabled.
@@ -24,7 +25,9 @@ final class AppModel {
     /// Public, production URLs. These must stay live and match the App Store
     /// Connect metadata before each submission.
     static let privacyPolicyURL = URL(string: "https://www.tocheers.com/privacy.html")!
+    static let termsURL = URL(string: "https://www.tocheers.com/terms.html")!
     static let supportURL = URL(string: "https://www.tocheers.com/support.html")!
+    static let accountDeletionURL = URL(string: "https://www.tocheers.com/account-deletion.html")!
     static let remoteOperationSafetyURL = URL(string: "https://www.tocheers.com/remote-operations.html")!
 
     private enum Keys {
@@ -36,6 +39,7 @@ final class AppModel {
         static let displayName = "display_name"
         static let role = "role"
         static let username = "username"
+        static let avatarURL = "avatar_url"
     }
 
     var serverURLString: String
@@ -59,8 +63,24 @@ final class AppModel {
     @ObservationIgnored
     private(set) var token: String?
 
+    /// Refresh tokens rotate on every use. Keep the refresh operation single-flight so
+    /// a foreground wakeup and the periodic timer cannot present the same token twice
+    /// and trigger the gateway's refresh-token-reuse revocation.
+    @ObservationIgnored
+    private var isRefreshingSession = false
+
+    @ObservationIgnored
+    private var lastSessionRefreshAt: Date?
+
     init() {
         let defaults = UserDefaults.standard
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing-reset-session") {
+            KeychainStore.remove(Keys.token)
+            KeychainStore.remove(Keys.refreshToken)
+            KeychainStore.remove(Keys.trustedDevice)
+            [Keys.serverURL, Keys.userId, Keys.displayName, Keys.role, Keys.username, Keys.avatarURL]
+                .forEach(defaults.removeObject(forKey:))
+        }
         serverURLString = defaults.string(forKey: Keys.serverURL) ?? Self.defaultServerURL
         token = KeychainStore.get(Keys.token)
         if let token, !token.isEmpty, let userId = defaults.string(forKey: Keys.userId) {
@@ -68,7 +88,8 @@ final class AppModel {
                 userId: userId,
                 displayName: defaults.string(forKey: Keys.displayName),
                 role: defaults.string(forKey: Keys.role) ?? "member",
-                username: defaults.string(forKey: Keys.username)
+                username: defaults.string(forKey: Keys.username),
+                avatarURL: defaults.string(forKey: Keys.avatarURL)
             )
             _ = token // silence unused warning paths
         } else {
@@ -79,7 +100,7 @@ final class AppModel {
         }
         if session != nil {
             if KeychainStore.get(Keys.refreshToken) != nil {
-                Task { await restoreSession() }
+                Task { await refreshSessionIfNeeded(force: true) }
             } else {
                 connectSocket()
             }
@@ -275,22 +296,62 @@ final class AppModel {
         defaults.set(role, forKey: Keys.role)
         defaults.set(response.username, forKey: Keys.username)
 
+        let persistedAvatarURL = session?.userId == userId ? session?.avatarURL : nil
         session = UserSession(
             userId: userId,
             displayName: response.displayName,
             role: role,
-            username: response.username
+            username: response.username,
+            avatarURL: persistedAvatarURL
         )
-        connectSocket()
+        lastSessionRefreshAt = Date()
+        if socket.isAuthed {
+            socket.refreshAuthentication(token: accessToken)
+        } else {
+            connectSocket()
+        }
     }
 
-    private func restoreSession() async {
-        guard let base = baseURL, let refreshToken = KeychainStore.get(Keys.refreshToken) else { return }
+    /// Rotates the native refresh token before the ten-minute access token expires.
+    /// Web and macOS use the same eight-minute cadence. Transient network failures keep
+    /// the local session so a later timer/foreground wakeup can retry; only a rejected
+    /// refresh credential signs the user out.
+    func refreshSessionIfNeeded(force: Bool = false) async {
+        guard session != nil,
+              !isRefreshingSession,
+              let base = baseURL,
+              let refreshToken = KeychainStore.get(Keys.refreshToken)
+        else { return }
+        if !force,
+           let lastSessionRefreshAt,
+           Date().timeIntervalSince(lastSessionRefreshAt) < 8 * 60 {
+            return
+        }
+
+        isRefreshingSession = true
+        defer { isRefreshingSession = false }
         do {
             let response = try await APIClient(baseURL: base, token: nil).refresh(refreshToken: refreshToken)
             try finishLogin(base: base, response: response)
-        } catch {
+        } catch APIError.http(let status, _) where status == 401 {
             clearSession()
+        } catch {
+            // Offline/server failures are retryable. Keep using the current access
+            // token when it is still valid and retry on the next minute tick.
+            reconnectSocketIfNeeded()
+        }
+    }
+
+    /// One-minute checks make a failed eight-minute refresh retry before the access
+    /// token's ten-minute expiry. SwiftUI cancels this task automatically on sign-out.
+    func runSessionRefreshLoop() async {
+        while !Task.isCancelled, session != nil {
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch {
+                return
+            }
+            await refreshSessionIfNeeded()
         }
     }
 
@@ -335,6 +396,7 @@ final class AppModel {
         Task { await messageStore.removeAll() }
         token = nil
         session = nil
+        lastSessionRefreshAt = nil
         KeychainStore.remove(Keys.token)
         KeychainStore.remove(Keys.refreshToken)
         KeychainStore.remove(Keys.trustedDevice)
@@ -343,6 +405,47 @@ final class AppModel {
         defaults.removeObject(forKey: Keys.displayName)
         defaults.removeObject(forKey: Keys.role)
         defaults.removeObject(forKey: Keys.username)
+        defaults.removeObject(forKey: Keys.avatarURL)
+    }
+
+    /// Clears the session and remembered server URL so Login shows the server field.
+    func switchServer() async {
+        await logout()
+        serverURLString = Self.defaultServerURL
+        UserDefaults.standard.removeObject(forKey: Keys.serverURL)
+    }
+
+    /// Updates the in-memory + persisted profile fields used outside the edit sheet.
+    func applyProfile(displayName: String?, avatarURL: String?) {
+        guard let session else { return }
+        let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = (trimmed?.isEmpty == false) ? trimmed : nil
+        self.session = UserSession(
+            userId: session.userId,
+            displayName: next,
+            role: session.role,
+            username: session.username,
+            avatarURL: avatarURL
+        )
+        UserDefaults.standard.set(next, forKey: Keys.displayName)
+        UserDefaults.standard.set(avatarURL, forKey: Keys.avatarURL)
+    }
+
+    func applyProfileAvatarURL(_ avatarURL: String?) {
+        applyProfile(displayName: session?.displayName, avatarURL: avatarURL)
+    }
+
+    func resolveServerResourceURL(_ raw: String?) -> URL? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let absolute = URL(string: raw), absolute.scheme != nil { return absolute }
+        guard let baseURL,
+              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return URL(string: raw, relativeTo: components.url)?.absoluteURL
     }
 
     // MARK: Socket

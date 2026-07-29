@@ -1,13 +1,12 @@
 import SwiftUI
 
-/// Fleet — the workspace's mission control, matching the web's Fleet page:
-/// a "Waiting on you" section (pending approvals) over a "Bots" roster with
-/// live status.
+/// Fleet — bot roster + create/manage. Approvals live in Activity
+/// (`docs/arch/CLIENT_NAV_IA.md` §5); this screen deep-links when any are pending.
 struct FleetView: View {
     @Environment(AppModel.self) private var app
+    @Environment(ShellModel.self) private var shell
     var activity: ActivityModel
     @State private var model = AgentsModel()
-    @State private var sheetItem: ApprovalItem?
     @State private var showOnboarding = false
     @State private var selectedBot: BotDto?
 
@@ -15,11 +14,29 @@ struct FleetView: View {
         ScreenScaffold(title: "Fleet") {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    if !activity.pending.isEmpty {
-                        sectionHeader("Waiting on you", icon: "shield.lefthalf.filled", tint: Theme.warning)
-                        ForEach(activity.pending) { item in
-                            approvalCard(item)
+                    if activity.pending.count > 0 {
+                        Button { shell.push(.activity) } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "shield.lefthalf.filled")
+                                    .foregroundStyle(Theme.warning)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(activity.pending.count) waiting on you")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Theme.textPrimary)
+                                    Text("Review in Activity")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(Theme.textSecondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Theme.textFaint)
+                            }
+                            .padding(12)
+                            .background(Theme.bgSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
+                        .buttonStyle(.plain)
                     }
 
                     HStack {
@@ -59,11 +76,6 @@ struct FleetView: View {
             model.attach(app)
             await model.loadIfNeeded()
         }
-        .sheet(item: $sheetItem) { item in
-            ApprovalSheetView(channelId: item.channelId, botName: item.botName, request: item.request)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
         .sheet(isPresented: $showOnboarding) {
             BotOnboardingView(existingBots: model.bots) {
                 Task { await model.load() }
@@ -76,8 +88,6 @@ struct FleetView: View {
         }
     }
 
-    /// An empty fleet is the most common first-run state, so it doubles as the
-    /// entry point rather than just reporting that nothing is here.
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let message = model.errorMessage {
@@ -102,68 +112,17 @@ struct FleetView: View {
         .padding(.vertical, 16)
     }
 
-    private func sectionHeader(_ title: String, icon: String? = nil, tint: Color = Theme.textSecondary) -> some View {
-        HStack(spacing: 6) {
-            if let icon {
-                Image(systemName: icon).font(.system(size: 12)).foregroundStyle(tint)
-            }
-            Text(title.uppercased())
-                .font(.system(size: 11.5, weight: .bold)).tracking(0.7)
-                .foregroundStyle(Theme.textSecondary)
-        }
-        .padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 2)
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 11.5, weight: .bold)).tracking(0.7)
+            .foregroundStyle(Theme.textSecondary)
+            .padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 2)
     }
-
-    // MARK: Waiting on you
-
-    private func approvalCard(_ item: ApprovalItem) -> some View {
-        HStack(spacing: 0) {
-            Rectangle().fill(Theme.warning).frame(width: 3)
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 9) {
-                    AvatarView(seedId: item.message.senderId ?? item.id, name: item.botName, size: 30)
-                    Text(item.request.title)
-                        .font(.system(size: 14.5, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Spacer()
-                }
-                if let command = item.request.command {
-                    Text(command)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(1).truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(Theme.bgApp)
-                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                }
-                Text("\(item.botName) · #\(channelName(item))")
-                    .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
-                Button { sheetItem = item } label: {
-                    Text("Review")
-                        .font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
-                        .padding(.horizontal, 16).padding(.vertical, 8)
-                        .background(Theme.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(12)
-        }
-        .background(Theme.bgSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func channelName(_ item: ApprovalItem) -> String {
-        item.channelId.prefix(6).description
-    }
-
-    // MARK: Bots
 
     private var summaryStrip: some View {
         HStack(spacing: 7) {
             summaryChip(dot: Theme.online, "\(model.onlineCount) online")
-            summaryChip(dot: Theme.textFaint, "\(model.offlineCount) idle")
+            summaryChip(dot: Theme.textFaint, "\(model.offlineCount) offline")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

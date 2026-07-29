@@ -1,18 +1,26 @@
 import SwiftUI
 import AuthenticationServices
 import CryptoKit
+import PhotosUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
+    @Environment(ShellModel.self) private var shell
     @State private var isSigningOut = false
     @State private var showSignOutConfirm = false
     @State private var showChangePassword = false
     @State private var showTwoFactor = false
     @State private var showPasskeys = false
     @State private var showAppleAccount = false
+    @State private var showGoogleAccount = false
     @State private var showBlockedUsers = false
     @State private var showAIConsents = false
     @State private var showDeleteAccount = false
+    @State private var showWorkspaceAdmin = false
+    @State private var showAccountSessions = false
+    @State private var showProfileEdit = false
+    @State private var showSwitchServerConfirm = false
 
     var body: some View {
         List {
@@ -36,6 +44,17 @@ struct SettingsView: View {
         } message: {
             Text("This revokes your sessions on this server.")
         }
+        .confirmationDialog(
+            "Switch server?",
+            isPresented: $showSwitchServerConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Switch server", role: .destructive) {
+                Task { await app.switchServer() }
+            }
+        } message: {
+            Text("Signs you out and lets you pick a different server URL on the next login.")
+        }
         .sheet(isPresented: $showChangePassword) {
             ChangePasswordSheet()
         }
@@ -46,9 +65,18 @@ struct SettingsView: View {
             PasskeySettingsView()
         }
         .sheet(isPresented: $showAppleAccount) { AppleAccountSheet() }
+        .sheet(isPresented: $showGoogleAccount) { GoogleAccountSheet() }
         .sheet(isPresented: $showBlockedUsers) { BlockedUsersSheet() }
         .sheet(isPresented: $showAIConsents) { AIConsentSettingsSheet() }
         .sheet(isPresented: $showDeleteAccount) { DeleteAccountSheet() }
+        .sheet(isPresented: $showWorkspaceAdmin) {
+            if let workspace = shell.selectedWorkspace {
+                WorkspaceAdminSheet(workspace: workspace)
+            }
+        }
+        .sheet(isPresented: $showAccountSessions) { AccountSessionsSheet() }
+        .sheet(isPresented: $showProfileEdit) { ProfileEditSheet() }
+        .task { await refreshProfileSummary() }
     }
 
     private var displayName: String {
@@ -57,29 +85,41 @@ struct SettingsView: View {
         return session?.username ?? "Unknown"
     }
 
+    private func refreshProfileSummary() async {
+        guard let api = app.api, let profile = try? await api.getMe() else { return }
+        app.applyProfile(displayName: profile.displayName, avatarURL: profile.avatarURL)
+    }
+
     private var profileSection: some View {
         Section {
-            HStack(spacing: 14) {
-                AvatarView(seedId: app.session?.userId ?? "?", name: displayName, size: 52)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    if let username = app.session?.username {
-                        Text(username)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.textMuted)
+            Button { showProfileEdit = true } label: {
+                HStack(spacing: 14) {
+                    AvatarView(
+                        seedId: app.session?.userId ?? "?",
+                        name: displayName,
+                        size: 52,
+                        imageURL: app.resolveServerResourceURL(app.session?.avatarURL)
+                    )
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(displayName)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        if let username = app.session?.username {
+                            Text(username)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        Text("Edit profile")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.accent)
                     }
-                    Text(app.session?.role ?? "member")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.botBadgeText)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Theme.botBadgeBg)
-                        .clipShape(Capsule())
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.textFaint)
                 }
+                .padding(.vertical, 4)
             }
-            .padding(.vertical, 4)
             .listRowBackground(Theme.bgSurface)
 
             LabeledContent {
@@ -127,10 +167,16 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.textMuted)
             }
             .listRowBackground(Theme.bgSurface)
+
+            Button { showSwitchServerConfirm = true } label: {
+                Text("Switch server")
+                    .foregroundStyle(Theme.accent)
+            }
+            .listRowBackground(Theme.bgSurface)
         } header: {
             sectionHeader("Server")
         } footer: {
-            Text("To switch servers, sign out and sign back in with a different server URL.")
+            Text("Switching servers signs you out. Tokens belong to one server.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textFaint)
         }
@@ -138,6 +184,20 @@ struct SettingsView: View {
 
     private var accountSection: some View {
         Section {
+            if let workspace = shell.selectedWorkspace, workspace.kind != "personal" {
+                Button { showWorkspaceAdmin = true } label: {
+                    Label("Manage \(workspace.name)", systemImage: "building.2")
+                        .foregroundStyle(Theme.textBody)
+                }
+                .listRowBackground(Theme.bgSurface)
+            }
+
+            Button { showAccountSessions = true } label: {
+                Label("Devices and sessions", systemImage: "laptopcomputer.and.iphone")
+                    .foregroundStyle(Theme.textBody)
+            }
+            .listRowBackground(Theme.bgSurface)
+
             Button { showChangePassword = true } label: {
                 Label("Change password", systemImage: "key")
                     .font(.system(size: 14, weight: .medium))
@@ -159,6 +219,12 @@ struct SettingsView: View {
 
             Button { showAppleAccount = true } label: {
                 Label("Sign in with Apple", systemImage: "apple.logo")
+                    .foregroundStyle(Theme.textBody)
+            }
+            .listRowBackground(Theme.bgSurface)
+
+            Button { showGoogleAccount = true } label: {
+                Label("Google account", systemImage: "g.circle")
                     .foregroundStyle(Theme.textBody)
             }
             .listRowBackground(Theme.bgSurface)
@@ -209,8 +275,20 @@ struct SettingsView: View {
             }
             .listRowBackground(Theme.bgSurface)
 
+            Link(destination: AppModel.termsURL) {
+                Label("Terms", systemImage: "doc.text")
+                    .foregroundStyle(Theme.textBody)
+            }
+            .listRowBackground(Theme.bgSurface)
+
             Link(destination: AppModel.supportURL) {
                 Label("Help & Support", systemImage: "questionmark.circle")
+                    .foregroundStyle(Theme.textBody)
+            }
+            .listRowBackground(Theme.bgSurface)
+
+            Link(destination: AppModel.accountDeletionURL) {
+                Label("Account deletion", systemImage: "person.crop.circle.badge.minus")
                     .foregroundStyle(Theme.textBody)
             }
             .listRowBackground(Theme.bgSurface)
@@ -238,6 +316,162 @@ struct SettingsView: View {
         Task {
             await app.logout()
             isSigningOut = false
+        }
+    }
+}
+
+// MARK: - Profile edit
+
+private struct ProfileEditSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var displayName = ""
+    @State private var statusEmoji = ""
+    @State private var statusText = ""
+    @State private var bio = ""
+    @State private var avatarURL: URL?
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var isUploadingAvatar = false
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if isLoading {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else {
+                    Section {
+                        HStack(spacing: 14) {
+                            AvatarView(
+                                seedId: app.session?.userId ?? "?",
+                                name: displayName.isEmpty ? app.session?.username : displayName,
+                                size: 64,
+                                imageURL: avatarURL
+                            )
+                            VStack(alignment: .leading, spacing: 8) {
+                                PhotosPicker(selection: $pickerItem, matching: .images) {
+                                    Text(isUploadingAvatar ? "Uploading…" : "Change photo")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Theme.accent)
+                                }
+                                .disabled(isUploadingAvatar)
+                                Text("JPEG or PNG, used across Cheers clients.")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.textMuted)
+                            }
+                        }
+                        .padding(.vertical, 4)
+
+                        TextField("Display name", text: $displayName)
+                        TextField("Status emoji", text: $statusEmoji)
+                            .textInputAutocapitalization(.never)
+                        TextField("Status text", text: $statusText)
+                        TextField("Bio", text: $bio, axis: .vertical)
+                            .lineLimit(3...6)
+                    }
+                    if let errorText {
+                        Section {
+                            Text(errorText).foregroundStyle(Theme.danger)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Edit profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(isLoading || isSaving || isUploadingAvatar)
+                }
+            }
+            .task { await load() }
+            .onChange(of: pickerItem) { _, item in
+                guard let item else { return }
+                Task { await uploadAvatar(from: item) }
+            }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let me = try await app.api?.getMe()
+            displayName = me?.displayName ?? app.session?.displayName ?? ""
+            statusEmoji = me?.statusEmoji ?? ""
+            statusText = me?.statusText ?? ""
+            bio = me?.bio ?? ""
+            avatarURL = app.resolveServerResourceURL(me?.avatarURL)
+            if let me {
+                app.applyProfile(displayName: me.displayName, avatarURL: me.avatarURL)
+            }
+        } catch {
+            errorText = error.localizedDescription
+            displayName = app.session?.displayName ?? ""
+        }
+    }
+
+    private func uploadAvatar(from item: PhotosPickerItem) async {
+        isUploadingAvatar = true
+        defer {
+            isUploadingAvatar = false
+            pickerItem = nil
+        }
+        do {
+            guard let jpeg = try await Self.jpegData(from: item) else {
+                errorText = "Could not read the selected photo."
+                return
+            }
+            let urlString = try await app.api?.uploadUserAvatar(data: jpeg, contentType: "image/jpeg")
+            avatarURL = app.resolveServerResourceURL(urlString)
+            app.applyProfileAvatarURL(urlString)
+            errorText = nil
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// PhotosPicker's `Data` transferable is unreliable for HEIC/Live Photos;
+    /// decode via UIImage and re-encode JPEG so the gateway always accepts it.
+    private static func jpegData(from item: PhotosPickerItem) async throws -> Data? {
+        if let data = try await item.loadTransferable(type: Data.self),
+           let image = UIImage(data: data),
+           let jpeg = image.jpegData(compressionQuality: 0.88) {
+            return jpeg
+        }
+        // Fallback: some iOS versions only expose a file URL transferable.
+        if let url = try await item.loadTransferable(type: URL.self),
+           let data = try? Data(contentsOf: url),
+           let image = UIImage(data: data),
+           let jpeg = image.jpegData(compressionQuality: 0.88) {
+            return jpeg
+        }
+        return nil
+    }
+
+    private func save() async {
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            let me = try await app.api?.updateMe(
+                displayName: displayName,
+                bio: bio,
+                statusText: statusText,
+                statusEmoji: statusEmoji
+            )
+            app.applyProfile(
+                displayName: me?.displayName ?? displayName,
+                avatarURL: me?.avatarURL ?? app.session?.avatarURL
+            )
+            dismiss()
+        } catch {
+            errorText = error.localizedDescription
         }
     }
 }
@@ -462,6 +696,132 @@ private struct AppleAccountSheet: View {
     }
 }
 
+private struct GoogleAccountSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var status: ExternalIdentityStatusDto?
+    @State private var errorText: String?
+    @State private var isBusy = false
+    @State private var googleOAuth = GoogleOAuthSession()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let status {
+                    Section {
+                        Label(
+                            status.linked ? "Google account linked" : "Google account not linked",
+                            systemImage: status.linked ? "checkmark.shield" : "g.circle"
+                        )
+                        if status.linked {
+                            if let email = status.email, !email.isEmpty {
+                                Text(email).foregroundStyle(Theme.textSecondary)
+                            } else if let name = status.displayName, !name.isEmpty {
+                                Text(name).foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                    }
+
+                    if status.linked {
+                        Section {
+                            Button("Unlink Google", role: .destructive) {
+                                Task { await unlink() }
+                            }
+                            .disabled(isBusy || !status.canUnlink || !status.recentAuthentication)
+                        } footer: {
+                            if !status.canUnlink {
+                                Text("Add another sign-in method (password, Apple, or passkey) before unlinking Google.")
+                            } else if !status.recentAuthentication {
+                                Text("Sign in again (within the last 5 minutes) to make this change.")
+                            } else {
+                                Text("Unlinking signs out other sessions and removes trusted devices.")
+                            }
+                        }
+                    } else {
+                        Section {
+                            Button {
+                                Task { await link() }
+                            } label: {
+                                if isBusy {
+                                    ProgressView()
+                                } else {
+                                    Text("Link Google")
+                                }
+                            }
+                            .disabled(isBusy || !status.recentAuthentication)
+                        } footer: {
+                            if !status.recentAuthentication {
+                                Text("Sign in again (within the last 5 minutes), then tap Link Google.")
+                            } else {
+                                Text("Opens Google sign-in and attaches that account to your current Cheers session.")
+                            }
+                        }
+                    }
+                } else {
+                    ProgressView()
+                }
+                if let errorText {
+                    Section { Text(errorText).foregroundStyle(Theme.danger) }
+                }
+            }
+            .navigationTitle("Google account")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        do {
+            status = try await app.api?.externalIdentityStatus(provider: "google")
+            errorText = nil
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func link() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            guard let api = app.api else { throw APIError.unauthorized }
+            let started = try await api.startExternalIdentityOAuthLink(
+                provider: "google",
+                deviceName: UIDevice.current.name
+            )
+            guard let url = URL(string: started.authorizationURL) else {
+                throw APIError.http(status: 500, detail: "Invalid Google authorization URL.")
+            }
+            let callback = try await googleOAuth.authenticate(authorizationURL: url)
+            guard let comps = URLComponents(url: callback, resolvingAgainstBaseURL: false) else {
+                throw APIError.http(status: 401, detail: "Google link did not return a callback.")
+            }
+            if let err = comps.queryItems?.first(where: { $0.name == "error" })?.value {
+                throw APIError.http(status: 401, detail: err)
+            }
+            guard comps.queryItems?.first(where: { $0.name == "linked" })?.value == "google" else {
+                throw APIError.http(status: 401, detail: "Google link did not complete.")
+            }
+            await load()
+        } catch let oauthError as GoogleOAuthError {
+            if case .cancelled = oauthError { return }
+            errorText = oauthError.localizedDescription
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func unlink() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await app.api?.unlinkExternalIdentity(provider: "google")
+            await load()
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+}
+
 private struct DeleteAccountSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -569,4 +929,278 @@ private struct AIConsentSettingsSheet: View {
     }
     private func load() async { do { consents = try await app.api?.storedAIConsents() ?? [] } catch { errorText = error.localizedDescription } }
     private func revoke(_ consent: StoredAIConsent) async { do { try await app.api?.revokeAIConsent(channelId: consent.channelId, botId: consent.botId); await load() } catch { errorText = error.localizedDescription } }
+}
+
+// MARK: - Workspace administration
+
+struct WorkspaceAdminSheet: View {
+    private enum Confirmation: Identifiable {
+        case remove(WorkspaceMemberDto), leave, delete
+        var id: String {
+            switch self {
+            case .remove(let member): return "remove-\(member.userId)"
+            case .leave: return "leave"
+            case .delete: return "delete"
+            }
+        }
+    }
+
+    @Environment(AppModel.self) private var app
+    @Environment(ShellModel.self) private var shell
+    @Environment(\.dismiss) private var dismiss
+
+    let workspace: WorkspaceDto
+    @State private var name: String
+    @State private var members: [WorkspaceMemberDto] = []
+    @State private var inviteIdentifier = ""
+    @State private var inviteRole = "member"
+    @State private var isBusy = false
+    @State private var confirmation: Confirmation?
+    @State private var errorText: String?
+
+    init(workspace: WorkspaceDto) {
+        self.workspace = workspace
+        _name = State(initialValue: workspace.name)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Workspace") {
+                    TextField("Workspace name", text: $name)
+                    Button("Save name") { Task { await saveName() } }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name == workspace.name || isBusy)
+                }
+
+                Section {
+                    TextField("Exact username or email", text: $inviteIdentifier)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Picker("Role", selection: $inviteRole) {
+                        Text("Member").tag("member")
+                        Text("Admin").tag("admin")
+                        Text("Owner").tag("owner")
+                    }
+                    Button("Send invitation") { Task { await invite() } }
+                        .disabled(inviteIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isBusy)
+                } header: {
+                    Text("Invite member")
+                } footer: {
+                    Text("Invitations remain pending until the recipient accepts. Only owners can grant the owner role.")
+                }
+
+                Section("Members") {
+                    if members.isEmpty, errorText == nil { ProgressView() }
+                    ForEach(members) { member in
+                        HStack(spacing: 10) {
+                            AvatarView(seedId: member.userId, name: member.name, size: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(member.name)
+                                Text("@\(member.username) · \(member.status)")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                            Spacer()
+                            if member.userId == app.session?.userId {
+                                Text(member.role.capitalized).foregroundStyle(Theme.textSecondary)
+                            } else {
+                                Menu(member.role.capitalized) {
+                                    ForEach(["member", "admin", "owner"], id: \.self) { role in
+                                        Button(role.capitalized) { Task { await setRole(member, role: role) } }
+                                    }
+                                    Divider()
+                                    Button("Remove", role: .destructive) { confirmation = .remove(member) }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section("Danger zone") {
+                    Button("Leave workspace", role: .destructive) { confirmation = .leave }
+                    Button("Delete workspace", role: .destructive) { confirmation = .delete }
+                }
+
+                if let errorText {
+                    Section { Text(errorText).foregroundStyle(Theme.danger) }
+                }
+            }
+            .disabled(isBusy)
+            .navigationTitle("Workspace Admin")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task { await loadMembers() }
+            .confirmationDialog(confirmationTitle, isPresented: Binding(
+                get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }
+            ), titleVisibility: .visible) {
+                Button(confirmationButtonTitle, role: .destructive) { Task { await performConfirmation() } }
+                Button("Cancel", role: .cancel) { confirmation = nil }
+            } message: {
+                Text(confirmationMessage)
+            }
+        }
+    }
+
+    private var confirmationTitle: String {
+        switch confirmation {
+        case .remove(let member): return "Remove \(member.name)?"
+        case .leave: return "Leave \(workspace.name)?"
+        case .delete: return "Delete \(workspace.name)?"
+        case nil: return "Confirm action"
+        }
+    }
+
+    private var confirmationButtonTitle: String {
+        switch confirmation {
+        case .remove: return "Remove member"
+        case .leave: return "Leave workspace"
+        case .delete: return "Delete workspace"
+        case nil: return "Confirm"
+        }
+    }
+
+    private var confirmationMessage: String {
+        switch confirmation {
+        case .remove: return "The person loses access to workspace channels."
+        case .leave: return "You lose access to this workspace. The last owner cannot leave."
+        case .delete: return "The workspace and its contents are permanently removed."
+        case nil: return ""
+        }
+    }
+
+    private func loadMembers() async {
+        guard let api = app.api else { return }
+        do {
+            members = try await api.listWorkspaceMembers(workspaceId: workspace.workspaceId)
+            errorText = nil
+        } catch { errorText = apiMessage(error) }
+    }
+
+    private func saveName() async {
+        guard let api = app.api else { return }
+        await run {
+            _ = try await api.updateWorkspace(workspaceId: workspace.workspaceId, name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+            await shell.loadWorkspaces()
+        }
+    }
+
+    private func invite() async {
+        guard let api = app.api else { return }
+        await run {
+            try await api.inviteWorkspaceMember(
+                workspaceId: workspace.workspaceId,
+                identifier: inviteIdentifier.trimmingCharacters(in: .whitespacesAndNewlines),
+                role: inviteRole
+            )
+            inviteIdentifier = ""
+            await loadMembers()
+        }
+    }
+
+    private func setRole(_ member: WorkspaceMemberDto, role: String) async {
+        guard let api = app.api else { return }
+        await run {
+            try await api.setWorkspaceMemberRole(workspaceId: workspace.workspaceId, userId: member.userId, role: role)
+            await loadMembers()
+        }
+    }
+
+    private func performConfirmation() async {
+        guard let api = app.api, let action = confirmation else { return }
+        confirmation = nil
+        await run {
+            switch action {
+            case .remove(let member):
+                try await api.removeWorkspaceMember(workspaceId: workspace.workspaceId, userId: member.userId)
+                await loadMembers()
+            case .leave:
+                try await api.leaveWorkspace(workspaceId: workspace.workspaceId)
+                shell.selectWorkspace(nil)
+                await shell.loadWorkspaces()
+                dismiss()
+            case .delete:
+                try await api.deleteWorkspace(workspaceId: workspace.workspaceId)
+                shell.selectWorkspace(nil)
+                await shell.loadWorkspaces()
+                dismiss()
+            }
+        }
+    }
+
+    private func run(_ operation: () async throws -> Void) async {
+        isBusy = true
+        defer { isBusy = false }
+        do { try await operation(); errorText = nil }
+        catch { errorText = apiMessage(error) }
+    }
+
+    private func apiMessage(_ error: Error) -> String {
+        (error as? APIError)?.errorDescription ?? error.localizedDescription
+    }
+}
+
+// MARK: - Account sessions
+
+private struct AccountSessionsSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var sessions: [AuthSessionSummary] = []
+    @State private var revoking: String?
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if sessions.isEmpty, errorText == nil { ProgressView() }
+                ForEach(sessions) { session in
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack {
+                            Label(session.deviceName ?? session.client.capitalized, systemImage: icon(for: session.client))
+                                .font(.headline)
+                            Spacer()
+                            if session.current {
+                                Text("This device").font(.caption).foregroundStyle(Theme.online)
+                            }
+                        }
+                        Text("Last active \(relativeDate(session.lastSeenAt))")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        if !session.current {
+                            Button("Revoke session", role: .destructive) { Task { await revoke(session) } }
+                                .disabled(revoking != nil)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                if let errorText { Text(errorText).foregroundStyle(Theme.danger) }
+            }
+            .navigationTitle("Devices & Sessions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .refreshable { await load() }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        do { sessions = try await app.api?.listAuthSessions() ?? []; errorText = nil }
+        catch { errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription }
+    }
+
+    private func revoke(_ session: AuthSessionSummary) async {
+        guard let api = app.api else { return }
+        revoking = session.id
+        defer { revoking = nil }
+        do { try await api.revokeAuthSession(sessionId: session.id); await load() }
+        catch { errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription }
+    }
+
+    private func icon(for client: String) -> String {
+        switch client { case "ios": return "iphone"; case "macos": return "desktopcomputer"; default: return "globe" }
+    }
+
+    private func relativeDate(_ value: String) -> String {
+        guard let date = ISO8601DateFormatter().date(from: value) else { return value }
+        return date.formatted(.relative(presentation: .named))
+    }
 }
