@@ -50,7 +50,7 @@ struct SettingsView: View {
             titleVisibility: .visible
         ) {
             Button("Switch server", role: .destructive) {
-                app.switchServer()
+                Task { await app.switchServer() }
             }
         } message: {
             Text("Signs you out and lets you pick a different server URL on the next login.")
@@ -76,6 +76,7 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showAccountSessions) { AccountSessionsSheet() }
         .sheet(isPresented: $showProfileEdit) { ProfileEditSheet() }
+        .task { await refreshProfileSummary() }
     }
 
     private var displayName: String {
@@ -84,11 +85,21 @@ struct SettingsView: View {
         return session?.username ?? "Unknown"
     }
 
+    private func refreshProfileSummary() async {
+        guard let api = app.api, let profile = try? await api.getMe() else { return }
+        app.applyProfile(displayName: profile.displayName, avatarURL: profile.avatarURL)
+    }
+
     private var profileSection: some View {
         Section {
             Button { showProfileEdit = true } label: {
                 HStack(spacing: 14) {
-                    AvatarView(seedId: app.session?.userId ?? "?", name: displayName, size: 52)
+                    AvatarView(
+                        seedId: app.session?.userId ?? "?",
+                        name: displayName,
+                        size: 52,
+                        imageURL: app.resolveServerResourceURL(app.session?.avatarURL)
+                    )
                     VStack(alignment: .leading, spacing: 3) {
                         Text(displayName)
                             .font(.system(size: 16, weight: .semibold))
@@ -387,19 +398,6 @@ private struct ProfileEditSheet: View {
         }
     }
 
-    private func resolveAvatarURL(_ raw: String?) -> URL? {
-        guard let raw, !raw.isEmpty else { return nil }
-        if let absolute = URL(string: raw), absolute.scheme != nil { return absolute }
-        guard let base = app.baseURL,
-              var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
-            return nil
-        }
-        comps.path = ""
-        comps.query = nil
-        comps.fragment = nil
-        return URL(string: raw, relativeTo: comps.url)?.absoluteURL
-    }
-
     private func load() async {
         isLoading = true
         defer { isLoading = false }
@@ -409,7 +407,10 @@ private struct ProfileEditSheet: View {
             statusEmoji = me?.statusEmoji ?? ""
             statusText = me?.statusText ?? ""
             bio = me?.bio ?? ""
-            avatarURL = resolveAvatarURL(me?.avatarURL)
+            avatarURL = app.resolveServerResourceURL(me?.avatarURL)
+            if let me {
+                app.applyProfile(displayName: me.displayName, avatarURL: me.avatarURL)
+            }
         } catch {
             errorText = error.localizedDescription
             displayName = app.session?.displayName ?? ""
@@ -428,7 +429,8 @@ private struct ProfileEditSheet: View {
                 return
             }
             let urlString = try await app.api?.uploadUserAvatar(data: jpeg, contentType: "image/jpeg")
-            avatarURL = resolveAvatarURL(urlString)
+            avatarURL = app.resolveServerResourceURL(urlString)
+            app.applyProfileAvatarURL(urlString)
             errorText = nil
         } catch {
             errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
@@ -463,7 +465,10 @@ private struct ProfileEditSheet: View {
                 statusText: statusText,
                 statusEmoji: statusEmoji
             )
-            app.applyProfileDisplayName(me?.displayName ?? displayName)
+            app.applyProfile(
+                displayName: me?.displayName ?? displayName,
+                avatarURL: me?.avatarURL ?? app.session?.avatarURL
+            )
             dismiss()
         } catch {
             errorText = error.localizedDescription
