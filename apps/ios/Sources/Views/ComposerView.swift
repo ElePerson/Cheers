@@ -253,7 +253,6 @@ struct ComposerView: View {
                 .stroke(isFocused ? Theme.accentHover.opacity(0.55) : Color.primary.opacity(0.08), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .alert("Voice dictation", isPresented: Binding(
             get: { dictation.errorMessage != nil },
             set: { if !$0 { dictation.errorMessage = nil } }

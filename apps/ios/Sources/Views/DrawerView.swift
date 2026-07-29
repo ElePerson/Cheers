@@ -26,7 +26,6 @@ struct DrawerView: View {
             footer
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
     private var searchField: some View {

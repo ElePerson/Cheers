@@ -1136,6 +1136,14 @@ struct MessageFileRef: Codable, Hashable, Identifiable {
 
     var id: String { fileId }
 
+    var isImageAttachment: Bool {
+        if contentType?.lowercased().hasPrefix("image/") == true { return true }
+        guard let ext = originalFilename?.split(separator: ".").last?.lowercased() else {
+            return false
+        }
+        return ["jpg", "jpeg", "png", "heic", "heif", "webp", "gif"].contains(String(ext))
+    }
+
     enum CodingKeys: String, CodingKey {
         case fileId = "file_id"
         case originalFilename = "original_filename"

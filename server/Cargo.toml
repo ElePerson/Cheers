@@ -22,7 +22,7 @@ cheers-bridge-protocol = { path = "../packages/cheers-acp-connector-rs/bridge-pr
 tokio        = { version = "1",   features = ["full"] }
 axum         = { version = "0.7", features = ["ws", "macros"] }
 tower        = "0.4"
-tower-http   = { version = "0.5", features = ["cors", "trace", "timeout"] }
+tower-http   = { version = "0.5", features = ["cors", "request-id", "trace", "timeout"] }
 
 # ── 数据库 ───────────────────────────────────────────────────────────────────
 sqlx = { version = "0.8", features = [

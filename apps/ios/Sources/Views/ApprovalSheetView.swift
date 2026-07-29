@@ -26,6 +26,9 @@ struct ApprovalSheetView: View {
                     if let command = request.command {
                         commandBlock(command)
                     }
+                    if !request.locations.isEmpty {
+                        locationsBlock
+                    }
                     if let diff = request.diff {
                         diffBlock(diff)
                     }
@@ -101,6 +104,24 @@ struct ApprovalSheetView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxHeight: 180)
+        .padding(12)
+        .background(Theme.bgApp)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var locationsBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Files affected")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+            ForEach(request.locations, id: \.self) { path in
+                Label(path, systemImage: "doc")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(Theme.textBody)
+                    .textSelection(.enabled)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(Theme.bgApp)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))

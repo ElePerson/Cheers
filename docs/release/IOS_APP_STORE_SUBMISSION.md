@@ -36,8 +36,9 @@ used for **App Functionality**, and **not used for Tracking**:
 | --- | --- | --- |
 | Notifications | Optional approvals, mentions, direct-message and invite alerts | Keep optional; request only after sign-in, never gate core use on it |
 | Camera | Not used | Do not add `NSCameraUsageDescription` |
-| Photo Library | Not used | Do not add `NSPhotoLibraryUsageDescription` |
-| Microphone | Not used | Do not add `NSMicrophoneUsageDescription` |
+| Photo Library | Profile avatars use the system `PhotosPicker`; files may also contain user-selected images | Keep the picker scoped; `PhotosPicker` does not require broad library access, so do not add `NSPhotoLibraryUsageDescription` unless the implementation changes |
+| Microphone | Voice channels and composer dictation, only after the user starts either feature | Keep `NSMicrophoneUsageDescription`; denial must leave text chat usable |
+| Speech Recognition | Local Apple Speech fallback for composer dictation when no server adapter is configured | Keep `NSSpeechRecognitionUsageDescription`; request only when dictation is started |
 | Location, Contacts, Calendar, Bluetooth, Health, Tracking | Not used | Do not add the corresponding purpose strings or entitlements |
 
 Network access is not an iOS consent dialog. The app communicates with the
@@ -46,9 +47,11 @@ development. It does not have iOS-level permission to control the user’s phone
 camera, microphone, or files outside its own sandbox.
 
 Before submission, release owner must reconfirm this list against the final
-binary and production services. If a crash reporter, analytics SDK, advertising
-SDK, voice capture, payment SDK, or new provider is added, update both the
-App Privacy questionnaire and `website/privacy.html` first.
+binary and production services. The current privacy manifest includes photos or
+videos and audio data because users can upload images, join voice channels, and
+dictate a draft. If a crash reporter, analytics SDK, advertising SDK, payment
+SDK, or new provider is added, update both the App Privacy questionnaire and
+`website/privacy.html` first.
 
 ### External AI and remote-operation release gate
 
@@ -94,6 +97,17 @@ test workspace/channel, and no MFA, IP allowlist, invite, or email-verification
 step that blocks Apple reviewers. Do not include a production administrator
 account or any real user data. Describe any test-only bot or privileged feature
 in review notes with precise steps.
+
+### Release metadata and archive identity
+
+- App ID / bundle ID: `app.cheers.ios`.
+- The first public release uses `MARKETING_VERSION = 1.0.0`; increment
+  `CURRENT_PROJECT_VERSION` for every App Store Connect upload.
+- `Info.plist` must reference `$(MARKETING_VERSION)` and
+  `$(CURRENT_PROJECT_VERSION)` rather than carrying an independent version.
+- Validate the signed archive's application identifier, production APNs
+  entitlement, Sign in with Apple entitlement, and associated domains before
+  upload. The unsigned CI build cannot prove distribution signing.
 
 ## Security release gate
 
