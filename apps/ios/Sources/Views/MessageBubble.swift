@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -41,7 +42,7 @@ struct SystemMessageView: View {
             let resolved = message.contentData?["resolved"]?.boolValue == true
             return resolved
                 ? String(localized: "Approval request (resolved)")
-                : String(localized: "Approval request — respond from the web app")
+                : String(localized: "Approval request")
         }
         if message.msgType == "auth_required" {
             let resolved = message.contentData?["resolved"]?.boolValue == true
@@ -206,7 +207,11 @@ struct MessageBubbleView: View {
             if let files = message.files, !files.isEmpty {
                 ForEach(files) { file in
                     Button { onTapFile?(file) } label: {
-                        AttachmentChipView(file: file, isOwn: isOwn)
+                        if file.isImageAttachment {
+                            AttachmentImagePreview(file: file, isOwn: isOwn)
+                        } else {
+                            AttachmentChipView(file: file, isOwn: isOwn)
+                        }
                     }
                     .buttonStyle(.plain)
                 }
@@ -360,6 +365,99 @@ struct AttachmentChipView: View {
         .padding(.vertical, 6)
         .background(Theme.bgSelected.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+/// Authenticated thumbnail for image attachments. Attachment URLs cannot be
+/// handed to AsyncImage because they require the current Bearer token, so the
+/// bytes use the same scoped API path as the full preview sheet.
+private struct AttachmentImagePreview: View {
+    @Environment(AppModel.self) private var app
+    let file: MessageFileRef
+    let isOwn: Bool
+
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    @MainActor private static let cache = NSCache<NSString, UIImage>()
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: 240, minHeight: 120, maxHeight: 220)
+                    .clipped()
+                    .overlay(alignment: .bottomLeading) {
+                        Text(file.originalFilename ?? String(localized: "Image attachment"))
+                            .font(.caption2)
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(.black.opacity(0.62), in: Capsule())
+                            .padding(7)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else if failed {
+                AttachmentChipView(file: file, isOwn: isOwn)
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(file.originalFilename ?? String(localized: "Image attachment"))
+                        .font(.caption)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(Theme.textBody)
+                .frame(maxWidth: 240, minHeight: 96)
+                .background(Theme.bgSelected.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+        .accessibilityLabel(file.originalFilename ?? String(localized: "Image attachment"))
+        .accessibilityHint("Opens a larger preview")
+        .task(id: file.fileId) { await load() }
+    }
+
+    @MainActor
+    private func load() async {
+        let key = file.fileId as NSString
+        if let cached = Self.cache.object(forKey: key) {
+            image = cached
+            return
+        }
+        guard let api = app.api else {
+            failed = true
+            return
+        }
+        do {
+            let data = try await api.fileData(fileId: file.fileId, download: false)
+            guard !Task.isCancelled, let thumbnail = Self.thumbnail(from: data) else {
+                if !Task.isCancelled { failed = true }
+                return
+            }
+            Self.cache.setObject(thumbnail, forKey: key)
+            image = thumbnail
+        } catch is CancellationError {
+            // A recycled timeline cell cancels its task; no user-facing error.
+        } catch {
+            failed = true
+        }
+    }
+
+    private static func thumbnail(from data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 720,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
     }
 }
 

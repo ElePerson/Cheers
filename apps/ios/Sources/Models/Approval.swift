@@ -28,6 +28,9 @@ struct PermissionRequest {
     let command: String?
     /// Inline agent diff, if the tool call carries one (edit tool calls).
     let diff: String?
+    /// Files or URIs the operation can affect. Kept separate from the command
+    /// so approvals remain useful when an older connector sent only locations.
+    let locations: [String]
     /// Extra impact text distinct from the command.
     let impact: String?
     let options: [PermissionOption]
@@ -62,18 +65,32 @@ struct PermissionRequest {
         self.chosenKind = data["chosen_kind"]?.stringValue
 
         let tool = data["tool"]
-        // Prefer connector/server-normalized command, then summary (#332).
+        let rawInput = tool?["raw_input"] ?? tool?["rawInput"]
+        var parsedLocations = Self.locationPaths(tool?["locations"])
+        parsedLocations.append(contentsOf: Self.pathsFromRawInput(rawInput))
+        self.locations = parsedLocations.reduce(into: []) { paths, path in
+            if !paths.contains(path) { paths.append(path) }
+        }
+        // Prefer connector/server-normalized command, then reconstruct the same
+        // useful preview the web Audit/Permission surfaces use for legacy cards.
         self.command = tool?.firstString("command")
             ?? tool?.firstString("summary")
+            ?? Self.previewRawInput(rawInput)
+            ?? self.locations.first
+            ?? tool?.firstString("name")
             ?? data.firstString("body")
         self.diff = tool?.firstString("diff")
         let body = data.firstString("body")
         let cmd = self.command
         self.impact = (body != nil && body != cmd) ? body : nil
         // Prefer a concrete tool title over connector boilerplate.
-        if let toolTitle = tool?.firstString("title"), !toolTitle.isEmpty {
+        if let toolTitle = tool?.firstString("title"),
+           !toolTitle.isEmpty,
+           toolTitle != "ACP permission request" {
             self.title = toolTitle
-        } else if let t = data["title"]?.stringValue, !t.isEmpty {
+        } else if let t = data["title"]?.stringValue,
+                  !t.isEmpty,
+                  t != "ACP permission request" {
             self.title = t
         } else {
             self.title = "Approval needed"
@@ -92,6 +109,39 @@ struct PermissionRequest {
             }
         }
         self.options = parsed
+    }
+
+    private static func locationPaths(_ value: JSONValue?) -> [String] {
+        value?.arrayValue?.compactMap { location in
+            location.stringValue
+                ?? location.firstString("path", "uri", "file_path", "filePath")
+        } ?? []
+    }
+
+    private static func pathsFromRawInput(_ value: JSONValue?) -> [String] {
+        guard let value else { return [] }
+        var paths: [String] = []
+        if let path = value.firstString("file_path", "filePath", "path") {
+            paths.append(path)
+        }
+        if let rawPaths = value["paths"]?.arrayValue {
+            paths.append(contentsOf: rawPaths.compactMap(\.stringValue))
+        }
+        return paths
+    }
+
+    private static func previewRawInput(_ value: JSONValue?) -> String? {
+        guard let value else { return nil }
+        if let raw = value.stringValue, !raw.isEmpty { return raw }
+        if let command = value.firstString("command", "cmd"), !command.isEmpty {
+            return command
+        }
+        if let argv = value["argv"]?.arrayValue?.compactMap(\.stringValue), !argv.isEmpty {
+            return argv.joined(separator: " ")
+        }
+        guard let path = pathsFromRawInput(value).first else { return nil }
+        let content = value.firstString("content", "new_string", "contents")
+        return content.map { "\(path)  (\($0.count) chars)" } ?? path
     }
 }
 

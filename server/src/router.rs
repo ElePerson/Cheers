@@ -9,14 +9,16 @@ use std::time::Duration;
 
 use axum::{
     extract::DefaultBodyLimit,
-    http::{header, HeaderName, HeaderValue, Method},
+    http::{header, HeaderName, HeaderValue, Method, Request},
     middleware,
     routing::{delete, get, patch, post, put},
     Router,
 };
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
+    request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     timeout::TimeoutLayer,
+    trace::TraceLayer,
 };
 
 use crate::{
@@ -27,6 +29,7 @@ use crate::{
 
 pub fn build(state: AppState) -> Router {
     let cors = build_cors(&state);
+    let request_id_header = HeaderName::from_static("x-request-id");
 
     // Keep CORS policy explicit at the top-level router so every grouped route
     // shares a consistent browser/API access policy.
@@ -40,6 +43,26 @@ pub fn build(state: AppState) -> Router {
         // Backstop request timeout so a stuck handler can't pin a worker; set
         // generously so legitimate slow connector RPCs aren't cut off.
         .layer(TimeoutLayer::new(Duration::from_secs(120)))
+        // Every REST response carries a request id. Native clients log this id,
+        // so login, push, reconnect-adjacent REST calls and approval deep links
+        // can be correlated with the gateway span without logging credentials.
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
+                let request_id = request
+                    .headers()
+                    .get("x-request-id")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("");
+                tracing::info_span!(
+                    "http_request",
+                    method = %request.method(),
+                    uri = %request.uri().path(),
+                    request_id = %request_id
+                )
+            }),
+        )
+        .layer(PropagateRequestIdLayer::new(request_id_header.clone()))
+        .layer(SetRequestIdLayer::new(request_id_header, MakeRequestUuid))
         // CORS stays outermost so 4xx / timeout / 413 responses still carry the
         // CORS headers the browser needs to read them.
         .layer(cors)
@@ -89,6 +112,7 @@ fn cors_layer(origins: Vec<HeaderValue>) -> CorsLayer {
             header::ORIGIN,
             HeaderName::from_static("x-csrf-token"),
         ])
+        .expose_headers([HeaderName::from_static("x-request-id")])
         .allow_origin(AllowOrigin::list(origins))
         // Desktop API requests originate in WKWebView and use
         // `credentials: include`. Browsers reject even cookie-free responses
@@ -921,5 +945,32 @@ mod tests {
                 .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS),
             Some(&HeaderValue::from_static("true"))
         );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_EXPOSE_HEADERS),
+            Some(&HeaderValue::from_static("x-request-id"))
+        );
+    }
+
+    #[tokio::test]
+    async fn request_id_is_generated_and_propagated() {
+        let request_id = HeaderName::from_static("x-request-id");
+        let mut service = Router::new()
+            .route("/", get(|| async {}))
+            .layer(PropagateRequestIdLayer::new(request_id.clone()))
+            .layer(SetRequestIdLayer::new(request_id.clone(), MakeRequestUuid));
+
+        let response = service
+            .call(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let value = response
+            .headers()
+            .get(&request_id)
+            .and_then(|value| value.to_str().ok())
+            .expect("x-request-id response header");
+
+        assert!(uuid::Uuid::parse_str(value).is_ok());
     }
 }

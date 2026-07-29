@@ -429,6 +429,8 @@ struct LoginView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($focusedField, equals: field)
+                .accessibilityLabel(label)
+                .accessibilityIdentifier(field == .server ? "server-url-field" : "login-\(label.lowercased())-field")
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .background(Theme.bgRaised)

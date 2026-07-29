@@ -8,6 +8,36 @@ private let timelinePerformanceSignposter = OSSignposter(
     category: "TimelinePerformance"
 )
 
+enum AttachmentUploadPolicy {
+    /// Matches the gateway's explicit top-level request body limit.
+    static let maximumByteCount: Int64 = 16 * 1024 * 1024
+
+    static func validate(byteCount: Int64) throws {
+        guard byteCount > 0 else { throw AttachmentUploadError.empty }
+        guard byteCount <= maximumByteCount else {
+            throw AttachmentUploadError.tooLarge(maximumByteCount: maximumByteCount)
+        }
+    }
+}
+
+enum AttachmentUploadError: LocalizedError, Equatable {
+    case empty
+    case unreadable
+    case tooLarge(maximumByteCount: Int64)
+
+    var errorDescription: String? {
+        switch self {
+        case .empty:
+            return String(localized: "The selected file is empty.")
+        case .unreadable:
+            return String(localized: "Cheers cannot read the selected file. Check its access permissions and try again.")
+        case .tooLarge(let maximumByteCount):
+            let limit = ByteCountFormatter.string(fromByteCount: maximumByteCount, countStyle: .file)
+            return String(localized: "The selected file is too large. Choose a file no larger than \(limit).")
+        }
+    }
+}
+
 /// Channel header surfaces, mirroring the web channel header. Every ⋯-menu item
 /// opens a bottom SHEET (modal "peek" surfaces) — pushed pages are reserved for
 /// drawer destinations, so the menu's presentation stays consistent.
@@ -82,6 +112,8 @@ struct ChatView: View {
     @State private var showChannelFiles = false
     @State private var showResourceContext = false
     @State private var isUploading = false
+    @State private var uploadTask: Task<Void, Never>?
+    @State private var uploadingFilename: String?
     @State private var voice: VoiceRoomModel
     @State private var reportTarget: MessageDto?
     @State private var blockTarget: MessageDto?
@@ -237,8 +269,17 @@ struct ChatView: View {
             allowedContentTypes: [.item],
             allowsMultipleSelection: false
         ) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            Task { await upload(url) }
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                uploadTask?.cancel()
+                uploadTask = Task { await upload(url) }
+            case .failure(let error):
+                let nsError = error as NSError
+                if nsError.code != NSUserCancelledError {
+                    model.errorMessage = error.localizedDescription
+                }
+            }
         }
         .sheet(isPresented: Binding(
             get: { !model.pendingAIConsent.isEmpty },
@@ -275,7 +316,19 @@ struct ChatView: View {
         if isUploading || !model.pendingFiles.isEmpty || !model.pendingContext.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 7) {
-                    if isUploading { ProgressView().controlSize(.small) }
+                    if isUploading {
+                        ProgressView().controlSize(.small)
+                        Text(uploadingFilename ?? String(localized: "Uploading file"))
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                        Button {
+                            uploadTask?.cancel()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .accessibilityLabel("Cancel upload")
+                    }
                     ForEach(model.pendingFiles) { file in
                         removableChip(file.originalFilename ?? "File", icon: "paperclip") {
                             model.pendingFiles.removeAll { $0.fileId == file.fileId }
@@ -309,20 +362,35 @@ struct ChatView: View {
     private func upload(_ url: URL) async {
         guard let api = app.api, !isUploading else { return }
         isUploading = true
-        defer { isUploading = false }
+        uploadingFilename = url.lastPathComponent
+        defer {
+            isUploading = false
+            uploadingFilename = nil
+            uploadTask = nil
+        }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .isReadableKey, .contentTypeKey])
+            if values.isReadable == false { throw AttachmentUploadError.unreadable }
+            if let fileSize = values.fileSize {
+                try AttachmentUploadPolicy.validate(byteCount: Int64(fileSize))
+            }
+            try Task.checkCancellation()
             let data = try Data(contentsOf: url, options: .mappedIfSafe)
-            let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?
-                .preferredMIMEType ?? "application/octet-stream"
+            try AttachmentUploadPolicy.validate(byteCount: Int64(data.count))
+            try Task.checkCancellation()
+            let type = values.contentType?.preferredMIMEType ?? "application/octet-stream"
             let file = try await api.uploadFile(
                 channelId: model.channel.channelId,
                 filename: url.lastPathComponent,
                 contentType: type,
                 data: data
             )
+            try Task.checkCancellation()
             model.addPendingFile(file)
+        } catch is CancellationError {
+            // User cancellation is an expected state, not a red error banner.
         } catch {
             model.errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }

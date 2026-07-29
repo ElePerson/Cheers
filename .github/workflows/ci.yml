@@ -312,3 +312,42 @@ jobs:
             -destination "generic/platform=iOS Simulator" \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Select available iPhone simulator
+        id: ios-simulator
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available -j | python3 -c 'import json, sys; data=json.load(sys.stdin); print(next(device["udid"] for devices in data["devices"].values() for device in devices if "iPhone" in device.get("deviceTypeIdentifier", "") and device.get("isAvailable", False)))')"
+          test -n "$DEVICE_ID"
+          echo "id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Test (unit and accessibility UI)
+        run: |
+          xcodebuild \
+            -project Cheers.xcodeproj \
+            -scheme Cheers \
+            -destination "id=${{ steps.ios-simulator.outputs.id }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Build (Release device, unsigned)
+        run: |
+          xcodebuild \
+            -project Cheers.xcodeproj \
+            -scheme Cheers \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$RUNNER_TEMP/cheers-ios-release" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Validate release metadata and privacy manifest
+        run: |
+          APP_INFO="$RUNNER_TEMP/cheers-ios-release/Build/Products/Release-iphoneos/Cheers.app/Info.plist"
+          test "$(plutil -extract CFBundleIdentifier raw "$APP_INFO")" = "app.cheers.ios"
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP_INFO")" = "1.0.0"
+          test "$(plutil -extract CFBundleVersion raw "$APP_INFO")" = "1"
+          test -n "$(plutil -extract NSMicrophoneUsageDescription raw "$APP_INFO")"
+          test -n "$(plutil -extract NSSpeechRecognitionUsageDescription raw "$APP_INFO")"
+          plutil -lint Sources/PrivacyInfo.xcprivacy
+          plutil -convert json -o - Sources/PrivacyInfo.xcprivacy \
+            | python3 -c 'import json, sys; values={item["NSPrivacyCollectedDataType"] for item in json.load(sys.stdin)["NSPrivacyCollectedDataTypes"]}; required={"NSPrivacyCollectedDataTypePhotosorVideos", "NSPrivacyCollectedDataTypeAudioData", "NSPrivacyCollectedDataTypeOtherUserContent"}; missing=required-values; assert not missing, f"missing privacy declarations: {sorted(missing)}"'

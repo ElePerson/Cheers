@@ -93,11 +93,12 @@ xcrun simctl launch booted app.cheers.ios
 
 ## Pointing at a server
 
-The login screen has a server URL field, defaulting to
+The login screen defaults to the official production workspace at
+`https://www.tocheers.com/api/v1`. A custom server can be selected under
+**Advanced server settings**. For local development, use
 `http://localhost:30080/api/v1` — the local kind/Helm dev stack's frontend
 NodePort, which proxies `/api` and `/ws` to the gateway and is reachable from
-the iOS simulator on the same Mac. Sign in with the dev credentials
-(`admin` / `admin12345`).
+the iOS simulator on the same Mac.
 
 Any base URL works; `/api/v1` is appended automatically if missing, and the
 websocket URL is derived from it (`ws(s)://host[:port]/ws`). `Info.plist`
@@ -122,10 +123,16 @@ should use HTTPS.
   expiry; rejected refresh tokens, REST 401s, or socket `auth_err` sign the user
   out locally. Logout also calls `POST /auth/logout` to revoke server-side.
 
-## Not yet implemented
+## Attachment support
 
-File **upload** is not implemented yet (download/preview works). Since the last
-update the app gained a mention picker, actionable approval
-cards, workspace switching, channel management (settings, member roles, direct
-+ link invites), and the five-board ViewBoard (Plan/Cost/Sessions/Audit/Activity
-— four boards ride the gateway's WS `resource_req` verbs). See the repo roadmap.
+The composer supports one-at-a-time document selection, upload status and
+cancellation, removable pending chips, and sending attachments through
+`file_ids`. Image attachments render an authenticated inline thumbnail and all
+attachments can be opened in the download/preview sheet. The gateway currently
+accepts request bodies up to 16 MiB; iOS rejects larger files before reading or
+uploading them.
+
+The app also includes a mention picker, actionable approval cards, workspace
+switching, channel management (settings, member roles, direct + link invites),
+and the five-board ViewBoard (Plan/Cost/Sessions/Audit/Activity — four boards
+ride the gateway's WS `resource_req` verbs). See the repo roadmap.

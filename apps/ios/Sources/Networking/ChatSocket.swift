@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 // MARK: - Wire payloads (gateway/src/gateway/realtime/frame.rs)
 
@@ -84,6 +85,7 @@ enum ResourceError: Error, LocalizedError {
 
 @MainActor
 final class ChatSocket: NSObject {
+    private static let logger = Logger(subsystem: "app.cheers.ios", category: "Realtime")
     private(set) var isAuthed = false
 
     var onEvent: ((SocketEvent) -> Void)?
@@ -109,6 +111,7 @@ final class ChatSocket: NSObject {
         retryCount = 0
         reconnectTask?.cancel()
         reconnectTask = nil
+        Self.logger.info("Connecting realtime host=\(url.host ?? "unknown", privacy: .public)")
         openSocket()
     }
 
@@ -173,6 +176,7 @@ final class ChatSocket: NSObject {
     func request(resource: String, params: [String: Any]) async throws -> JSONValue {
         guard isAuthed else { throw ResourceError.notConnected }
         let reqId = UUID().uuidString
+        Self.logger.info("Realtime resource request resource=\(resource, privacy: .public) req_id=\(reqId, privacy: .public)")
 
         let value: JSONValue = try await withCheckedThrowingContinuation { continuation in
             pendingResources[reqId] = continuation
@@ -245,6 +249,7 @@ final class ChatSocket: NSObject {
         retryCount += 1
         // 1s, 2s, 4s, ... capped at 30s; attempts are never capped (see header).
         let delay = min(30.0, pow(2.0, Double(min(retryCount, 6) - 1)))
+        Self.logger.notice("Realtime reconnect attempt=\(self.retryCount) delay_seconds=\(delay)")
         onEvent?(.disconnected)
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -357,6 +362,7 @@ final class ChatSocket: NSObject {
             let wasAuthed = isAuthed
             isAuthed = true
             retryCount = 0
+            Self.logger.info("Realtime authentication succeeded")
             startPinging()
             if !wasAuthed {
                 onEvent?(.connected)
@@ -367,6 +373,7 @@ final class ChatSocket: NSObject {
         case "auth_err":
             isAuthed = false
             intentionallyClosed = true
+            Self.logger.error("Realtime authentication failed: \(head.reason ?? "unknown", privacy: .public)")
             onEvent?(.authFailed(head.reason ?? "authentication failed"))
         case "subscribed":
             if let channelId = head.channelId {
