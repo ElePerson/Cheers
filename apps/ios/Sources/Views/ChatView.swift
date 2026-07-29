@@ -148,7 +148,7 @@ struct ChatView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                CircleIconButton(systemName: "line.3.horizontal", badge: shell.pendingApprovals) {
+                CircleIconButton(systemName: "line.3.horizontal", badge: shell.pendingApprovals + shell.pendingInvites) {
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { shell.openDrawer() }
                 }
             }

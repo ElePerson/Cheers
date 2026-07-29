@@ -375,6 +375,25 @@ struct AppleIdentityStatus: Decodable {
     }
 }
 
+/// Shared shape for GET `/users/me/external-identities/{apple|google}`.
+struct ExternalIdentityStatusDto: Decodable {
+    let provider: String
+    let linked: Bool
+    let displayName: String?
+    let email: String?
+    let hasPassword: Bool
+    let canUnlink: Bool
+    let recentAuthentication: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case provider, linked, email
+        case displayName = "display_name"
+        case hasPassword = "has_password"
+        case canUnlink = "can_unlink"
+        case recentAuthentication = "recent_authentication"
+    }
+}
+
 struct AppleChallenge: Decodable {
     let challengeId: String
     let nonce: String
@@ -457,6 +476,28 @@ struct StoredAIConsent: Decodable, Identifiable {
         case privacyURL = "privacy_url"
         case dataUse = "data_use"
         case policyVersion = "policy_version"
+    }
+}
+
+struct MeProfileDto: Decodable {
+    let userId: String
+    let username: String
+    let displayName: String?
+    let role: String?
+    let avatarURL: String?
+    let bio: String?
+    let statusText: String?
+    let statusEmoji: String?
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case displayName = "display_name"
+        case role
+        case avatarURL = "avatar_url"
+        case bio
+        case statusText = "status_text"
+        case statusEmoji = "status_emoji"
     }
 }
 

@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Circular initials avatar with the deterministic color hash shared with the
-/// web client (frontend/src/lib/format.ts).
+/// Circular avatar: optional remote image, else initials with the deterministic
+/// color hash shared with the web client (`frontend/src/lib/format.ts`).
 struct AvatarView: View {
     let seedId: String
     let name: String?
@@ -9,14 +9,29 @@ struct AvatarView: View {
     /// Neutral (grayscale) fill instead of the identity-hash color. Used on the
     /// chat page to keep it to a two-color palette (accent + neutral).
     var monochrome: Bool = false
+    var imageURL: URL? = nil
 
     var body: some View {
         ZStack {
             Circle()
                 .fill(monochrome ? Theme.bgSelected : Theme.avatarColor(for: seedId))
-            Text(Theme.initials(name))
-                .font(.system(size: size * 0.36, weight: .semibold))
-                .foregroundStyle(monochrome ? Theme.textSecondary : .white)
+            if let imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        Text(Theme.initials(name))
+                            .font(.system(size: size * 0.36, weight: .semibold))
+                            .foregroundStyle(monochrome ? Theme.textSecondary : .white)
+                    }
+                }
+                .clipShape(Circle())
+            } else {
+                Text(Theme.initials(name))
+                    .font(.system(size: size * 0.36, weight: .semibold))
+                    .foregroundStyle(monochrome ? Theme.textSecondary : .white)
+            }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)

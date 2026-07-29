@@ -267,6 +267,27 @@ struct APIClient: Sendable {
         )
     }
 
+    /// Authenticated in-session Google link (returns the provider authorize URL).
+    func startExternalIdentityOAuthLink(
+        provider: String,
+        client: String = "ios",
+        deviceName: String?
+    ) async throws -> OAuthStartResponse {
+        struct Body: Encodable {
+            let client: String
+            let deviceName: String?
+            enum CodingKeys: String, CodingKey {
+                case client
+                case deviceName = "device_name"
+            }
+        }
+        return try await postJSON(
+            "/users/me/external-identities/\(provider)/oauth-start",
+            body: Body(client: client, deviceName: deviceName),
+            as: OAuthStartResponse.self
+        )
+    }
+
     func exchangeOAuthHandoff(
         code: String,
         client: String = "ios",
@@ -368,6 +389,14 @@ struct APIClient: Sendable {
         try await deleteEmpty("/users/me/external-identities/apple")
     }
 
+    func externalIdentityStatus(provider: String) async throws -> ExternalIdentityStatusDto {
+        try await getJSON("/users/me/external-identities/\(provider)", as: ExternalIdentityStatusDto.self)
+    }
+
+    func unlinkExternalIdentity(provider: String) async throws {
+        try await deleteEmpty("/users/me/external-identities/\(provider)")
+    }
+
     func deleteAccount(currentPassword: String?, apple: AppleAuthorizationPayload?) async throws {
         try await postEmptyJSON(
             "/users/me/delete",
@@ -404,6 +433,50 @@ struct APIClient: Sendable {
 
     func storedAIConsents() async throws -> [StoredAIConsent] {
         try await getJSON("/users/me/ai-consents", as: [StoredAIConsent].self)
+    }
+
+    func getMe() async throws -> MeProfileDto {
+        try await getJSON("/users/me", as: MeProfileDto.self)
+    }
+
+    func updateMe(
+        displayName: String?,
+        bio: String?,
+        statusText: String?,
+        statusEmoji: String?
+    ) async throws -> MeProfileDto {
+        struct Body: Encodable {
+            let displayName: String?
+            let bio: String?
+            let statusText: String?
+            let statusEmoji: String?
+            enum CodingKeys: String, CodingKey {
+                case displayName = "display_name"
+                case bio
+                case statusText = "status_text"
+                case statusEmoji = "status_emoji"
+            }
+        }
+        return try await patchJSON(
+            "/users/me",
+            body: Body(
+                displayName: displayName,
+                bio: bio,
+                statusText: statusText,
+                statusEmoji: statusEmoji
+            ),
+            as: MeProfileDto.self
+        )
+    }
+
+    func uploadUserAvatar(data: Data, contentType: String) async throws -> String {
+        struct Resp: Decodable {
+            let avatarURL: String
+            enum CodingKeys: String, CodingKey { case avatarURL = "avatar_url" }
+        }
+        var request = try makeRequest("POST", "/users/me/avatar", body: data)
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        return try decode(Resp.self, from: try await send(request)).avatarURL
     }
 
     func grantAIConsent(channelId: String, disclosure: AIDataDisclosure) async throws {

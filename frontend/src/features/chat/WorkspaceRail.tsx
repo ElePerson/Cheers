@@ -1,10 +1,9 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Settings, LogOut, MessageSquare, Plus, Radar, Users } from "lucide-react";
 import toast from "react-hot-toast";
 import { cn } from "@/lib/cn";
 import { Avatar } from "@/components/ui/avatar";
-import { getFleetBadge } from "@/api/fleet";
 import { useChatStore } from "@/stores/chatStore";
 import { useAuthStore } from "@/stores/authStore";
 import { disablePush } from "@/lib/push";
@@ -95,25 +94,6 @@ export function WorkspaceRail({
   const personalSelected =
     !!personalWorkspace && selectedWorkspaceId === personalWorkspace.workspace_id;
 
-  // Pending-approvals badge on the Fleet button. Cheap count endpoint, polled
-  // slowly + refreshed on focus; the Fleet page itself is the live surface.
-  const [fleetCount, setFleetCount] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    const load = () =>
-      getFleetBadge()
-        .then((r) => alive && setFleetCount(r.count))
-        .catch(() => {});
-    load();
-    const t = window.setInterval(load, 60_000);
-    window.addEventListener("focus", load);
-    return () => {
-      alive = false;
-      window.clearInterval(t);
-      window.removeEventListener("focus", load);
-    };
-  }, []);
-
   return (
     <div className="w-14 h-full bg-rail flex flex-col items-center py-3 gap-2 flex-shrink-0 max-md:pt-[calc(0.75rem+env(safe-area-inset-top))] max-md:pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
       {/* Personal workspace — the user's home (DMs + private space), the most important
@@ -181,15 +161,10 @@ export function WorkspaceRail({
             onAction?.();
             navigate("/fleet");
           }}
-          title="Fleet — agent status & approvals"
+          title="Fleet — bots & status"
           className="relative w-8 h-8 max-md:w-11 max-md:h-11 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 flex items-center justify-center transition-colors"
         >
           <Radar className="w-4 h-4" />
-          {fleetCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] px-1.5 py-0.5 rounded-full bg-amber-600 text-white text-[10px] font-bold flex items-center justify-center">
-              {fleetCount}
-            </span>
-          )}
         </button>
 
         <button

@@ -300,6 +300,11 @@ notification; tapping it lands on the resolved card.
 
 ### 7.1 Navigation
 
+> **Cross-client IA lock:** destinations and Settings nesting are defined in
+> [CLIENT_NAV_IA.md](./CLIENT_NAV_IA.md) (shared with Mac/web). Mobile keeps
+> drawer chrome; labels converge on **Activity · Fleet · Friends · Settings**
+> (not “Agents” as the primary-nav name — Fleet is canonical).
+
 ```
 Root (auth gate)
 ├─ Login stack
@@ -307,7 +312,7 @@ Root (auth gate)
    └─ left drawer (edge swipe / badged menu button) — the single navigation hub
       ├─ top:    workspace strip (All · Personal · <workspace> · +)
       ├─ middle: selected workspace's channels & DMs
-      └─ bottom: Activity (inbox, badge) · Agents (fleet) · Friends ·
+      └─ bottom: Activity (inbox, badge) · Fleet · Friends ·
                  profile & settings · New chat
 Root-level sheets: Approval · New chat · Session picker ·
                    Model picker · Forward picker · Attachment viewer
@@ -337,7 +342,7 @@ Root-level sheets: Approval · New chat · Session picker ·
      main list instead.
   3. **Navigation & settings** pinned at the bottom, kept compact: one
      chip row with the remaining top-level destinations (**Activity** with
-     its pending badge, **Agents**, **Friends**), then a slim footer with
+     its pending badge, **Fleet**, **Friends**), then a slim footer with
      the profile avatar, settings, and a prominent **New chat** button.
   There is **no bottom tab bar and no floating buttons** on the home
   screen — the drawer is the app's single navigation hub, replacing both

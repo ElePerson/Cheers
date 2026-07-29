@@ -1,42 +1,41 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Radar, Inbox, RefreshCw, Bot as BotIcon } from "lucide-react";
+import {
+  ArrowLeft,
+  Radar,
+  Inbox,
+  RefreshCw,
+  Bot as BotIcon,
+  Wand2,
+  KeyRound,
+} from "lucide-react";
+import toast from "react-hot-toast";
 import { cn } from "@/lib/cn";
 import { Avatar } from "@/components/ui/avatar";
 import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SurfaceSpinner } from "@/components/ui/spinner";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { getFleet, type FleetApproval, type FleetBot } from "@/api/fleet";
 import { listWorkspaces, getPersonalWorkspace } from "@/api/workspaces";
+import { listBots, issueBotToken, type IssuedToken } from "@/api/bots";
+import { listChannels } from "@/api/channels";
 import { useFleetLive } from "./useFleetLive";
-import { PermissionCard } from "@/features/chat/PermissionCard";
 import { useChatStore } from "@/stores/chatStore";
-import { useAuthStore } from "@/stores/authStore";
-import type { Message } from "@/types";
+import { useActivityUiStore } from "@/stores/activityUiStore";
+import { BotOnboardingWizard } from "@/features/bots/BotOnboardingWizard";
+import { BotDetailPanel, CopyButton } from "@/features/bots/BotDetailPanel";
+import type { BotItem, Channel } from "@/types";
 
-// Fleet view (docs/design/FLEET_VIEW.md): the workspace-level mission control.
-// Zone A answers "who is waiting on me?" (the caller's approval inbox);
-// Zone B answers "what is my fleet doing?" (bot roster with live status/cost).
+// Fleet view: workspace bot roster + create/manage (detail + token).
+// Approvals live in Activity (`docs/arch/CLIENT_NAV_IA.md`); this page deep-links.
 
 const POLL_MS = 30_000;
 
 /** DM channels have empty names — render a readable label instead of "#". */
 function channelLabel(name: string): string {
   return name.trim() ? `#${name}` : "Direct message";
-}
-
-/** Wrap a fleet approval as the Message shape PermissionCard renders. */
-function toCardMessage(a: FleetApproval, botName?: string): Message {
-  return {
-    msg_id: a.message_id,
-    sender_id: a.bot_id,
-    sender_type: "bot",
-    sender_name: botName,
-    content: "",
-    created_at: a.created_at,
-    msg_type: "permission",
-    content_data: a.content_data,
-  };
 }
 
 function StatusChip({ bot }: { bot: FleetBot }) {
@@ -60,7 +59,13 @@ function StatusChip({ bot }: { bot: FleetBot }) {
   return <span className="text-[10px] text-zinc-400">idle</span>;
 }
 
-function BotRow({ bot }: { bot: FleetBot }) {
+function BotRow({
+  bot,
+  onSelect,
+}: {
+  bot: FleetBot;
+  onSelect: () => void;
+}) {
   const sessions =
     bot.busy_sessions + bot.idle_sessions > 0
       ? `${bot.busy_sessions + bot.idle_sessions} session${
@@ -68,7 +73,11 @@ function BotRow({ bot }: { bot: FleetBot }) {
         }${bot.busy_sessions > 0 ? ` · ${bot.busy_sessions} busy` : ""}`
       : null;
   return (
-    <div className="flex items-center gap-3 px-2.5 py-2 rounded-md hover:bg-zinc-900">
+    <button
+      type="button"
+      onClick={onSelect}
+      className="w-full flex items-center gap-3 px-2.5 py-2 rounded-md hover:bg-zinc-900 text-left"
+    >
       <div className="relative flex-shrink-0">
         <Avatar name={bot.bot_name} id={bot.bot_id} size="sm" />
         <span
@@ -109,13 +118,13 @@ function BotRow({ bot }: { bot: FleetBot }) {
           </span>
         )}
       </div>
-    </div>
+    </button>
   );
 }
 
 export default function FleetPage() {
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const requestActivityOpen = useActivityUiStore((s) => s.requestOpen);
   const {
     workspaces,
     personalWorkspace,
@@ -124,8 +133,6 @@ export default function FleetPage() {
     setPersonalWorkspace,
   } = useChatStore();
 
-  // The store is populated by ChatLayout; landing on /fleet directly needs the
-  // same bootstrap (workspaces are not persisted).
   useEffect(() => {
     if (workspaces.length > 0) return;
     Promise.all([listWorkspaces(), getPersonalWorkspace().catch(() => null)])
@@ -146,27 +153,53 @@ export default function FleetPage() {
 
   const [approvals, setApprovals] = useState<FleetApproval[]>([]);
   const [bots, setBots] = useState<FleetBot[]>([]);
+  const [catalog, setCatalog] = useState<BotItem[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
+  const [issued, setIssued] = useState<IssuedToken | null>(null);
 
-  const refresh = useCallback(async (workspaceId: string, quiet = false) => {
-    if (!quiet) setRefreshing(true);
-    try {
-      const res = await getFleet(workspaceId);
-      setApprovals(res.approvals);
-      setBots(res.bots);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't load the fleet");
-    } finally {
-      setLoading(false);
-      if (!quiet) setRefreshing(false);
-    }
-  }, []);
+  const refreshCatalog = useCallback(
+    async (quiet = false) => {
+      try {
+        const [b, c] = await Promise.all([
+          listBots(),
+          listChannels(activeWsId ?? undefined).catch(() => [] as Channel[]),
+        ]);
+        setCatalog(b);
+        setChannels(c);
+        if (!quiet) setError(null);
+      } catch (e) {
+        if (!quiet) {
+          toast.error(e instanceof Error ? e.message : "Couldn't load bot catalog");
+        }
+      }
+    },
+    [activeWsId]
+  );
 
-  // Initial load + poll. P1 keeps this page on simple polling (+ focus refetch);
-  // live WS-driven refresh arrives with the P2 `bot_processing` frames.
+  const refresh = useCallback(
+    async (workspaceId: string, quiet = false) => {
+      if (!quiet) setRefreshing(true);
+      try {
+        const res = await getFleet(workspaceId);
+        setApprovals(res.approvals);
+        setBots(res.bots);
+        setError(null);
+        void refreshCatalog(true);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't load the fleet");
+      } finally {
+        setLoading(false);
+        if (!quiet) setRefreshing(false);
+      }
+    },
+    [refreshCatalog]
+  );
+
   useEffect(() => {
     if (!activeWsId) return;
     setLoading(true);
@@ -180,8 +213,6 @@ export default function FleetPage() {
     };
   }, [activeWsId, refresh]);
 
-  // Live wire (P2): any relevant WS frame in a fleet channel → quiet refetch.
-  // The 30s poll stays as the fallback for signals the WS can't carry.
   const liveChannelIds = useMemo(
     () => [...new Set(bots.map((b) => b.channel_id))],
     [bots]
@@ -190,14 +221,7 @@ export default function FleetPage() {
     if (activeWsId) refresh(activeWsId, true);
   });
 
-  const botName = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const b of bots) m.set(b.bot_id, b.bot_name);
-    return m;
-  }, [bots]);
-
-  const actionable = approvals.filter((a) => a.actionable);
-  const watchOnly = approvals.filter((a) => !a.actionable);
+  const actionableCount = approvals.filter((a) => a.actionable).length;
 
   const botsByChannel = useMemo(() => {
     const groups = new Map<string, { name: string; bots: FleetBot[] }>();
@@ -211,6 +235,11 @@ export default function FleetPage() {
     );
   }, [bots]);
 
+  const selectedBot = useMemo(
+    () => catalog.find((b) => b.bot_id === selectedBotId) ?? null,
+    [catalog, selectedBotId]
+  );
+
   const wsOptions = useMemo(() => {
     const list = [...workspaces];
     if (
@@ -221,6 +250,32 @@ export default function FleetPage() {
     }
     return list;
   }, [workspaces, personalWorkspace]);
+
+  async function onIssue(botId: string) {
+    try {
+      setIssued(await issueBotToken(botId));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't issue token");
+    }
+  }
+
+  async function openBot(botId: string) {
+    try {
+      const [b, c] = await Promise.all([
+        listBots(),
+        listChannels(activeWsId ?? undefined).catch(() => [] as Channel[]),
+      ]);
+      setCatalog(b);
+      setChannels(c);
+      if (!b.some((bot) => bot.bot_id === botId)) {
+        toast.error("Couldn't open bot details — you may not manage this bot.");
+        return;
+      }
+      setSelectedBotId(botId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't open bot details");
+    }
+  }
 
   return (
     <div className="h-full bg-zinc-950 text-zinc-100 flex flex-col">
@@ -235,6 +290,10 @@ export default function FleetPage() {
         <Radar className="w-4 h-4 text-indigo-400" />
         <h1 className="text-lg font-semibold">Fleet</h1>
         <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" onClick={() => setWizardOpen(true)}>
+            <Wand2 className="w-3.5 h-3.5" />
+            Add bot
+          </Button>
           {wsOptions.length > 1 && (
             <Select
               value={activeWsId ?? ""}
@@ -273,59 +332,27 @@ export default function FleetPage() {
                 </p>
               )}
 
-              {/* ── Zone A: approvals ─────────────────────────────────── */}
-              <section>
-                <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
-                  Waiting on you
-                </h2>
-                {actionable.length === 0 ? (
-                  <EmptyState
-                    icon={Inbox}
-                    title="No approvals waiting"
-                    hint="When an agent asks for permission, it lands here."
-                  />
-                ) : (
-                  <ul className="space-y-3">
-                    {actionable.map((a) => (
-                      <li key={a.message_id}>
-                        <p className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
-                          {channelLabel(a.channel_name)}
-                        </p>
-                        <PermissionCard
-                          message={toCardMessage(a, botName.get(a.bot_id))}
-                          channelId={a.channel_id}
-                          currentUserId={user?.user_id}
-                          approverOverride
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {watchOnly.length > 0 && (
-                  <div className="mt-5">
-                    <h3 className="text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
-                      Pending in your channels (not yours to answer)
-                    </h3>
-                    <ul className="space-y-2">
-                      {watchOnly.map((a) => (
-                        <li key={a.message_id}>
-                          <p className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
-                            {channelLabel(a.channel_name)}
-                          </p>
-                          <PermissionCard
-                            message={toCardMessage(a, botName.get(a.bot_id))}
-                            channelId={a.channel_id}
-                            currentUserId={user?.user_id}
-                            approverOverride={false}
-                          />
-                        </li>
-                      ))}
-                    </ul>
+              {actionableCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // ActivityCenter lives in the chat shell rail — open the
+                    // dialog via the shared store, then land on /chat so it mounts.
+                    requestActivityOpen();
+                    navigate("/chat");
+                  }}
+                  className="w-full flex items-center gap-3 rounded-xl border border-amber-900/50 bg-amber-950/30 px-4 py-3 text-left hover:bg-amber-950/50 transition-colors"
+                >
+                  <Inbox className="w-4 h-4 text-amber-300 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-zinc-100">
+                      {actionableCount} waiting on you
+                    </p>
+                    <p className="text-xs text-zinc-400">Review in Activity</p>
                   </div>
-                )}
-              </section>
+                </button>
+              )}
 
-              {/* ── Zone B: bot roster ────────────────────────────────── */}
               <section>
                 <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
                   Bots
@@ -334,7 +361,7 @@ export default function FleetPage() {
                   <EmptyState
                     icon={BotIcon}
                     title="No bots in this workspace"
-                    hint="Add a bot to a channel and it shows up here."
+                    hint="Add a bot here, then connect it on the machine that will run it."
                   />
                 ) : (
                   <div className="space-y-5">
@@ -345,7 +372,11 @@ export default function FleetPage() {
                         </p>
                         <div>
                           {g.bots.map((b) => (
-                            <BotRow key={`${b.bot_id}:${b.channel_id}`} bot={b} />
+                            <BotRow
+                              key={`${b.bot_id}:${b.channel_id}`}
+                              bot={b}
+                              onSelect={() => openBot(b.bot_id)}
+                            />
                           ))}
                         </div>
                       </div>
@@ -357,6 +388,63 @@ export default function FleetPage() {
           )}
         </div>
       </div>
+
+      {selectedBot && (
+        <Dialog
+          title={selectedBot.display_name || selectedBot.username}
+          onClose={() => setSelectedBotId(null)}
+          maxWidth="max-w-3xl"
+        >
+          <BotDetailPanel
+            key={selectedBot.bot_id}
+            bot={selectedBot}
+            channels={channels}
+            onIssue={onIssue}
+            onError={(m) => toast.error(m)}
+            onChanged={() => {
+              void refreshCatalog();
+              if (activeWsId) void refresh(activeWsId, true);
+            }}
+            onPoll={() => void refreshCatalog(true)}
+          />
+        </Dialog>
+      )}
+
+      {issued && (
+        <Dialog
+          title={
+            <span className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-indigo-400" /> Connection token
+            </span>
+          }
+          onClose={() => setIssued(null)}
+          maxWidth="max-w-lg"
+        >
+          <p className="text-xs text-amber-400">
+            {issued.note ?? "Store this token now — shown only once."}
+          </p>
+          <div className="rounded-lg bg-zinc-950 p-3">
+            <code className="text-xs text-emerald-300 break-all">{issued.token}</code>
+          </div>
+          <div className="flex items-center justify-between gap-3 mt-3">
+            <span className="text-xs text-zinc-400">
+              Save this into the bot&apos;s token file on the machine that runs it.
+            </span>
+            <CopyButton value={issued.token} label="Copy token" />
+          </div>
+        </Dialog>
+      )}
+
+      {wizardOpen && (
+        <BotOnboardingWizard
+          bots={catalog}
+          onClose={() => setWizardOpen(false)}
+          onDone={() => {
+            void refreshCatalog();
+            if (activeWsId) void refresh(activeWsId);
+          }}
+        />
+      )}
     </div>
   );
 }

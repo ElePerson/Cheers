@@ -1,6 +1,8 @@
 import SwiftUI
 import AuthenticationServices
 import CryptoKit
+import PhotosUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
@@ -11,11 +13,14 @@ struct SettingsView: View {
     @State private var showTwoFactor = false
     @State private var showPasskeys = false
     @State private var showAppleAccount = false
+    @State private var showGoogleAccount = false
     @State private var showBlockedUsers = false
     @State private var showAIConsents = false
     @State private var showDeleteAccount = false
     @State private var showWorkspaceAdmin = false
     @State private var showAccountSessions = false
+    @State private var showProfileEdit = false
+    @State private var showSwitchServerConfirm = false
 
     var body: some View {
         List {
@@ -39,6 +44,17 @@ struct SettingsView: View {
         } message: {
             Text("This revokes your sessions on this server.")
         }
+        .confirmationDialog(
+            "Switch server?",
+            isPresented: $showSwitchServerConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Switch server", role: .destructive) {
+                app.switchServer()
+            }
+        } message: {
+            Text("Signs you out and lets you pick a different server URL on the next login.")
+        }
         .sheet(isPresented: $showChangePassword) {
             ChangePasswordSheet()
         }
@@ -49,6 +65,7 @@ struct SettingsView: View {
             PasskeySettingsView()
         }
         .sheet(isPresented: $showAppleAccount) { AppleAccountSheet() }
+        .sheet(isPresented: $showGoogleAccount) { GoogleAccountSheet() }
         .sheet(isPresented: $showBlockedUsers) { BlockedUsersSheet() }
         .sheet(isPresented: $showAIConsents) { AIConsentSettingsSheet() }
         .sheet(isPresented: $showDeleteAccount) { DeleteAccountSheet() }
@@ -58,6 +75,7 @@ struct SettingsView: View {
             }
         }
         .sheet(isPresented: $showAccountSessions) { AccountSessionsSheet() }
+        .sheet(isPresented: $showProfileEdit) { ProfileEditSheet() }
     }
 
     private var displayName: String {
@@ -68,27 +86,29 @@ struct SettingsView: View {
 
     private var profileSection: some View {
         Section {
-            HStack(spacing: 14) {
-                AvatarView(seedId: app.session?.userId ?? "?", name: displayName, size: 52)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    if let username = app.session?.username {
-                        Text(username)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.textMuted)
+            Button { showProfileEdit = true } label: {
+                HStack(spacing: 14) {
+                    AvatarView(seedId: app.session?.userId ?? "?", name: displayName, size: 52)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(displayName)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        if let username = app.session?.username {
+                            Text(username)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        Text("Edit profile")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.accent)
                     }
-                    Text(app.session?.role ?? "member")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.botBadgeText)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Theme.botBadgeBg)
-                        .clipShape(Capsule())
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.textFaint)
                 }
+                .padding(.vertical, 4)
             }
-            .padding(.vertical, 4)
             .listRowBackground(Theme.bgSurface)
 
             LabeledContent {
@@ -136,10 +156,16 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.textMuted)
             }
             .listRowBackground(Theme.bgSurface)
+
+            Button { showSwitchServerConfirm = true } label: {
+                Text("Switch server")
+                    .foregroundStyle(Theme.accent)
+            }
+            .listRowBackground(Theme.bgSurface)
         } header: {
             sectionHeader("Server")
         } footer: {
-            Text("To switch servers, sign out and sign back in with a different server URL.")
+            Text("Switching servers signs you out. Tokens belong to one server.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textFaint)
         }
@@ -182,6 +208,12 @@ struct SettingsView: View {
 
             Button { showAppleAccount = true } label: {
                 Label("Sign in with Apple", systemImage: "apple.logo")
+                    .foregroundStyle(Theme.textBody)
+            }
+            .listRowBackground(Theme.bgSurface)
+
+            Button { showGoogleAccount = true } label: {
+                Label("Google account", systemImage: "g.circle")
                     .foregroundStyle(Theme.textBody)
             }
             .listRowBackground(Theme.bgSurface)
@@ -232,8 +264,20 @@ struct SettingsView: View {
             }
             .listRowBackground(Theme.bgSurface)
 
+            Link(destination: AppModel.termsURL) {
+                Label("Terms", systemImage: "doc.text")
+                    .foregroundStyle(Theme.textBody)
+            }
+            .listRowBackground(Theme.bgSurface)
+
             Link(destination: AppModel.supportURL) {
                 Label("Help & Support", systemImage: "questionmark.circle")
+                    .foregroundStyle(Theme.textBody)
+            }
+            .listRowBackground(Theme.bgSurface)
+
+            Link(destination: AppModel.accountDeletionURL) {
+                Label("Account deletion", systemImage: "person.crop.circle.badge.minus")
                     .foregroundStyle(Theme.textBody)
             }
             .listRowBackground(Theme.bgSurface)
@@ -261,6 +305,168 @@ struct SettingsView: View {
         Task {
             await app.logout()
             isSigningOut = false
+        }
+    }
+}
+
+// MARK: - Profile edit
+
+private struct ProfileEditSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var displayName = ""
+    @State private var statusEmoji = ""
+    @State private var statusText = ""
+    @State private var bio = ""
+    @State private var avatarURL: URL?
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var isUploadingAvatar = false
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if isLoading {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else {
+                    Section {
+                        HStack(spacing: 14) {
+                            AvatarView(
+                                seedId: app.session?.userId ?? "?",
+                                name: displayName.isEmpty ? app.session?.username : displayName,
+                                size: 64,
+                                imageURL: avatarURL
+                            )
+                            VStack(alignment: .leading, spacing: 8) {
+                                PhotosPicker(selection: $pickerItem, matching: .images) {
+                                    Text(isUploadingAvatar ? "Uploading…" : "Change photo")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Theme.accent)
+                                }
+                                .disabled(isUploadingAvatar)
+                                Text("JPEG or PNG, used across Cheers clients.")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.textMuted)
+                            }
+                        }
+                        .padding(.vertical, 4)
+
+                        TextField("Display name", text: $displayName)
+                        TextField("Status emoji", text: $statusEmoji)
+                            .textInputAutocapitalization(.never)
+                        TextField("Status text", text: $statusText)
+                        TextField("Bio", text: $bio, axis: .vertical)
+                            .lineLimit(3...6)
+                    }
+                    if let errorText {
+                        Section {
+                            Text(errorText).foregroundStyle(Theme.danger)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Edit profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(isLoading || isSaving || isUploadingAvatar)
+                }
+            }
+            .task { await load() }
+            .onChange(of: pickerItem) { _, item in
+                guard let item else { return }
+                Task { await uploadAvatar(from: item) }
+            }
+        }
+    }
+
+    private func resolveAvatarURL(_ raw: String?) -> URL? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let absolute = URL(string: raw), absolute.scheme != nil { return absolute }
+        guard let base = app.baseURL,
+              var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        comps.path = ""
+        comps.query = nil
+        comps.fragment = nil
+        return URL(string: raw, relativeTo: comps.url)?.absoluteURL
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let me = try await app.api?.getMe()
+            displayName = me?.displayName ?? app.session?.displayName ?? ""
+            statusEmoji = me?.statusEmoji ?? ""
+            statusText = me?.statusText ?? ""
+            bio = me?.bio ?? ""
+            avatarURL = resolveAvatarURL(me?.avatarURL)
+        } catch {
+            errorText = error.localizedDescription
+            displayName = app.session?.displayName ?? ""
+        }
+    }
+
+    private func uploadAvatar(from item: PhotosPickerItem) async {
+        isUploadingAvatar = true
+        defer {
+            isUploadingAvatar = false
+            pickerItem = nil
+        }
+        do {
+            guard let jpeg = try await Self.jpegData(from: item) else {
+                errorText = "Could not read the selected photo."
+                return
+            }
+            let urlString = try await app.api?.uploadUserAvatar(data: jpeg, contentType: "image/jpeg")
+            avatarURL = resolveAvatarURL(urlString)
+            errorText = nil
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// PhotosPicker's `Data` transferable is unreliable for HEIC/Live Photos;
+    /// decode via UIImage and re-encode JPEG so the gateway always accepts it.
+    private static func jpegData(from item: PhotosPickerItem) async throws -> Data? {
+        if let data = try await item.loadTransferable(type: Data.self),
+           let image = UIImage(data: data),
+           let jpeg = image.jpegData(compressionQuality: 0.88) {
+            return jpeg
+        }
+        // Fallback: some iOS versions only expose a file URL transferable.
+        if let url = try await item.loadTransferable(type: URL.self),
+           let data = try? Data(contentsOf: url),
+           let image = UIImage(data: data),
+           let jpeg = image.jpegData(compressionQuality: 0.88) {
+            return jpeg
+        }
+        return nil
+    }
+
+    private func save() async {
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            let me = try await app.api?.updateMe(
+                displayName: displayName,
+                bio: bio,
+                statusText: statusText,
+                statusEmoji: statusEmoji
+            )
+            app.applyProfileDisplayName(me?.displayName ?? displayName)
+            dismiss()
+        } catch {
+            errorText = error.localizedDescription
         }
     }
 }
@@ -485,6 +691,132 @@ private struct AppleAccountSheet: View {
     }
 }
 
+private struct GoogleAccountSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var status: ExternalIdentityStatusDto?
+    @State private var errorText: String?
+    @State private var isBusy = false
+    @State private var googleOAuth = GoogleOAuthSession()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let status {
+                    Section {
+                        Label(
+                            status.linked ? "Google account linked" : "Google account not linked",
+                            systemImage: status.linked ? "checkmark.shield" : "g.circle"
+                        )
+                        if status.linked {
+                            if let email = status.email, !email.isEmpty {
+                                Text(email).foregroundStyle(Theme.textSecondary)
+                            } else if let name = status.displayName, !name.isEmpty {
+                                Text(name).foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                    }
+
+                    if status.linked {
+                        Section {
+                            Button("Unlink Google", role: .destructive) {
+                                Task { await unlink() }
+                            }
+                            .disabled(isBusy || !status.canUnlink || !status.recentAuthentication)
+                        } footer: {
+                            if !status.canUnlink {
+                                Text("Add another sign-in method (password, Apple, or passkey) before unlinking Google.")
+                            } else if !status.recentAuthentication {
+                                Text("Sign in again (within the last 5 minutes) to make this change.")
+                            } else {
+                                Text("Unlinking signs out other sessions and removes trusted devices.")
+                            }
+                        }
+                    } else {
+                        Section {
+                            Button {
+                                Task { await link() }
+                            } label: {
+                                if isBusy {
+                                    ProgressView()
+                                } else {
+                                    Text("Link Google")
+                                }
+                            }
+                            .disabled(isBusy || !status.recentAuthentication)
+                        } footer: {
+                            if !status.recentAuthentication {
+                                Text("Sign in again (within the last 5 minutes), then tap Link Google.")
+                            } else {
+                                Text("Opens Google sign-in and attaches that account to your current Cheers session.")
+                            }
+                        }
+                    }
+                } else {
+                    ProgressView()
+                }
+                if let errorText {
+                    Section { Text(errorText).foregroundStyle(Theme.danger) }
+                }
+            }
+            .navigationTitle("Google account")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        do {
+            status = try await app.api?.externalIdentityStatus(provider: "google")
+            errorText = nil
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func link() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            guard let api = app.api else { throw APIError.unauthorized }
+            let started = try await api.startExternalIdentityOAuthLink(
+                provider: "google",
+                deviceName: UIDevice.current.name
+            )
+            guard let url = URL(string: started.authorizationURL) else {
+                throw APIError.http(status: 500, detail: "Invalid Google authorization URL.")
+            }
+            let callback = try await googleOAuth.authenticate(authorizationURL: url)
+            guard let comps = URLComponents(url: callback, resolvingAgainstBaseURL: false) else {
+                throw APIError.http(status: 401, detail: "Google link did not return a callback.")
+            }
+            if let err = comps.queryItems?.first(where: { $0.name == "error" })?.value {
+                throw APIError.http(status: 401, detail: err)
+            }
+            guard comps.queryItems?.first(where: { $0.name == "linked" })?.value == "google" else {
+                throw APIError.http(status: 401, detail: "Google link did not complete.")
+            }
+            await load()
+        } catch let oauthError as GoogleOAuthError {
+            if case .cancelled = oauthError { return }
+            errorText = oauthError.localizedDescription
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func unlink() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await app.api?.unlinkExternalIdentity(provider: "google")
+            await load()
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+}
+
 private struct DeleteAccountSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -596,7 +928,7 @@ private struct AIConsentSettingsSheet: View {
 
 // MARK: - Workspace administration
 
-private struct WorkspaceAdminSheet: View {
+struct WorkspaceAdminSheet: View {
     private enum Confirmation: Identifiable {
         case remove(WorkspaceMemberDto), leave, delete
         var id: String {

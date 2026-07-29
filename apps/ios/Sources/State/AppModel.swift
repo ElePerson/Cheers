@@ -24,7 +24,9 @@ final class AppModel {
     /// Public, production URLs. These must stay live and match the App Store
     /// Connect metadata before each submission.
     static let privacyPolicyURL = URL(string: "https://www.tocheers.com/privacy.html")!
+    static let termsURL = URL(string: "https://www.tocheers.com/terms.html")!
     static let supportURL = URL(string: "https://www.tocheers.com/support.html")!
+    static let accountDeletionURL = URL(string: "https://www.tocheers.com/account-deletion.html")!
     static let remoteOperationSafetyURL = URL(string: "https://www.tocheers.com/remote-operations.html")!
 
     private enum Keys {
@@ -398,6 +400,27 @@ final class AppModel {
         defaults.removeObject(forKey: Keys.displayName)
         defaults.removeObject(forKey: Keys.role)
         defaults.removeObject(forKey: Keys.username)
+    }
+
+    /// Clears the session and remembered server URL so Login shows the server field.
+    func switchServer() {
+        clearSession()
+        serverURLString = Self.defaultServerURL
+        UserDefaults.standard.removeObject(forKey: Keys.serverURL)
+    }
+
+    /// Updates the in-memory + persisted display name after a profile save.
+    func applyProfileDisplayName(_ displayName: String?) {
+        guard let session else { return }
+        let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = (trimmed?.isEmpty == false) ? trimmed : nil
+        self.session = UserSession(
+            userId: session.userId,
+            displayName: next,
+            role: session.role,
+            username: session.username
+        )
+        UserDefaults.standard.set(next, forKey: Keys.displayName)
     }
 
     // MARK: Socket
