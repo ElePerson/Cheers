@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 // MARK: - Errors
 
@@ -43,6 +44,7 @@ struct APIClient: Sendable {
         config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }()
+    private static let logger = Logger(subsystem: "app.cheers.ios", category: "HTTP")
 
     init(baseURL: URL, token: String?) {
         self.baseURL = baseURL
@@ -120,11 +122,18 @@ struct APIClient: Sendable {
         do {
             (data, response) = try await Self.session.data(for: request)
         } catch {
+            Self.logger.error(
+                "HTTP \(request.httpMethod ?? "-", privacy: .public) \(request.url?.path ?? "-", privacy: .public) transport failure: \(error.localizedDescription, privacy: .public)"
+            )
             throw APIError.transport(error)
         }
         guard let http = response as? HTTPURLResponse else {
             throw APIError.http(status: 0, detail: "no HTTP response")
         }
+        let requestId = http.value(forHTTPHeaderField: "x-request-id") ?? "unavailable"
+        Self.logger.info(
+            "HTTP \(request.httpMethod ?? "-", privacy: .public) \(request.url?.path ?? "-", privacy: .public) -> \(http.statusCode) request_id=\(requestId, privacy: .public)"
+        )
         guard (200..<300).contains(http.statusCode) else {
             if http.statusCode == 428,
                let required = try? JSONDecoder().decode(AIConsentRequiredResponse.self, from: data),

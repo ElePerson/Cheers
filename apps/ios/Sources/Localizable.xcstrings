@@ -26,9 +26,9 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "审批请求（已处理）" } }
       }
     },
-    "Approval request — respond from the web app" : {
+    "Approval request" : {
       "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "审批请求 — 请在网页端处理" } }
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "审批请求" } }
       }
     },
     "Agent sign-in (resolved)" : {
@@ -76,6 +76,16 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消" } }
       }
     },
+    "Cancel upload" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消上传" } }
+      }
+    },
+    "Cheers cannot read the selected file. Check its access permissions and try again." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Cheers 无法读取所选文件。请检查访问权限后重试。" } }
+      }
+    },
     "Channel files" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "频道文件" } }
@@ -84,6 +94,36 @@
     "Channel settings" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "频道设置" } }
+      }
+    },
+    "Files affected" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "受影响的文件" } }
+      }
+    },
+    "Image attachment" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "图片附件" } }
+      }
+    },
+    "Opens a larger preview" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开更大的预览" } }
+      }
+    },
+    "The selected file is empty." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "所选文件为空。" } }
+      }
+    },
+    "The selected file is too large. Choose a file no larger than %@." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "所选文件过大。请选择不超过 %@ 的文件。" } }
+      }
+    },
+    "Uploading file" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在上传文件" } }
       }
     },
     "Channels" : {
