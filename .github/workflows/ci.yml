@@ -280,6 +280,7 @@ jobs:
     # SwiftUI MainActor-isolation inference that lets a View hold a @MainActor
     # model). macos-14 defaults to Xcode 15.4 / Swift 5.10 and fails on both.
     runs-on: macos-15
+    timeout-minutes: 20
     needs: changes
     if: needs.changes.outputs.ios == 'true' || github.event_name == 'workflow_dispatch'
     defaults:
@@ -326,6 +327,9 @@ jobs:
             -project Cheers.xcodeproj \
             -scheme Cheers \
             -destination "id=${{ steps.ios-simulator.outputs.id }}" \
+            -parallel-testing-enabled NO \
+            -test-timeouts-enabled YES \
+            -maximum-test-execution-time-allowance 120 \
             CODE_SIGNING_ALLOWED=NO \
             test
 
