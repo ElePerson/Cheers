@@ -36,21 +36,65 @@ pub struct ApnsClient {
     cached: Mutex<Option<(Instant, String)>>,
 }
 
+type ProviderCredentials = (String, String, String);
+
+fn complete_credentials(
+    private_key: Option<String>,
+    key_id: Option<String>,
+    team_id: Option<String>,
+) -> Result<Option<ProviderCredentials>, ()> {
+    match (private_key, key_id, team_id) {
+        (None, None, None) => Ok(None),
+        (Some(private_key), Some(key_id), Some(team_id)) => {
+            Ok(Some((private_key, key_id, team_id)))
+        }
+        _ => Err(()),
+    }
+}
+
+fn env_value(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
 impl ApnsClient {
-    /// Build from env; returns None (push disabled) unless all of
-    /// APNS_KEY_P8 / APNS_KEY_ID / APNS_TEAM_ID are set. APNS_KEY_P8 may be the
-    /// PEM content itself or a path to the .p8 file. APNS_TOPIC defaults to the
-    /// iOS bundle id; APNS_SANDBOX=true targets the development environment.
+    /// Build from env. An explicit APNS_KEY_P8 / APNS_KEY_ID / APNS_TEAM_ID
+    /// tuple takes precedence. When that tuple is absent, the official service
+    /// may reuse the complete APPLE_PRIVATE_KEY_P8 / APPLE_KEY_ID /
+    /// APPLE_TEAM_ID tuple when the Apple key is authorized for both Sign in
+    /// with Apple and APNs. Partial tuples fail closed instead of mixing keys.
+    /// APNS_KEY_P8 may be the PEM content itself or a path to the .p8 file.
+    /// APNS_TOPIC defaults to the iOS bundle id; APNS_SANDBOX=true targets the
+    /// development environment.
     pub fn from_env() -> Option<Self> {
-        let raw_key = std::env::var("APNS_KEY_P8")
-            .ok()
-            .filter(|v| !v.trim().is_empty())?;
-        let key_id = std::env::var("APNS_KEY_ID")
-            .ok()
-            .filter(|v| !v.trim().is_empty())?;
-        let team_id = std::env::var("APNS_TEAM_ID")
-            .ok()
-            .filter(|v| !v.trim().is_empty())?;
+        let credentials = match complete_credentials(
+            env_value("APNS_KEY_P8"),
+            env_value("APNS_KEY_ID"),
+            env_value("APNS_TEAM_ID"),
+        ) {
+            Ok(Some(credentials)) => credentials,
+            Ok(None) => match complete_credentials(
+                env_value("APPLE_PRIVATE_KEY_P8"),
+                env_value("APPLE_KEY_ID"),
+                env_value("APPLE_TEAM_ID"),
+            ) {
+                Ok(Some(credentials)) => {
+                    tracing::info!("APNS_* not set; reusing the APPLE_* key authorized for APNs");
+                    credentials
+                }
+                Ok(None) => return None,
+                Err(()) => {
+                    tracing::error!("incomplete APPLE_* key tuple — push disabled");
+                    return None;
+                }
+            },
+            Err(()) => {
+                tracing::error!("incomplete APNS_* key tuple — push disabled");
+                return None;
+            }
+        };
+        let (raw_key, key_id, team_id) = credentials;
 
         let pem = if raw_key.contains("BEGIN PRIVATE KEY") {
             raw_key
@@ -146,5 +190,28 @@ impl ApnsClient {
             return Err(ApnsError::TokenDead);
         }
         Err(ApnsError::Rejected { status, reason })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::complete_credentials;
+
+    #[test]
+    fn credential_tuple_requires_all_fields() {
+        assert!(complete_credentials(None, None, None).unwrap().is_none());
+        assert!(complete_credentials(Some("key".into()), None, Some("team".into())).is_err());
+
+        let credentials = complete_credentials(
+            Some("key".into()),
+            Some("key-id".into()),
+            Some("team-id".into()),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            credentials,
+            ("key".into(), "key-id".into(), "team-id".into())
+        );
     }
 }
