@@ -59,6 +59,14 @@ Environment Variables because they are public metadata. The CD workflow creates
 a versioned, Base64-encoded allowlist payload and sends it only through the
 forced-command SSH connection's standard input.
 
+The official Apple Developer key is authorized for both Sign in with Apple and
+APNs. When no explicit `APNS_KEY_P8`, `APNS_KEY_ID`, or `APNS_TEAM_ID` tuple is
+configured, the gateway atomically reuses the complete `APPLE_*` key tuple for
+APNs; partial APNs or Apple tuples disable push rather than mixing credentials.
+`APNS_TOPIC` defaults to `app.cheers.ios` and production uses
+`APNS_SANDBOX=false`. Self-hosted deployments may provide a separate complete
+`APNS_*` tuple, which always takes precedence.
+
 Google's client secret is stored as the `GOOGLE_WEB_CLIENT_SECRET` production
 Environment Secret. Its client ID and callback URI are production Environment
 Variables. If the Google group is absent, capabilities report Google disabled;

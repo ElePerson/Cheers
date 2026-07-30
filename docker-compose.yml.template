@@ -56,6 +56,14 @@ services:
       - APPLE_PRIVATE_KEY_P8=${APPLE_PRIVATE_KEY_P8:-}
       - APPLE_WEB_CLIENT_ID=${APPLE_WEB_CLIENT_ID:-}
       - APPLE_WEB_REDIRECT_URI=${APPLE_WEB_REDIRECT_URI:-}
+      # APNs token authentication. Explicit APNS_* values take precedence;
+      # when absent, the gateway can reuse the complete APPLE_* key tuple if
+      # that Apple Developer key is authorized for both services.
+      - APNS_KEY_P8=${APNS_KEY_P8:-}
+      - APNS_KEY_ID=${APNS_KEY_ID:-}
+      - APNS_TEAM_ID=${APNS_TEAM_ID:-}
+      - APNS_TOPIC=${APNS_TOPIC:-app.cheers.ios}
+      - APNS_SANDBOX=${APNS_SANDBOX:-false}
       - GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID:-}
       - GOOGLE_WEB_CLIENT_SECRET=${GOOGLE_WEB_CLIENT_SECRET:-}
       - GOOGLE_WEB_REDIRECT_URI=${GOOGLE_WEB_REDIRECT_URI:-}
