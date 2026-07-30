@@ -51,6 +51,12 @@ Team/Key/Client ID 和两个 HTTPS 回调地址属于公开元数据，保存为
 Variables。CD workflow 生成带版本号、Base64 编码且字段固定在 allowlist 中的载荷，
 只通过 forced-command SSH 连接的标准输入传输。
 
+官方 Apple Developer Key 已同时授权 Sign in with Apple 与 APNs。未显式配置
+`APNS_KEY_P8`、`APNS_KEY_ID`、`APNS_TEAM_ID` 整组变量时，gateway 会将完整的
+`APPLE_*` Key 组合原子地复用于 APNs；APNs 或 Apple 任一组合只配置部分字段时，
+推送会安全关闭，不会混用凭据。`APNS_TOPIC` 默认是 `app.cheers.ios`，生产使用
+`APNS_SANDBOX=false`。自托管部署可提供独立且完整的 `APNS_*` 组合，并始终优先使用。
+
 Google client secret 保存为 production Environment Secret
 `GOOGLE_WEB_CLIENT_SECRET`，client ID 和 callback URI 保存为 Environment
 Variables。未配置整组 Google 变量时 capabilities 会关闭 Google；只配置部分字段会
