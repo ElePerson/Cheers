@@ -349,7 +349,9 @@ jobs:
           APP_INFO="$RUNNER_TEMP/cheers-ios-release/Build/Products/Release-iphoneos/Cheers.app/Info.plist"
           test "$(plutil -extract CFBundleIdentifier raw "$APP_INFO")" = "app.cheers.ios"
           test "$(plutil -extract CFBundleShortVersionString raw "$APP_INFO")" = "1.0.0"
-          test "$(plutil -extract CFBundleVersion raw "$APP_INFO")" = "1"
+          BUILD_NUMBER="$(plutil -extract CFBundleVersion raw "$APP_INFO")"
+          [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          test -n "$(plutil -extract NSCameraUsageDescription raw "$APP_INFO")"
           test -n "$(plutil -extract NSMicrophoneUsageDescription raw "$APP_INFO")"
           test -n "$(plutil -extract NSSpeechRecognitionUsageDescription raw "$APP_INFO")"
           plutil -lint Sources/PrivacyInfo.xcprivacy
