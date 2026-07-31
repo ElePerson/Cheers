@@ -35,7 +35,7 @@ used for **App Functionality**, and **not used for Tracking**:
 | Permission | Current use | Release decision |
 | --- | --- | --- |
 | Notifications | Optional approvals, mentions, direct-message and invite alerts | Keep optional; request only after sign-in, never gate core use on it |
-| Camera | Not used | Do not add `NSCameraUsageDescription` |
+| Camera | The bundled LiveKit/WebRTC stack references camera APIs for user-initiated video sharing | Keep `NSCameraUsageDescription` even when the current UI does not request camera access; Apple validates linked SDK APIs and rejected build 1 with `ITMS-90683` when the key was absent |
 | Photo Library | Profile avatars use the system `PhotosPicker`; files may also contain user-selected images | Keep the picker scoped; `PhotosPicker` does not require broad library access, so do not add `NSPhotoLibraryUsageDescription` unless the implementation changes |
 | Microphone | Voice channels and composer dictation, only after the user starts either feature | Keep `NSMicrophoneUsageDescription`; denial must leave text chat usable |
 | Speech Recognition | Local Apple Speech fallback for composer dictation when no server adapter is configured | Keep `NSSpeechRecognitionUsageDescription`; request only when dictation is started |
