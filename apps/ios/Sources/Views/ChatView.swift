@@ -80,8 +80,8 @@ private enum ChatTimelineItem: Identifiable, Hashable {
     case system(MessageDto)
     case bubble(
         MessageDto,
+        traceEvents: [TraceEntryDto],
         isOwn: Bool,
-        showName: Bool,
         showAvatar: Bool,
         isLast: Bool,
         formattedTime: String,
@@ -145,44 +145,30 @@ struct ChatView: View {
             }
             messageScroll
             TaskClaimsPanelView(model: model)
-            if let reply = model.replyTo {
-                replyBar(reply)
-            }
-            if let error = model.errorMessage {
-                errorBanner(error)
-            }
-            pendingAttachmentBar
-            ComposerView(
-                initialText: model.composerText,
-                clearTick: model.composerClearTick,
-                placeholder: composerPlaceholder,
-                isSending: model.isSending,
-                streamingCount: model.streamingMessageIds.count,
-                onSend: { draft in await model.send(draft: draft) },
-                onStopStreaming: { await model.stopAllTurns() },
-                channelId: model.channel.channelId,
-                api: app.api,
-                onChooseSession: { showSessionSheet = true },
-                onModelSettings: { showModelSheet = true },
-                onUploadFile: { showFileImporter = true },
-                onBrowseFiles: { showChannelFiles = true },
-                onAddContext: { showResourceContext = true },
-                mentionPool: model.mentionPool,
-                onMentionPicked: { candidate in
-                    if !model.pickedMentions.contains(candidate) {
-                        model.pickedMentions.append(candidate)
-                    }
-                }
-            )
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            composerDock
         }
         .background(Theme.bgApp)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                CircleIconButton(systemName: "line.3.horizontal", badge: shell.pendingApprovals + shell.pendingInvites) {
+                Button {
+                    NativeFeedback.lightImpact()
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { shell.openDrawer() }
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "line.3.horizontal")
+                        if shell.pendingApprovals + shell.pendingInvites > 0 {
+                            Circle()
+                                .fill(Theme.mention)
+                                .frame(width: 7, height: 7)
+                                .offset(x: 4, y: -3)
+                        }
+                    }
                 }
+                .accessibilityLabel("Open conversations")
             }
             ToolbarItem(placement: .principal) {
                 header
@@ -202,6 +188,7 @@ struct ChatView: View {
             await model.loadInitial()
         }
         .onChange(of: model.messages) { rebuildMessageItems() }
+        .onChange(of: model.traceRevision) { rebuildMessageItems() }
         .onChange(of: app.session?.userId) { rebuildMessageItems() }
         .onAppear { rebuildMessageItems() }
         .onDisappear {
@@ -308,6 +295,38 @@ struct ChatView: View {
             Button("Cancel", role: .cancel) { blockTarget = nil }
         } message: {
             Text("Blocking removes any friendship and prevents direct messages in either direction.")
+        }
+    }
+
+    private var composerDock: some View {
+        VStack(spacing: 0) {
+            if let reply = model.replyTo {
+                replyBar(reply)
+            }
+            if let error = model.errorMessage {
+                errorBanner(error)
+            }
+            pendingAttachmentBar
+            ComposerView(
+                initialText: model.composerText,
+                clearTick: model.composerClearTick,
+                placeholder: composerPlaceholder,
+                isSending: model.isSending,
+                onSend: { draft in await model.send(draft: draft) },
+                channelId: model.channel.channelId,
+                api: app.api,
+                onChooseSession: { showSessionSheet = true },
+                onModelSettings: { showModelSheet = true },
+                onUploadFile: { showFileImporter = true },
+                onBrowseFiles: { showChannelFiles = true },
+                onAddContext: { showResourceContext = true },
+                mentionPool: model.mentionPool,
+                onMentionPicked: { candidate in
+                    if !model.pickedMentions.contains(candidate) {
+                        model.pickedMentions.append(candidate)
+                    }
+                }
+            )
         }
     }
 
@@ -490,8 +509,9 @@ struct ChatView: View {
                 }
             }
         } label: {
-            NativeCircleButtonLabel(systemName: "ellipsis")
+            Image(systemName: "ellipsis")
         }
+        .accessibilityLabel("Channel options")
     }
 
     // MARK: Message list
@@ -589,14 +609,20 @@ struct ChatView: View {
         messages visible: [MessageDto],
         currentUserId: String?
     ) -> [ChatTimelineItem] {
-        // Approval cards stay in the stream in both states: pending renders an
-        // actionable card, resolved shrinks to a quiet trace line (ApprovalCardView).
+        // Only actionable approvals belong in the main conversation. Completed,
+        // denied and expired results remain available in the agent trace/audit.
         var result: [ChatTimelineItem] = []
         result.reserveCapacity(visible.count + 8)
         var previousDay: Date?
         let messagesById = Dictionary(uniqueKeysWithValues: visible.map { ($0.msgId, $0) })
+        let displayMessages = visible.filter { message in
+            guard message.msgType == "permission" else { return true }
+            let resolved = PermissionRequest(contentData: message.contentData)?.resolved == true
+                || message.contentData?["resolved"]?.boolValue == true
+            return !resolved
+        }
 
-        for (index, message) in visible.enumerated() {
+        for (index, message) in displayMessages.enumerated() {
             let day = message.createdDate
             if let day, !TimeFormat.sameDay(day, previousDay) {
                 result.append(.day(label: TimeFormat.dayLabel(day), key: message.msgId))
@@ -622,15 +648,15 @@ struct ChatView: View {
                     && TimeFormat.sameDay(other.createdDate, message.createdDate)
             }
 
-            let prev = index > 0 ? visible[index - 1] : nil
-            let next = index + 1 < visible.count ? visible[index + 1] : nil
+            let prev = index > 0 ? displayMessages[index - 1] : nil
+            let next = index + 1 < displayMessages.count ? displayMessages[index + 1] : nil
             let isFirstInGroup = !groupable(prev)
             let isLastInGroup = !groupable(next)
 
             result.append(.bubble(
                 message,
+                traceEvents: model.traceEvents(for: message.msgId),
                 isOwn: isOwn,
-                showName: !isOwn && !model.channel.isDM && isFirstInGroup,
                 showAvatar: !isOwn && isFirstInGroup,   // web parity: avatar on the FIRST of a run, top-aligned
                 isLast: isLastInGroup,
                 formattedTime: TimeFormat.time(message.createdDate),
@@ -891,12 +917,11 @@ private struct ChatTimelineRow: View {
             } else {
                 SystemMessageView(message: message)
             }
-        case .bubble(let message, let isOwn, let showName, let showAvatar, let isLast, let time, let repliedTo):
+        case .bubble(let message, let traceEvents, let isOwn, let showAvatar, let isLast, let time, let repliedTo):
             VStack(alignment: isOwn ? .trailing : .leading, spacing: 0) {
                 MessageBubbleView(
                     message: message,
                     isOwn: isOwn,
-                    showSenderName: showName,
                     showAvatar: showAvatar,
                     isLastInGroup: isLast,
                     formattedTime: time,
@@ -905,28 +930,19 @@ private struct ChatTimelineRow: View {
                     onForward: { onForward(message) },
                     onTapFile: onFile,
                     onReport: { onReport(message) },
-                    onBlock: { onBlock(message) }
+                    onBlock: { onBlock(message) },
+                    onStop: message.isPartial == true ? { onStop(message) } : nil
                 )
-                if message.isBot, message.isPartial == true {
-                    Button { onStop(message) } label: {
-                        Label("Stop", systemImage: "stop.fill")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
-                    .controlSize(.small)
-                    .tint(Theme.danger)
-                    .padding(.leading, 58)
-                    .padding(.top, 3)
-                    .accessibilityHint("Stops this response and any bot-to-bot chain it started")
-                }
-                // Lazy durable timeline — toggle only; fetch on first expand.
-                if message.isBot, message.isPartial != true {
-                    BotTracePanelView(channelId: channelId, msgId: message.msgId)
-                        .padding(.leading, showAvatar || isOwn ? 48 : 48)
-                        .padding(.trailing, 12)
-                        .padding(.top, 2)
-                        .padding(.bottom, 4)
+                if message.isBot {
+                    BotTracePanelView(
+                        channelId: channelId,
+                        msgId: message.msgId,
+                        liveEvents: traceEvents,
+                        isRunning: message.isPartial == true
+                    )
+                    .padding(.horizontal, Theme.space5)
+                    .padding(.top, Theme.space1)
+                    .padding(.bottom, message.isPartial == true ? 0 : 4)
                 }
                 if message.msgType == "task_claim_confirmation" {
                     TaskClaimConfirmationFooter(message: message, channelId: channelId)
