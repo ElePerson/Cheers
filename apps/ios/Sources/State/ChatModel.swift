@@ -367,6 +367,38 @@ final class ChatModel {
         }
     }
 
+    /// Replace the active window with context surrounding a search result.
+    /// The selected result is supplied by the search response itself; the two
+    /// cursor reads fetch its nearest older and newer neighbours.
+    func loadAround(_ target: MessageDto) async {
+        guard let api = app?.api else { return }
+        if messages.contains(where: { $0.msgId == target.msgId }) { return }
+
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            async let olderTask = api.listMessages(
+                channelId: channel.channelId,
+                before: target.msgId,
+                limit: 24
+            )
+            async let newerTask = api.listMessages(
+                channelId: channel.channelId,
+                after: target.msgId,
+                limit: 25
+            )
+            let (older, newer) = try await (olderTask, newerTask)
+            let window = older.messages + [target] + newer.messages
+            messages = sorted(window.map(withResolvedSender))
+            hasMoreBefore = older.meta?.hasMore ?? false
+            hasTrimmedNewer = newer.meta?.hasMore ?? false
+            highestSeq = max(highestSeq, messages.compactMap(\.channelSeq).max() ?? 0)
+            schedulePersist()
+        } catch {
+            report(error)
+        }
+    }
+
     /// Replaces an older paging window with the authoritative newest page.
     /// This avoids retaining an unbounded local transcript just to support a
     /// return-to-bottom gesture.

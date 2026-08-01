@@ -205,6 +205,7 @@ async fn authorize_workspace_items(
 
 #[derive(Deserialize)]
 pub struct ListMessagesQuery {
+    pub query: Option<String>,
     pub before: Option<String>,
     #[serde(rename = "before_id")]
     pub before_id: Option<String>,
@@ -244,7 +245,22 @@ pub async fn list_messages(
         .map_err(|_| AppError::Unauthorized("invalid user_id".into()))?;
 
     let limit = q.limit.clamp(1, 200);
-    let page = if let Some(since_seq) = q.since_seq {
+    let search_query = q
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let page = if let Some(search_query) = search_query {
+        messages::search_messages(
+            &state.db,
+            user_id,
+            channel_id,
+            search_query,
+            q.before,
+            limit,
+        )
+        .await?
+    } else if let Some(since_seq) = q.since_seq {
         messages::list_messages_since_seq(&state.db, user_id, channel_id, since_seq, limit).await?
     } else {
         let before = q.before.or(q.before_id).or(q.around_id);

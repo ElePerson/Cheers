@@ -777,6 +777,7 @@ struct APIClient: Sendable {
     func listMessages(
         channelId: String,
         before: String? = nil,
+        after: String? = nil,
         sinceSeq: Int64? = nil,
         limit: Int = 50
     ) async throws -> ListMessagesResponse {
@@ -784,8 +785,27 @@ struct APIClient: Sendable {
         if let before {
             query.append(URLQueryItem(name: "before", value: before))
         }
+        if let after {
+            query.append(URLQueryItem(name: "after", value: after))
+        }
         if let sinceSeq {
             query.append(URLQueryItem(name: "since_seq", value: String(sinceSeq)))
+        }
+        return try await getJSON("/channels/\(channelId)/messages", query: query, as: ListMessagesResponse.self)
+    }
+
+    func searchMessages(
+        channelId: String,
+        query searchQuery: String,
+        before: String? = nil,
+        limit: Int = 50
+    ) async throws -> ListMessagesResponse {
+        var query = [
+            URLQueryItem(name: "query", value: searchQuery),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        if let before {
+            query.append(URLQueryItem(name: "before", value: before))
         }
         return try await getJSON("/channels/\(channelId)/messages", query: query, as: ListMessagesResponse.self)
     }

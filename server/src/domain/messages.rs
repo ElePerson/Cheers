@@ -693,6 +693,19 @@ pub async fn list_messages_since_seq(
     list_channel_messages_since_seq(db, &channel_id, since_seq, limit).await
 }
 
+/// Permission-checked channel history search for HTTP clients.
+pub async fn search_messages(
+    db: &PgPool,
+    user_id: Uuid,
+    channel_id: Uuid,
+    query: &str,
+    before: Option<String>,
+    limit: i64,
+) -> Result<MessageListPage, AppError> {
+    ensure_member(db, channel_id, user_id).await?;
+    search_channel_messages(db, &channel_id, query, before, limit).await
+}
+
 /// Channel membership guard shared by the read paths. Any membership row
 /// (user or bot) grants read access to the channel's history.
 async fn ensure_member(db: &PgPool, channel_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
@@ -740,7 +753,8 @@ pub async fn list_channel_messages(
     let limit = limit.clamp(1, 200);
     let requested_limit = limit;
 
-    let (rows, anchor_found, has_more_before, has_more_after) = match (before, after) {
+    let (rows, anchor_found, has_more_before, has_more_after, reverse_rows) = match (before, after)
+    {
         (Some(before_id), None) => {
             let anchor = fetch_anchor(db, &before_id, channel_id).await?;
 
@@ -764,7 +778,7 @@ pub async fn list_channel_messages(
                 .fetch_all(db)
                 .await
                 .map_err(AppError::Db)?;
-                (rows, true, true, false)
+                (rows, true, true, false, true)
             } else {
                 let rows = sqlx::query(&format!(
                     "{MESSAGE_LIST_SELECT}
@@ -779,7 +793,7 @@ pub async fn list_channel_messages(
                 .fetch_all(db)
                 .await
                 .map_err(AppError::Db)?;
-                (rows, false, true, false)
+                (rows, false, true, false, true)
             }
         }
         (None, Some(after_id)) => {
@@ -795,7 +809,7 @@ pub async fn list_channel_messages(
                            m.created_at > $2
                            OR (m.created_at = $2 AND m.msg_id > $3)
                        )
-                     ORDER BY m.created_at DESC, m.msg_id DESC
+                     ORDER BY m.created_at ASC, m.msg_id ASC
                      LIMIT $4"
                 ))
                 .bind(channel_id.to_string())
@@ -805,9 +819,9 @@ pub async fn list_channel_messages(
                 .fetch_all(db)
                 .await
                 .map_err(AppError::Db)?;
-                (rows, true, false, true)
+                (rows, true, false, true, false)
             } else {
-                (Vec::new(), false, false, false)
+                (Vec::new(), false, false, false, false)
             }
         }
         (None, None) => {
@@ -824,7 +838,7 @@ pub async fn list_channel_messages(
             .fetch_all(db)
             .await
             .map_err(AppError::Db)?;
-            (rows, true, true, false)
+            (rows, true, true, false, true)
         }
         (Some(_), Some(_)) => unreachable!(),
     };
@@ -835,7 +849,9 @@ pub async fn list_channel_messages(
         msgs.truncate(requested_limit as usize);
     }
 
-    msgs.reverse(); // 按时间升序返回
+    if reverse_rows {
+        msgs.reverse(); // DESC queries are normalized to ascending presentation order.
+    }
 
     Ok(MessageListPage {
         messages: msgs,

@@ -71,6 +71,133 @@ enum ChannelPanel: String, Identifiable {
     }
 }
 
+private struct ChannelMessageSearchSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let channel: ChannelDto
+    let members: [ChannelMemberDto]
+    let api: APIClient?
+    let onSelect: (MessageDto) -> Void
+
+    @State private var query = ""
+    @State private var results: [MessageDto] = []
+    @State private var isSearching = false
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ContentUnavailableView(
+                        "Search messages",
+                        systemImage: "magnifyingglass",
+                        description: Text("Search the full history of #\(channel.displayName).")
+                    )
+                } else if isSearching && results.isEmpty {
+                    ProgressView("Searching…")
+                } else if let errorText, results.isEmpty {
+                    ContentUnavailableView(
+                        "Search unavailable",
+                        systemImage: "exclamationmark.magnifyingglass",
+                        description: Text(errorText)
+                    )
+                } else if results.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                } else {
+                    List(results) { message in
+                        Button {
+                            onSelect(message)
+                            dismiss()
+                        } label: {
+                            searchResultRow(message)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Search")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, prompt: "Search in #\(channel.displayName)")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .task(id: query) {
+            await search()
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func searchResultRow(_ message: MessageDto) -> some View {
+        let member = members.first { $0.memberId == message.senderId }
+        return HStack(alignment: .top, spacing: 12) {
+            AvatarView(
+                seedId: message.senderId ?? message.msgId,
+                name: message.senderName,
+                size: 36,
+                monochrome: true,
+                imageURL: member?.avatarUrl.flatMap(URL.init(string:))
+            )
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(message.senderName ?? member?.name ?? "Unknown")
+                        .font(.headline)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    if let date = message.createdDate {
+                        Text(date, format: .dateTime.month(.abbreviated).day().hour().minute())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(message.content)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .lineLimit(3)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func search() async {
+        let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            results = []
+            errorText = nil
+            isSearching = false
+            return
+        }
+
+        do {
+            try await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            isSearching = true
+            errorText = nil
+            guard let api else {
+                results = []
+                errorText = "Connect to Cheers before searching."
+                isSearching = false
+                return
+            }
+            let response = try await api.searchMessages(channelId: channel.channelId, query: value)
+            guard !Task.isCancelled else { return }
+            results = Array(response.messages.reversed())
+            isSearching = false
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            results = []
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            isSearching = false
+        }
+    }
+}
+
 /// Immutable presentation records consumed by the UIKit timeline. Identity is
 /// stable by message id; equality includes the rendered content so the
 /// diffable data source reconfigures only rows that actually changed.
@@ -111,6 +238,7 @@ struct ChatView: View {
     @State private var showFileImporter = false
     @State private var showChannelFiles = false
     @State private var showResourceContext = false
+    @State private var showMessageSearch = false
     @State private var isUploading = false
     @State private var uploadTask: Task<Void, Never>?
     @State private var uploadingFilename: String?
@@ -124,6 +252,8 @@ struct ChatView: View {
     /// Whether the message list is parked at the bottom (drives auto-follow).
     @State private var atBottom = true
     @State private var manualBottomTick = 0
+    @State private var jumpTargetId: String?
+    @State private var jumpTargetTick = 0
     private let listModel: ConversationListModel?
 
     /// `model` comes from AppModel.chatModels so history survives channel
@@ -173,7 +303,13 @@ struct ChatView: View {
             ToolbarItem(placement: .principal) {
                 header
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    showMessageSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .accessibilityLabel("Search messages")
                 moreMenu
             }
         }
@@ -249,6 +385,14 @@ struct ChatView: View {
                 channelId: model.channel.channelId,
                 reply: model.replyTo,
                 onAdd: { model.addContext($0) }
+            )
+        }
+        .sheet(isPresented: $showMessageSearch) {
+            ChannelMessageSearchSheet(
+                channel: model.channel,
+                members: model.channelMembers,
+                api: app.api,
+                onSelect: jumpToSearchResult
             )
         }
         .fileImporter(
@@ -525,6 +669,9 @@ struct ChatView: View {
             isLoadingOlder: model.isLoadingOlder,
             followBottomTick: model.followBottomTick,
             forceBottomTick: model.forceBottomTick + manualBottomTick,
+            scrollTargetId: jumpTargetId,
+            scrollTargetTick: jumpTargetTick,
+            highlightedMessageId: jumpTargetId,
             atBottom: $atBottom,
             onLoadOlder: { Task { await model.loadOlder() } },
             onReply: { model.replyTo = $0 },
@@ -543,6 +690,18 @@ struct ChatView: View {
             if model.isLoading && model.messages.isEmpty {
                 ProgressView()
             }
+        }
+    }
+
+    private func jumpToSearchResult(_ message: MessageDto) {
+        Task {
+            await model.loadAround(message)
+            jumpTargetId = message.msgId
+            jumpTargetTick += 1
+            try? await Task.sleep(for: .seconds(1.6))
+            guard jumpTargetId == message.msgId else { return }
+            jumpTargetId = nil
+            jumpTargetTick += 1
         }
     }
 
@@ -703,6 +862,9 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
     let isLoadingOlder: Bool
     let followBottomTick: Int
     let forceBottomTick: Int
+    let scrollTargetId: String?
+    let scrollTargetTick: Int
+    let highlightedMessageId: String?
     @Binding var atBottom: Bool
     let onLoadOlder: () -> Void
     let onReply: (MessageDto) -> Void
@@ -744,18 +906,27 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
         private var itemHashes: [String: Int] = [:]
         private var lastFollowTick: Int
         private var lastForceTick: Int
+        private var lastScrollTargetTick: Int
+        private var lastHighlightedMessageId: String?
         private var hasAppliedInitialSnapshot = false
 
         init(parent: ChatCollectionTimeline) {
             self.parent = parent
             lastFollowTick = parent.followBottomTick
             lastForceTick = parent.forceBottomTick
+            lastScrollTargetTick = parent.scrollTargetTick
+            lastHighlightedMessageId = parent.highlightedMessageId
         }
 
         private lazy var registration = UICollectionView.CellRegistration<UICollectionViewCell, String> {
             [weak self] cell, _, itemId in
             guard let self, let item = self.itemsById[itemId] else { return }
-            cell.backgroundConfiguration = UIBackgroundConfiguration.clear()
+            var background = UIBackgroundConfiguration.clear()
+            if self.parent.highlightedMessageId == itemId {
+                background.backgroundColor = UIColor.tintColor.withAlphaComponent(0.12)
+                background.cornerRadius = 14
+            }
+            cell.backgroundConfiguration = background
             cell.contentConfiguration = UIHostingConfiguration {
                 ChatTimelineRow(
                     item: item,
@@ -797,8 +968,12 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
             let oldOffsetY = collectionView.contentOffset.y
             let forceBottom = parent.forceBottomTick != lastForceTick
             let followBottom = parent.followBottomTick != lastFollowTick && wasAtBottom
+            let scrollTargetChanged = parent.scrollTargetTick != lastScrollTargetTick
+            let previousHighlightId = lastHighlightedMessageId
             lastForceTick = parent.forceBottomTick
             lastFollowTick = parent.followBottomTick
+            lastScrollTargetTick = parent.scrollTargetTick
+            lastHighlightedMessageId = parent.highlightedMessageId
             self.parent = parent
 
             var newItemsById: [String: ChatTimelineItem] = [:]
@@ -820,14 +995,20 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
 
             // Binding updates such as crossing the bottom threshold re-enter
             // updateUIView. They must not re-apply an identical snapshot.
-            guard contentChanged || forceBottom || followBottom || !hasAppliedInitialSnapshot else { return }
+            guard contentChanged || forceBottom || followBottom || scrollTargetChanged || !hasAppliedInitialSnapshot else { return }
             let interval = timelinePerformanceSignposter.beginInterval("ApplyTimelineSnapshot")
 
             var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
             snapshot.appendSections([0])
             snapshot.appendItems(newIdentifiers, toSection: 0)
             let existingIds = Set(oldIdentifiers)
-            let reconfigurable = changedIds.filter { existingIds.contains($0) && newItemsById[$0] != nil }
+            var reconfigurable = changedIds.filter { existingIds.contains($0) && newItemsById[$0] != nil }
+            if scrollTargetChanged {
+                for id in [previousHighlightId, parent.highlightedMessageId].compactMap({ $0 })
+                    where existingIds.contains(id) && newItemsById[id] != nil && !reconfigurable.contains(id) {
+                    reconfigurable.append(id)
+                }
+            }
             if !reconfigurable.isEmpty {
                 snapshot.reconfigureItems(reconfigurable)
             }
@@ -849,6 +1030,11 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
                     )
                 } else if forceBottom || followBottom || !self.hasAppliedInitialSnapshot {
                     self.scrollToBottom(collectionView, animated: false)
+                }
+                if scrollTargetChanged,
+                   let targetId = parent.scrollTargetId,
+                   let indexPath = self.dataSource?.indexPath(for: targetId) {
+                    collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
                 }
                 self.hasAppliedInitialSnapshot = true
                 self.publishBottomState(collectionView)
