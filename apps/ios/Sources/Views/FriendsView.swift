@@ -157,7 +157,7 @@ struct FriendsView: View {
                                 Task { await openDM(userId: friend.friendId) }
                             } label: {
                                 Image(systemName: "bubble.left")
-                                    .font(.system(size: 16, weight: .medium))
+                                    .font(.body.weight(.medium))
                                     .frame(width: Theme.hitMin, height: Theme.hitMin)
                                     .contentShape(Rectangle())
                             }

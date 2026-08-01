@@ -27,7 +27,7 @@ struct ViewBoardSheet: View {
             HStack(spacing: 8) {
                 Image(systemName: "rectangle.3.group").foregroundStyle(Theme.accent)
                 Text("ViewBoard")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
             }
             .padding(.horizontal, 16)
@@ -149,14 +149,14 @@ private struct PlanBoardView: View {
             HStack(spacing: 8) {
                 AvatarView(seedId: plan.botId, name: memberNames[plan.botId] ?? "bot", size: 24, monochrome: true)
                 Text(memberNames[plan.botId] ?? "bot")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text(shortSession(plan.sessionId))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.caption.monospaced())
                     .foregroundStyle(Theme.textMuted)
                 Spacer()
                 Text("\(plan.completed)/\(plan.total)")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.textSecondary)
             }
             if plan.total > 0 {
@@ -182,16 +182,16 @@ private struct PlanBoardView: View {
         if !entries.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(title) · \(entries.count)")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(Theme.textMuted)
                 ForEach(entries) { entry in
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: icon)
-                            .font(.system(size: 11))
+                            .font(.caption)
                             .foregroundStyle(color)
                             .padding(.top, 2)
                         Text(entry.content)
-                            .font(.system(size: 13))
+                            .font(.subheadline)
                             .foregroundStyle(struck ? Theme.textMuted : Theme.textPrimary)
                             .strikethrough(struck)
                     }
@@ -244,14 +244,14 @@ private struct CostBoardView: View {
             HStack(spacing: 8) {
                 AvatarView(seedId: row.botId, name: memberNames[row.botId] ?? "bot", size: 24, monochrome: true)
                 Text(memberNames[row.botId] ?? "bot")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text(shortSession(row.sessionId))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.caption.monospaced())
                     .foregroundStyle(Theme.textMuted)
                 Spacer()
                 Text(fmtUSD(row.costUsd))
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
             }
             HStack(spacing: 14) {
@@ -268,8 +268,8 @@ private struct CostBoardView: View {
 
     private func metric(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.system(size: 10)).foregroundStyle(Theme.textMuted)
-            Text(value).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.textSecondary)
+            Text(label).font(.caption2).foregroundStyle(Theme.textMuted)
+            Text(value).font(.caption.monospaced()).foregroundStyle(Theme.textSecondary)
         }
     }
 
@@ -300,7 +300,7 @@ private struct SessionsBoardView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         Text("\(sessions.count) sessions")
-                            .font(.system(size: 12))
+                            .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
@@ -323,22 +323,22 @@ private struct SessionsBoardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(session.botName ?? memberNames[session.botId] ?? "bot")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(Theme.textPrimary)
                     if session.isPrimary {
                         Text("PRIMARY")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.caption2.weight(.bold))
                             .foregroundStyle(Theme.accent)
                             .padding(.horizontal, 4).padding(.vertical, 1)
                             .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
                     }
                     Text(shortSession(session.sessionId))
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.caption.monospaced())
                         .foregroundStyle(Theme.textMuted)
                 }
                 if let cwd = session.workspace?.cwd, !cwd.isEmpty {
                     Text(cwd)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.caption.monospaced())
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -399,23 +399,23 @@ private struct ActivityBoardView: View {
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: event.eventType == "message" ? "bubble.left" : "gearshape.2")
-                    .font(.system(size: 13))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textMuted)
                     .frame(width: 22)
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(headline(event))
-                        .font(.system(size: 13))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(expanded ? nil : 2)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 6) {
                         Text(actorName(event))
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.caption.weight(.medium))
                             .foregroundStyle(Theme.textSecondary)
                         if let ts = event.createdAt {
                             Text(TimeFormat.listStamp(TimeFormat.parse(ts)))
-                                .font(.system(size: 11))
+                                .font(.caption)
                                 .foregroundStyle(Theme.textMuted)
                         }
                     }
@@ -514,7 +514,11 @@ private struct AuditBoardView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     // WHAT: the concrete command or path, never the generic title.
                     Text(event.subject ?? event.outcomeLabel)
-                        .font(.system(size: 14, weight: .medium, design: event.subject == nil ? .default : .monospaced))
+                        .font(
+                            event.subject == nil
+                                ? .subheadline.weight(.medium)
+                                : .subheadline.weight(.medium).monospaced()
+                        )
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(2)
                         .truncationMode(.middle)
@@ -523,7 +527,7 @@ private struct AuditBoardView: View {
                         // WHO asked.
                         if let bot = event.botId {
                             Text(memberNames[bot] ?? "bot")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.caption.weight(.medium))
                                 .foregroundStyle(Theme.textSecondary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -531,17 +535,17 @@ private struct AuditBoardView: View {
                         }
                         // RESULT.
                         Text(event.outcomeLabel)
-                            .font(.system(size: 12))
+                            .font(.caption)
                             .foregroundStyle(auditTone(event.outcome))
                     }
                 }
                 Spacer(minLength: 8)
                 if let ts = event.createdAt {
                     Text(TimeFormat.listStamp(TimeFormat.parse(ts)))
-                        .font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
+                        .font(.caption).foregroundStyle(Theme.textSecondary)
                 }
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textFaint)
             }
             .padding(.horizontal, 16)
@@ -586,11 +590,11 @@ private struct AuditDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text("Approval detail")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
                 Text(event.outcomeLabel)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(auditTone(event.outcome))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -602,10 +606,10 @@ private struct AuditDetailSheet: View {
                     if let subject = event.subject {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Request")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.caption.weight(.semibold))
                                 .foregroundStyle(Theme.textMuted)
                             Text(subject)
-                                .font(.system(size: 13, design: .monospaced))
+                                .font(.subheadline.monospaced())
                                 .foregroundStyle(Theme.textPrimary)
                                 .textSelection(.enabled)
                                 .padding(10)
@@ -636,11 +640,11 @@ private struct AuditDetailSheet: View {
             VStack(spacing: 0) {
                 HStack(alignment: .top, spacing: 12) {
                     Text(label)
-                        .font(.system(size: 13))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 108, alignment: .leading)
                     Text(value)
-                        .font(.system(size: 13))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.textPrimary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)

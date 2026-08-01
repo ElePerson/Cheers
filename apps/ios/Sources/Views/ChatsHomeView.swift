@@ -24,16 +24,16 @@ struct ChatRootView: View {
     private var emptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 44))
+                .font(.largeTitle)
                 .foregroundStyle(Theme.textFaint)
             Text("No conversation open")
-                .font(.system(size: 15, weight: .medium))
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(Theme.textSecondary)
             Button {
                 withAnimation(.easeOut(duration: 0.25)) { shell.openDrawer() }
             } label: {
                 Label("Open menu", systemImage: "line.3.horizontal")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.link)
             }
         }

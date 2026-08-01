@@ -31,15 +31,15 @@ struct FleetView: View {
                                     .foregroundStyle(Theme.warning)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("\(activity.pending.count) waiting on you")
-                                        .font(.system(size: 14, weight: .semibold))
+                                        .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(Theme.textPrimary)
                                     Text("Review in Activity")
-                                        .font(.system(size: 12))
+                                        .font(.caption)
                                         .foregroundStyle(Theme.textSecondary)
                                 }
                                 Spacer()
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(.caption.weight(.semibold))
                                     .foregroundStyle(Theme.textFaint)
                             }
                             .padding(12)
@@ -112,16 +112,16 @@ struct FleetView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let message = model.errorMessage {
-                Text(message).font(.system(size: 13)).foregroundStyle(Theme.danger)
+                Text(message).font(.subheadline).foregroundStyle(Theme.danger)
             } else {
                 Text("No agents yet")
-                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.textPrimary)
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textPrimary)
                 Text("Create one here, then connect it from the machine that will run it — this phone can't host an agent itself.")
-                    .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                    .font(.subheadline).foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button { showOnboarding = true } label: {
                     Label("Add a bot", systemImage: "plus")
-                        .font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 16).padding(.vertical, 9)
                         .background(Theme.accent)
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -135,7 +135,7 @@ struct FleetView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 11.5, weight: .bold)).tracking(0.7)
+            .font(.caption.weight(.bold)).tracking(0.7)
             .foregroundStyle(Theme.textSecondary)
             .padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 2)
     }
@@ -151,7 +151,7 @@ struct FleetView: View {
     private func summaryChip(dot: Color, _ label: String) -> some View {
         HStack(spacing: 6) {
             Circle().fill(dot).frame(width: 8, height: 8)
-            Text(label).font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.textSecondary)
+            Text(label).font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
         }
         .padding(.horizontal, 11).padding(.vertical, 7)
         .background(Theme.bgRaised)
@@ -171,17 +171,17 @@ struct FleetView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(bot.name)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textPrimary).lineLimit(1)
                     Text("BOT")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.caption2.weight(.bold))
                         .foregroundStyle(Theme.botBadgeText)
                         .padding(.horizontal, 4).padding(.vertical, 1)
                         .background(Theme.botBadgeBg)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                     if bot.isDisabled == true {
                         Text("OFF")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.caption2.weight(.bold))
                             .foregroundStyle(Theme.danger)
                             .padding(.horizontal, 4).padding(.vertical, 1)
                             .background(Theme.danger.opacity(0.12))
@@ -189,11 +189,11 @@ struct FleetView: View {
                     }
                 }
                 Text(statusLine(bot))
-                    .font(.system(size: 12.5)).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                    .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textFaint)
         }
         .padding(.vertical, 10)

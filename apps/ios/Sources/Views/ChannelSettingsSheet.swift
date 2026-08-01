@@ -40,7 +40,7 @@ struct ChannelSettingsSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Channel settings")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
                 if canManage {
@@ -49,7 +49,7 @@ struct ChannelSettingsSheet: View {
                     } label: {
                         if isSaving { ProgressView().controlSize(.small) } else { Text("Save") }
                     }
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(dirty ? Theme.link : Theme.textFaint)
                     .disabled(!dirty || isSaving || name.trimmingCharacters(in: .whitespaces).isEmpty)
                     .frame(minHeight: 44)
@@ -61,12 +61,12 @@ struct ChannelSettingsSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if let errorText {
                         Text(errorText)
-                            .font(.system(size: 12))
+                            .font(.caption)
                             .foregroundStyle(Theme.danger)
                     }
                     if savedNotice {
                         Text("Saved")
-                            .font(.system(size: 12))
+                            .font(.caption)
                             .foregroundStyle(Theme.online)
                     }
 
@@ -86,7 +86,7 @@ struct ChannelSettingsSheet: View {
                     // Say so rather than letting an emptied field silently revert.
                     if canManage && (channel.purpose?.isEmpty == false) && purpose.isEmpty {
                         Text("Clearing the purpose isn't supported by the server — it will keep the previous text.")
-                            .font(.system(size: 11))
+                            .font(.caption)
                             .foregroundStyle(Theme.warning)
                     }
 
@@ -94,10 +94,10 @@ struct ChannelSettingsSheet: View {
                         Toggle(isOn: $isPublic) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Public channel")
-                                    .font(.system(size: 15))
+                                    .font(.subheadline)
                                     .foregroundStyle(Theme.textPrimary)
                                 Text("Anyone in the workspace can join. Invite links require this.")
-                                    .font(.system(size: 11))
+                                    .font(.caption)
                                     .foregroundStyle(Theme.textSecondary)
                             }
                         }
@@ -143,7 +143,7 @@ struct ChannelSettingsSheet: View {
                     confirmLeave = true
                 } label: {
                     Label("Leave channel", systemImage: "rectangle.portrait.and.arrow.right")
-                        .font(.system(size: 15))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.textPrimary)
                         .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
                 }
@@ -153,7 +153,7 @@ struct ChannelSettingsSheet: View {
                     confirmDelete = true
                 } label: {
                     Label("Delete channel", systemImage: "trash")
-                        .font(.system(size: 15))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.danger)
                         .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
                 }
@@ -164,10 +164,10 @@ struct ChannelSettingsSheet: View {
     private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textMuted)
             content()
-                .font(.system(size: 15))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 11)

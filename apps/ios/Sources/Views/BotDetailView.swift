@@ -46,14 +46,14 @@ struct BotDetailView: View {
                         }
                         VStack(alignment: .leading, spacing: 4) {
                             Text(bot.name)
-                                .font(.system(size: 17, weight: .semibold))
+                                .font(.body.weight(.semibold))
                             if let username = bot.username {
                                 Text("@\(username)")
-                                    .font(.system(size: 13))
+                                    .font(.subheadline)
                                     .foregroundStyle(Theme.textMuted)
                             }
                             Text(statusLine)
-                                .font(.system(size: 12))
+                                .font(.caption)
                                 .foregroundStyle(Theme.textSecondary)
                         }
                     }

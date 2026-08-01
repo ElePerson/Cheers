@@ -40,11 +40,11 @@ struct BotTracePanelView: View {
                         statusIcon
                             .frame(width: 16)
                         Text(summary)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.caption.weight(.medium))
                             .lineLimit(1)
                         Spacer(minLength: Theme.space2)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.caption.weight(.semibold))
                     }
                     .foregroundStyle(isRunning ? Theme.textSecondary : Theme.textMuted)
                     .frame(minHeight: Theme.hitMin)
@@ -201,17 +201,17 @@ private struct TraceStepRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: Theme.space3) {
             Image(systemName: entry.category.symbol)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(entry.statusTone)
                 .frame(width: 18, height: 22)
 
             VStack(alignment: .leading, spacing: Theme.space1) {
                 Text(entry.category.label)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 if let target = entry.targetLabel {
                     Text(target)
-                        .font(.system(size: 13))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(2)
                 }
@@ -222,7 +222,7 @@ private struct TraceStepRow: View {
             HStack(spacing: Theme.space2) {
                 if let duration = entry.durationLabel {
                     Text(duration)
-                        .font(.system(size: 11).monospacedDigit())
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(Theme.textMuted)
                 }
                 statusGlyph
@@ -280,7 +280,7 @@ private struct TraceDetailView: View {
                 Section("Changes") {
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(diff)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.caption.monospaced())
                             .foregroundStyle(Theme.textBody)
                             .textSelection(.enabled)
                     }
@@ -313,7 +313,7 @@ private struct TraceDetailView: View {
     private func jsonSection(_ title: LocalizedStringKey, value: JSONValue) -> some View {
         Section {
             Text(value.prettyPrinted)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.caption.monospaced())
                 .foregroundStyle(Theme.textBody)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)

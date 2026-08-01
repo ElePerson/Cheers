@@ -11,7 +11,6 @@ struct CheersApp: App {
             RootView()
                 .environment(appModel)
                 .environment(shellModel)
-                .tint(Theme.accent)
         }
     }
 }

@@ -105,7 +105,7 @@ struct TwoFactorSettingsView: View {
                 }
                 LabeledContent("Secret") {
                     Text(setup.secret)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.caption.monospaced())
                         .textSelection(.enabled)
                 }
             } header: {
@@ -139,7 +139,7 @@ struct TwoFactorSettingsView: View {
         Section {
             ForEach(backupCodes, id: \.self) { item in
                 Text(item)
-                    .font(.system(size: 15, design: .monospaced))
+                    .font(.subheadline.monospaced())
                     .textSelection(.enabled)
             }
             Button("Copy all codes") {

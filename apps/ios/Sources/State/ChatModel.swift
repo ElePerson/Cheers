@@ -21,6 +21,22 @@ struct MentionCandidate: Identifiable, Hashable {
     /// Drives the inserted "@label" text.
     let label: String
     let sublabel: String?
+    /// Real channel-member avatar. Group mentions intentionally have none.
+    let avatarURL: String?
+
+    init(
+        id: String,
+        kind: Kind,
+        label: String,
+        sublabel: String?,
+        avatarURL: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.label = label
+        self.sublabel = sublabel
+        self.avatarURL = avatarURL
+    }
 
     /// Group tokens the server expands to real members. `@here` currently
     /// aliases `@all` (no write-time presence signal yet) — web parity.
@@ -300,7 +316,8 @@ final class ChatModel {
                     id: member.memberId,
                     kind: member.isBot ? .bot : .user,
                     label: member.name,
-                    sublabel: member.username
+                    sublabel: member.username,
+                    avatarURL: member.avatarUrl
                 )
             }
     }

@@ -89,7 +89,7 @@ struct TaskClaimsPanelView: View {
         if !model.pendingTaskClaims.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("TASK CLAIM REQUESTS · \(model.pendingTaskClaims.count)")
-                    .font(.system(size: 10.5, weight: .bold))
+                    .font(.caption2.weight(.bold))
                     .tracking(0.6)
                     .foregroundStyle(Theme.accent)
                 ForEach(model.pendingTaskClaims) { claim in

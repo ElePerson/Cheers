@@ -28,6 +28,8 @@ struct ComposerView: View {
 
     @FocusState private var isFocused: Bool
     @State private var dictation = ComposerDictationController()
+    @State private var showMentionPicker = false
+    @State private var mentionSearch = ""
 
     init(
         initialText: String,
@@ -81,35 +83,19 @@ struct ComposerView: View {
         return (atIndex..<text.endIndex, String(query))
     }
 
-    /// Matches for the active token, ranked bots → group tokens → people (web
-    /// parity). Capped at 5 rows so the list never buries the input.
-    private var mentionMatches: [MentionCandidate] {
-        guard let token = mentionToken, !mentionPool.isEmpty else { return [] }
-        let q = token.query.lowercased()
-        let hits = mentionPool.filter {
-            q.isEmpty || $0.label.lowercased().contains(q)
-                || ($0.sublabel?.lowercased().contains(q) ?? false)
-        }
-        // Stable rank sort: decorate with the original index as tie-break.
-        return hits.enumerated()
-            .sorted { ($0.element.kind.rawValue, $0.offset) < ($1.element.kind.rawValue, $1.offset) }
-            .prefix(5)
-            .map(\.element)
-    }
-
     private func pick(_ candidate: MentionCandidate) {
         guard let token = mentionToken else { return }
         text.replaceSubrange(token.range, with: "@\(candidate.label) ")
         onMentionPicked(candidate)
+        showMentionPicker = false
+        Task { @MainActor in
+            await Task.yield()
+            isFocused = true
+        }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !mentionMatches.isEmpty {
-                mentionPicker
-            }
-            inputRow
-        }
+        inputRow
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .onChange(of: clearTick) {
@@ -117,47 +103,152 @@ struct ComposerView: View {
             transaction.disablesAnimations = true
             withTransaction(transaction) { text = "" }
         }
+        .onChange(of: text) { oldValue, newValue in
+            guard newValue != oldValue,
+                  newValue.last == "@",
+                  mentionToken?.query.isEmpty == true,
+                  !mentionPool.isEmpty else { return }
+            presentMentionPicker()
+        }
+        .onChange(of: showMentionPicker) { _, isPresented in
+            if !isPresented { mentionSearch = "" }
+        }
     }
 
-    private var mentionPicker: some View {
-        List(mentionMatches) { candidate in
-            Button { pick(candidate) } label: {
-                HStack(spacing: 8) {
-                    Label {
-                        Text(candidate.label)
-                            .lineLimit(1)
-                    } icon: {
-                        Image(systemName: candidate.kind == .bot ? "sparkles"
-                            : candidate.kind == .group ? "person.3" : "person")
+    private var mentionPickerSheet: some View {
+        NavigationStack {
+            Group {
+                if filteredMentionPool.isEmpty {
+                    ContentUnavailableView.search(text: mentionSearch)
+                } else {
+                    List {
+                        if !filteredGroups.isEmpty {
+                            Section("Groups") {
+                                ForEach(filteredGroups) { candidate in
+                                    mentionRow(candidate)
+                                }
+                            }
+                        }
+                        if !filteredBots.isEmpty {
+                            Section("Bots") {
+                                ForEach(filteredBots) { candidate in
+                                    mentionRow(candidate)
+                                }
+                            }
+                        }
+                        if !filteredPeople.isEmpty {
+                            Section("People") {
+                                ForEach(filteredPeople) { candidate in
+                                    mentionRow(candidate)
+                                }
+                            }
+                        }
                     }
-                    .font(.subheadline.weight(.medium))
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("Mention")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $mentionSearch, prompt: "Search people and groups")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showMentionPicker = false }
+                }
+            }
+        }
+    }
 
-                    if let sub = candidate.sublabel, !sub.isEmpty {
-                        Text(candidate.kind == .group ? sub : "@\(sub)")
-                            .font(.caption)
+    private var filteredMentionPool: [MentionCandidate] {
+        let query = mentionSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return mentionPool }
+        return mentionPool.filter { candidate in
+            candidate.label.localizedCaseInsensitiveContains(query)
+                || (candidate.sublabel?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
+    private var filteredGroups: [MentionCandidate] {
+        filteredMentionPool.filter { $0.kind == .group }
+    }
+
+    private var filteredBots: [MentionCandidate] {
+        filteredMentionPool.filter { $0.kind == .bot }
+    }
+
+    private var filteredPeople: [MentionCandidate] {
+        filteredMentionPool.filter { $0.kind == .user }
+    }
+
+    private func mentionRow(_ candidate: MentionCandidate) -> some View {
+        Button {
+            pick(candidate)
+        } label: {
+            HStack(spacing: Theme.space3) {
+                mentionIcon(candidate)
+                VStack(alignment: .leading, spacing: Theme.space1) {
+                    Text("@\(candidate.label)")
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                    if let sublabel = candidate.sublabel, !sublabel.isEmpty {
+                        Text(candidate.kind == .group ? sublabel : "@\(sublabel)")
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-
-                    Spacer(minLength: 0)
-
-                    if candidate.kind == .bot {
-                        Text("BOT")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.tint)
-                    }
                 }
-                .contentShape(Rectangle())
+                Spacer(minLength: 0)
+                if candidate.kind == .bot {
+                    Text("BOT")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
-            .buttonStyle(.plain)
-            .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+            .contentShape(Rectangle())
         }
-        .listStyle(.plain)
-        .scrollDisabled(true)
-        .environment(\.defaultMinListRowHeight, Theme.hitMin)
-        .frame(height: CGFloat(mentionMatches.count) * Theme.hitMin)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .padding(.bottom, 6)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Mention \(candidate.label)")
+    }
+
+    @ViewBuilder
+    private func mentionIcon(_ candidate: MentionCandidate) -> some View {
+        if candidate.kind == .group {
+            Image(systemName: groupMentionIcon(candidate.id))
+                .font(.title3)
+                .foregroundStyle(.tint)
+                .frame(width: 40, height: 40)
+                .background(.quaternary, in: Circle())
+                .accessibilityHidden(true)
+        } else {
+            AvatarView(
+                seedId: candidate.id,
+                name: candidate.label,
+                size: 40,
+                imageURL: resolveAvatarURL(candidate.avatarURL)
+            )
+        }
+    }
+
+    private func groupMentionIcon(_ id: String) -> String {
+        switch id {
+        case "all": return "person.3.fill"
+        case "bots": return "cpu"
+        case "humans": return "person.2.fill"
+        case "here": return "location.fill"
+        default: return "at"
+        }
+    }
+
+    private func resolveAvatarURL(_ raw: String?) -> URL? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let absolute = URL(string: raw), absolute.scheme != nil { return absolute }
+        guard let base = api?.baseURL,
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return URL(string: raw, relativeTo: components.url)?.absoluteURL
     }
 
     private var inputRow: some View {
@@ -197,6 +288,24 @@ struct ComposerView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Mention someone")
+            .popover(
+                isPresented: $showMentionPicker,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .bottom
+            ) {
+                mentionPickerSheet
+                    .frame(idealWidth: 360, minHeight: 420)
+                    .presentationCompactAdaptation(.popover)
+            }
+            .contextMenu {
+                ForEach(mentionPool.filter { $0.kind == .group }) { candidate in
+                    Button {
+                        quickPick(candidate)
+                    } label: {
+                        Label("@\(candidate.label)", systemImage: groupMentionIcon(candidate.id))
+                    }
+                }
+            }
 
             dictationButton
 
@@ -212,7 +321,6 @@ struct ComposerView: View {
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.circle)
             .controlSize(.large)
-            .tint(.blue)
             .frame(width: Theme.hitMin, height: Theme.hitMin)
             .disabled(!canSend)
             .accessibilityLabel(primaryActionLabel)
@@ -265,7 +373,23 @@ struct ComposerView: View {
             text += " "
         }
         text += "@"
-        isFocused = true
+        presentMentionPicker()
+    }
+
+    private func presentMentionPicker() {
+        guard !mentionPool.isEmpty else { return }
+        isFocused = false
+        showMentionPicker = true
+    }
+
+    private func quickPick(_ candidate: MentionCandidate) {
+        if mentionToken == nil {
+            if !text.isEmpty, text.last?.isWhitespace != true {
+                text += " "
+            }
+            text += "@"
+        }
+        pick(candidate)
     }
 
     private func sendDraft() {

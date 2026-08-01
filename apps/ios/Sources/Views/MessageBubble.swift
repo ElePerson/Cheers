@@ -272,14 +272,14 @@ struct AttachmentChipView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "doc")
-                .font(.system(size: 14))
+                .font(.subheadline)
             VStack(alignment: .leading, spacing: 1) {
                 Text(file.originalFilename ?? "Attachment")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption.weight(.medium))
                     .lineLimit(1)
                 if let bytes = file.sizeBytes {
                     Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
-                        .font(.system(size: 11))
+                        .font(.caption)
                         .opacity(0.7)
                 }
             }
@@ -418,7 +418,7 @@ struct MessageContentView: View {
                 case .code(let code, _):
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(code)
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(.subheadline.monospaced())
                             .foregroundStyle(Theme.textBody)
                             .padding(10)
                     }

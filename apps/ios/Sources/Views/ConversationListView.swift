@@ -26,12 +26,12 @@ struct ConversationRowView: View {
             VStack(alignment: .leading, spacing: Theme.space1) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(row.channel.displayName)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     if let ws = row.workspaceName {
                         Text(ws)
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.caption2.weight(.medium))
                             .foregroundStyle(Theme.textMuted)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1.5)
@@ -41,19 +41,19 @@ struct ConversationRowView: View {
                     }
                     Spacer(minLength: Theme.space2)
                     Text(TimeFormat.listStamp(row.lastActivity))
-                        .font(.system(size: 12).monospacedDigit())
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(Theme.textFaint)
                 }
 
                 HStack(alignment: .top) {
                     Text(previewLine)
-                        .font(.system(size: 13))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.textMuted)
                         .lineLimit(1)
                     Spacer(minLength: Theme.space2)
                     if row.unreadCount > 0 {
                         Text(row.unreadCount > 99 ? "99+" : String(row.unreadCount))
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.caption.weight(.bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)

@@ -24,7 +24,7 @@ struct PasskeySettingsView: View {
                     if let rpId {
                         LabeledContent("Relying party") {
                             Text(rpId)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(.caption.monospaced())
                                 .foregroundStyle(Theme.textSecondary)
                         }
                     }
@@ -42,9 +42,9 @@ struct PasskeySettingsView: View {
                         ForEach(credentials) { item in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(item.name)
-                                    .font(.system(size: 15, weight: .medium))
+                                    .font(.subheadline.weight(.medium))
                                 Text("Added \(item.createdAt.prefix(10))")
-                                    .font(.system(size: 12))
+                                    .font(.caption)
                                     .foregroundStyle(Theme.textMuted)
                             }
                             .swipeActions {

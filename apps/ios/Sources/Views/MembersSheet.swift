@@ -160,12 +160,12 @@ struct MembersSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(member.name)
-                        .font(.system(size: 15))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     if member.isBot {
                         Text("BOT")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.caption2.weight(.bold))
                             .foregroundStyle(Theme.botBadgeText)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -175,11 +175,11 @@ struct MembersSheet: View {
                 HStack(spacing: 6) {
                     if member.isPending {
                         Text("Invited · awaiting reply")
-                            .font(.system(size: 12))
+                            .font(.caption)
                             .foregroundStyle(Theme.warning)
                     } else if let role = member.role, role != "member" {
                         Text(role.capitalized)
-                            .font(.system(size: 12))
+                            .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }
@@ -216,7 +216,7 @@ struct MembersSheet: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.textMuted)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
@@ -308,11 +308,11 @@ struct InviteSheet: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Add to #\(channel.name)")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
                 Button("Done") { dismiss() }
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.link)
                     .frame(minHeight: 44)
             }
@@ -328,14 +328,14 @@ struct InviteSheet: View {
 
             if let errorText {
                 Text(errorText)
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(Theme.danger)
                     .padding(.horizontal, 16)
                     .padding(.top, 10)
             }
             if let notice {
                 Text(notice)
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(Theme.online)
                     .padding(.horizontal, 16)
                     .padding(.top, 10)
@@ -357,10 +357,10 @@ struct InviteSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textMuted)
                 TextField("Search people and bots", text: $query)
-                    .font(.system(size: 15))
+                    .font(.subheadline)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .onChange(of: query) { _, new in scheduleSearch(new) }
@@ -374,12 +374,12 @@ struct InviteSheet: View {
 
             if query.count < 2 {
                 Text("Only workspace members can be invited to a channel. Use an invite link to bring in someone new.")
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .padding(.horizontal, 16)
             } else if results.isEmpty && !isSearching {
                 Text("No matches")
-                    .font(.system(size: 13))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textMuted)
                     .padding(.horizontal, 16)
             } else {
@@ -404,11 +404,11 @@ struct InviteSheet: View {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 5) {
                         Text(item.name)
-                            .font(.system(size: 15))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.textPrimary)
                         if item.isBot {
                             Text("BOT")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.caption2.weight(.bold))
                                 .foregroundStyle(Theme.botBadgeText)
                                 .padding(.horizontal, 4).padding(.vertical, 1)
                                 .background(Theme.botBadgeBg, in: RoundedRectangle(cornerRadius: 3))
@@ -416,14 +416,14 @@ struct InviteSheet: View {
                     }
                     if already {
                         Text("Already in this channel")
-                            .font(.system(size: 12))
+                            .font(.caption)
                             .foregroundStyle(Theme.textMuted)
                     }
                 }
                 Spacer()
                 if !already {
                     Image(systemName: "plus.circle")
-                        .font(.system(size: 18))
+                        .font(.title3)
                         .foregroundStyle(Theme.link)
                 }
             }
@@ -494,7 +494,7 @@ struct InviteSheet: View {
                         }
                         Text("Create invite link")
                     }
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, minHeight: 46)
                     .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -522,18 +522,18 @@ struct InviteSheet: View {
     private func linkRow(_ link: InviteLinkDto) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(inviteURL(link))
-                .font(.system(size: 12, design: .monospaced))
+                .font(.caption.monospaced())
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             HStack(spacing: 10) {
                 Text(usageLabel(link))
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
                 ShareLink(item: inviteURL(link)) {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.link)
                         .frame(width: 44, height: 36)
                 }
@@ -542,7 +542,7 @@ struct InviteSheet: View {
                     notice = "Link copied"
                 } label: {
                     Image(systemName: "doc.on.doc")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.link)
                         .frame(width: 44, height: 36)
                 }
@@ -550,7 +550,7 @@ struct InviteSheet: View {
                     Task { await revoke(link) }
                 } label: {
                     Image(systemName: "trash")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.danger)
                         .frame(width: 44, height: 36)
                 }
@@ -582,7 +582,7 @@ struct InviteSheet: View {
 
     private func infoText(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12))
+            .font(.caption)
             .foregroundStyle(Theme.textSecondary)
             .padding(.horizontal, 16)
     }

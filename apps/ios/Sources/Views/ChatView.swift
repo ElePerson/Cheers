@@ -426,14 +426,14 @@ struct ChatView: View {
     private func replyBar(_ reply: MessageDto) -> some View {
         HStack(spacing: 9) {
             Image(systemName: "arrowshape.turn.up.left")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.link)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Replying to \(reply.senderName ?? (reply.isBot ? "Bot" : "message"))")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text(reply.content.replacingOccurrences(of: "\n", with: " "))
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
             }
@@ -442,7 +442,7 @@ struct ChatView: View {
                 model.replyTo = nil
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textSecondary)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
@@ -464,17 +464,17 @@ struct ChatView: View {
             HStack(spacing: 5) {
                 if !model.channel.isDM {
                     Image(systemName: "number")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textSecondary)
                 }
                 Text(model.channel.displayName)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
             }
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
             }
@@ -556,7 +556,7 @@ struct ChatView: View {
             }
         } label: {
             Image(systemName: "arrow.down")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: 44, height: 44)          // HIG minimum tap target
                 .background(.regularMaterial, in: Circle())
@@ -572,7 +572,7 @@ struct ChatView: View {
     private func errorBanner(_ text: String) -> some View {
         HStack {
             Text(text)
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(Theme.danger)
                 .lineLimit(2)
             Spacer()
@@ -580,7 +580,7 @@ struct ChatView: View {
                 model.errorMessage = nil
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textMuted)
                     .frame(width: Theme.hitMin, height: Theme.hitMin)
                     .contentShape(Rectangle())
@@ -1007,18 +1007,18 @@ private struct ForwardSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Forward to")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.body.weight(.semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .padding(16)
             Text(message.content.replacingOccurrences(of: "\n", with: " "))
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
             if let errorText {
                 Text(errorText)
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(Theme.danger)
                     .padding(.horizontal, 16)
             }
@@ -1029,7 +1029,7 @@ private struct ForwardSheet: View {
                             HStack(spacing: 11) {
                                 ChannelAvatarView(channel: row.channel, size: 34)
                                 Text(row.channel.displayName)
-                                    .font(.system(size: 15))
+                                    .font(.subheadline)
                                     .foregroundStyle(Theme.textBody)
                                     .lineLimit(1)
                                 Spacer()
@@ -1237,16 +1237,16 @@ private struct FilePreviewSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                    Text(title).font(.body.weight(.semibold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
                     if let bytes = file.sizeBytes {
                         Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
-                            .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
                 Spacer()
                 if let shareURL {
                     ShareLink(item: shareURL) {
-                        Image(systemName: "square.and.arrow.up").font(.system(size: 17))
+                        Image(systemName: "square.and.arrow.up").font(.body)
                     }
                 }
             }
@@ -1273,12 +1273,12 @@ private struct FilePreviewSheet: View {
             .background(Theme.bgApp)
         } else {
             VStack(spacing: 14) {
-                Image(systemName: "doc.fill").font(.system(size: 44)).foregroundStyle(Theme.textFaint)
-                Text("Preview not available for this type").font(.system(size: 14)).foregroundStyle(Theme.textSecondary)
+                Image(systemName: "doc.fill").font(.largeTitle).foregroundStyle(Theme.textFaint)
+                Text("Preview not available for this type").font(.subheadline).foregroundStyle(Theme.textSecondary)
                 if let shareURL {
                     ShareLink(item: shareURL) {
                         Label("Save / Share", systemImage: "square.and.arrow.up")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 18).frame(minHeight: 44)
                             .background(Theme.accent)
@@ -1336,7 +1336,7 @@ private struct SessionSheet: View {
                     Section(bot.name) {
                         let sessions = sessionsByBot[bot.memberId] ?? []
                         if sessions.isEmpty {
-                            Text("No sessions").font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                            Text("No sessions").font(.subheadline).foregroundStyle(Theme.textSecondary)
                         }
                         ForEach(sessions) { s in
                             HStack {
@@ -1345,8 +1345,8 @@ private struct SessionSheet: View {
                                 } label: {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(s.tag + (s.isPrimary == true ? " · primary" : ""))
-                                            .font(.system(size: 15)).foregroundStyle(Theme.textBody)
-                                        Text(sessionSubtitle(s)).font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                                            .font(.subheadline).foregroundStyle(Theme.textBody)
+                                        Text(sessionSubtitle(s)).font(.caption).foregroundStyle(Theme.textSecondary)
                                     }
                                 }
                                 Spacer()
@@ -1400,9 +1400,9 @@ private struct SessionSheet: View {
         Button(action: action) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 15)).foregroundStyle(Theme.textBody)
+                    Text(title).font(.subheadline).foregroundStyle(Theme.textBody)
                     if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle).font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                        Text(subtitle).font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
                 Spacer()
@@ -1492,7 +1492,7 @@ private struct ModelSettingsSheet: View {
                     }
                 }
                 if let errorText {
-                    Text(errorText).font(.system(size: 13)).foregroundStyle(Theme.danger)
+                    Text(errorText).font(.subheadline).foregroundStyle(Theme.danger)
                 }
             }
             .navigationTitle("Model & settings")
@@ -1528,7 +1528,7 @@ private struct ModelSettingsSheet: View {
         }
         if !hasSession {
             Text("No active session — start one to change settings.")
-                .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                .font(.caption).foregroundStyle(Theme.textSecondary)
         }
     }
 

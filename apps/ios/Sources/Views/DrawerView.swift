@@ -152,7 +152,7 @@ struct DrawerView: View {
                 if shell.personalWorkspace?.workspaceId == ws.workspaceId {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(Theme.online)
-                        .overlay(Image(systemName: "house.fill").font(.system(size: 14, weight: .medium)).foregroundStyle(.white))
+                        .overlay(Image(systemName: "house.fill").font(.subheadline.weight(.medium)).foregroundStyle(.white))
                 } else if let image = workspaceAvatarImages[ws.workspaceId] {
                     Image(uiImage: image)
                         .resizable()
@@ -162,12 +162,12 @@ struct DrawerView: View {
                 } else {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(Theme.avatarColor(for: ws.workspaceId))
-                        .overlay(Text(Theme.initials(ws.name)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white))
+                        .overlay(Text(Theme.initials(ws.name)).font(.subheadline.weight(.semibold)).foregroundStyle(.white))
                 }
             } else {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(Theme.bgRaised)
-                    .overlay(Image(systemName: "square.grid.2x2").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.textSecondary))
+                    .overlay(Image(systemName: "square.grid.2x2").font(.subheadline.weight(.medium)).foregroundStyle(Theme.textSecondary))
             }
         }
         .frame(width: 28, height: 28)
@@ -303,14 +303,14 @@ struct DrawerView: View {
                     ChannelAvatarView(channel: row.channel, size: 36)
                 } else if row.channel.isVoice {
                     Image(systemName: "waveform")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 36, height: 36)
                         .background(Theme.bgRaised)
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 } else {
                     Text("#")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 36, height: 36)
                         .background(Theme.bgRaised)
@@ -323,7 +323,7 @@ struct DrawerView: View {
                 Spacer(minLength: 6)
                 if row.unreadCount > 0 {
                     Text(row.unreadCount > 99 ? "99+" : String(row.unreadCount))
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)

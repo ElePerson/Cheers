@@ -86,9 +86,9 @@ struct ActivityView: View {
 
     private func sectionHeader(_ title: String, icon: String, tint: Color) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: icon).font(.system(size: 12)).foregroundStyle(tint)
+            Image(systemName: icon).font(.caption).foregroundStyle(tint)
             Text(title.uppercased())
-                .font(.system(size: 11.5, weight: .bold)).tracking(0.7)
+                .font(.caption.weight(.bold)).tracking(0.7)
                 .foregroundStyle(Theme.textSecondary)
         }
         .padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 2)
@@ -101,13 +101,13 @@ struct ActivityView: View {
                 HStack(spacing: 9) {
                     AvatarView(seedId: item.message.senderId ?? item.id, name: item.botName, size: 30)
                     Text(item.request.title)
-                        .font(.system(size: 14.5, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
                 }
                 if let command = item.request.command {
                     Text(command)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.caption.monospaced())
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -116,10 +116,10 @@ struct ActivityView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
                 Text("\(item.botName) · #\(item.channelId.prefix(6))")
-                    .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
                 Button { sheetItem = item } label: {
                     Text("Review")
-                        .font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 16).padding(.vertical, 8)
                         .background(Theme.accent)
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -136,25 +136,25 @@ struct ActivityView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 9) {
                 Image(systemName: invite.isChannelInvite ? "number" : "square.grid.2x2")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.textSecondary)
                     .frame(width: 30, height: 30)
                     .background(Theme.bgRaised)
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 Text(invite.title)
-                    .font(.system(size: 14.5, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
             }
             if let by = invite.invitedBy {
                 Text("\(by) invited you to join")
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
             }
             HStack(spacing: 8) {
                 Button { Task { await activity.acceptInvite(invite) } } label: {
                     Text("Accept")
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16).padding(.vertical, 8)
                         .background(Theme.accent)
@@ -163,7 +163,7 @@ struct ActivityView: View {
                 .buttonStyle(.plain)
                 Button { Task { await activity.declineInvite(invite) } } label: {
                     Text("Decline")
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, 16).padding(.vertical, 8)
                         .background(Theme.bgRaised)

@@ -85,25 +85,25 @@ struct WorkbenchSheet: View {
     private func row(_ node: TreeNode) -> some View {
         HStack(spacing: 10) {
             Image(systemName: node.isDir ? "folder.fill" : icon(for: node.name))
-                .font(.system(size: 15))
+                .font(.subheadline)
                 .foregroundStyle(node.isDir ? Theme.accent : Theme.textMuted)
                 .frame(width: 22)
             Text(node.name)
-                .font(.system(size: 15))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
             if node.isDir {
                 Text("\(node.children.count)")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.caption.monospaced())
                     .foregroundStyle(Theme.textFaint)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textFaint)
             } else {
                 Text(size(node.sizeBytes))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.caption.monospaced())
                     .foregroundStyle(Theme.textFaint)
             }
         }
@@ -147,7 +147,7 @@ struct WorkbenchSheet: View {
                     if openFile != nil { openFile = nil } else { stack.removeLast() }
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.accent)
                 }
             } else {
@@ -156,13 +156,13 @@ struct WorkbenchSheet: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(openFile?.name ?? "Workbench")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 // Show where we are; the root shows the purpose instead of an empty path.
                 Text(breadcrumb)
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(Theme.textMuted)
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -195,7 +195,7 @@ struct WorkbenchSheet: View {
                         ProgressView().controlSize(.small)
                     } else {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.accent)
                     }
                 }
@@ -472,7 +472,7 @@ private struct RawRenderer: View {
     var body: some View {
         ScrollView([.vertical, .horizontal]) {
             Text(content)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.subheadline.monospaced())
                 .foregroundStyle(Theme.textBody)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: true, vertical: true)
@@ -507,7 +507,7 @@ private struct MarkdownRenderer: View {
                 .foregroundStyle(Theme.textSecondary)
         } else if line.hasPrefix("- ") {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: "circle.fill").font(.system(size: 5))
+                Image(systemName: "circle.fill").font(.caption2)
                 Text(String(line.dropFirst(2)))
             }
         } else if line.hasPrefix("> ") {
@@ -753,7 +753,7 @@ struct RemoteWorkspaceSheet: View {
             .padding(.horizontal, 16)
             if isEditing {
                 TextEditor(text: $draft)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.subheadline.monospaced())
                     .padding(8).background(Theme.bgApp, in: RoundedRectangle(cornerRadius: 10))
                     .padding(.horizontal, 12)
                 HStack {
