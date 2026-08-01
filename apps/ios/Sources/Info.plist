@@ -39,6 +39,8 @@
 	<string>Cheers uses your camera only when you choose to share video in a channel. It never accesses the camera in the background.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Cheers uses your microphone for voice channels and composer dictation.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Cheers uses your camera only when you choose to share video in a channel.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Cheers converts your spoken draft into text when no server speech adapter is configured.</string>
 	<key>UIApplicationSceneManifest</key>
