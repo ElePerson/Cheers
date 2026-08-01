@@ -121,6 +121,10 @@ struct APIClient: Sendable {
         let response: URLResponse
         do {
             (data, response) = try await Self.session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
         } catch {
             Self.logger.error(
                 "HTTP \(request.httpMethod ?? "-", privacy: .public) \(request.url?.path ?? "-", privacy: .public) transport failure: \(error.localizedDescription, privacy: .public)"

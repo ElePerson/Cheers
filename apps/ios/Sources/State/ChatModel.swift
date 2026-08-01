@@ -756,6 +756,14 @@ final class ChatModel {
     }
 
     private func report(_ error: Error) {
+        if error is CancellationError { return }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return }
+        if let apiError = error as? APIError,
+           case .transport(let underlying) = apiError,
+           (underlying is CancellationError
+               || (underlying as? URLError)?.code == .cancelled) {
+            return
+        }
         if let apiError = error as? APIError {
             if case .unauthorized = apiError {
                 app?.clearSession()

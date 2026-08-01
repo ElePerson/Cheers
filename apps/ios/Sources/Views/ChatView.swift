@@ -227,8 +227,6 @@ private enum ChatTimelineItem: Identifiable, Hashable {
 
 struct ChatView: View {
     @Environment(AppModel.self) private var app
-    @Environment(ShellModel.self) private var shell
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model: ChatModel
     @State private var panel: ChannelPanel?
     @State private var forwardMessage: MessageDto?
@@ -281,25 +279,8 @@ struct ChatView: View {
         }
         .background(Theme.bgApp)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    NativeFeedback.lightImpact()
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { shell.openDrawer() }
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "line.3.horizontal")
-                        if shell.pendingApprovals + shell.pendingInvites > 0 {
-                            Circle()
-                                .fill(Theme.mention)
-                                .frame(width: 7, height: 7)
-                                .offset(x: 4, y: -3)
-                        }
-                    }
-                }
-                .accessibilityLabel("Open conversations")
-            }
             ToolbarItem(placement: .principal) {
                 header
             }

@@ -1,15 +1,13 @@
 import SwiftUI
 import UIKit
 
-/// The navigation hub. Top: a compact workspace bar (long-press to switch).
-/// Middle: the selected workspace's channels and DMs. Bottom: a compact nav chip
-/// row (Activity · Fleet · Friends) and a slim footer (profile/settings · New channel).
+/// Chats home: workspace scope, channels and direct messages. System-level
+/// destinations live in the app's TabView, not in this workspace hierarchy.
 struct DrawerView: View {
     @Environment(AppModel.self) private var app
     @Environment(ShellModel.self) private var shell
     var convo: ConversationListModel
-    var topInset: CGFloat = 0
-    var bottomInset: CGFloat = 0
+    let onOpenChannel: (ChannelDto) -> Void
 
     @State private var query = ""
     @State private var showSearch = false
@@ -21,14 +19,27 @@ struct DrawerView: View {
     @State private var userAvatarURL: URL?
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 10) {
-                channelList
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.bgSurface)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
+        VStack(spacing: 10) {
+            channelList
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.bgSurface)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        shell.push(.settings)
+                    } label: {
+                        AvatarView(
+                            seedId: app.session?.userId ?? "me",
+                            name: app.session?.displayName ?? app.session?.username,
+                            size: 28,
+                            imageURL: userAvatarURL
+                        )
+                    }
+                    .accessibilityLabel("Settings")
+                }
+
                 ToolbarItem(placement: .principal) {
                     Menu {
                         workspaceMenu
@@ -67,65 +78,26 @@ struct DrawerView: View {
                     .labelStyle(.iconOnly)
                 }
 
-                ToolbarItemGroup(placement: .bottomBar) {
-                    Button {
-                        shell.push(.settings)
-                    } label: {
-                        AvatarView(
-                            seedId: app.session?.userId ?? "me",
-                            name: app.session?.displayName ?? app.session?.username,
-                            size: 28,
-                            imageURL: userAvatarURL
-                        )
-                    }
-                    .accessibilityLabel("Settings")
 
-                    Button {
-                        shell.push(.activity)
-                    } label: {
-                        Label(
-                            "Activity",
-                            systemImage: shell.pendingInvites + shell.pendingApprovals > 0
-                                ? "bell.badge.fill"
-                                : "bell"
-                        )
-                    }
-
-                    Button {
-                        shell.push(.fleet)
-                    } label: {
-                        Label("Fleet", systemImage: "dot.radiowaves.left.and.right")
-                    }
-
-                    Button {
-                        shell.push(.friends)
-                    } label: {
-                        Label("Friends", systemImage: "person.2")
-                    }
-                }
-            }
-            .modifier(OptionalDrawerSearch(query: $query, isPresented: $showSearch))
-            .toolbarBackground(Theme.bgSurface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(Theme.bgSurface, for: .bottomBar)
-            .toolbarBackground(.visible, for: .bottomBar)
-            .sheet(isPresented: $showWorkspaceAdmin) {
-                if let workspace = shell.selectedWorkspace {
-                    WorkspaceAdminSheet(workspace: workspace)
-                }
-            }
-            .sheet(isPresented: $showNew) {
-                NewConversationSheet(startAsDM: newAsDM)
-                    .presentationDetents([.medium])
-                    .presentationDragIndicator(.visible)
-            }
-            .sheet(isPresented: $showNewWorkspace) {
-                NewWorkspaceSheet()
-                    .presentationDetents([.medium])
-                    .presentationDragIndicator(.visible)
+        }
+        .modifier(OptionalDrawerSearch(query: $query, isPresented: $showSearch))
+        .toolbarBackground(Theme.bgSurface, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .sheet(isPresented: $showWorkspaceAdmin) {
+            if let workspace = shell.selectedWorkspace {
+                WorkspaceAdminSheet(workspace: workspace)
             }
         }
-        .padding(.top, topInset)
+        .sheet(isPresented: $showNew) {
+            NewConversationSheet(startAsDM: newAsDM)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showNewWorkspace) {
+            NewWorkspaceSheet()
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .onChange(of: showSearch) { _, presented in
             if !presented {
@@ -135,8 +107,7 @@ struct DrawerView: View {
         .task(id: workspaceAvatarRevision) {
             await loadWorkspaceAvatars()
         }
-        .task(id: shell.drawerOpen) {
-            guard shell.drawerOpen else { return }
+        .task {
             await loadUserAvatar()
         }
     }
@@ -267,36 +238,26 @@ struct DrawerView: View {
     }
 
     private var channelList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                let channels = scopedRows.filter { !$0.channel.isDM }
-                let dms = scopedRows.filter { $0.channel.isDM }
-                if !channels.isEmpty {
-                    sectionHeader(String(localized: "Channels"))
+        List {
+            let channels = scopedRows.filter { !$0.channel.isDM }
+            let dms = scopedRows.filter { $0.channel.isDM }
+            if !channels.isEmpty {
+                Section("Channels") {
                     ForEach(channels) { row in drawerRow(row) }
                 }
-                if !dms.isEmpty {
-                    sectionHeader(String(localized: "Direct messages"))
+            }
+            if !dms.isEmpty {
+                Section("Direct messages") {
                     ForEach(dms) { row in drawerRow(row) }
                 }
             }
-            .padding(.vertical, Theme.space1)
         }
-    }
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.caption2.weight(.bold))
-            .tracking(0.7)
-            .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, 18)
-            .padding(.top, Theme.space3)
-            .padding(.bottom, Theme.space1)
+        .listStyle(.insetGrouped)
     }
 
     private func drawerRow(_ row: ConversationRow) -> some View {
         Button {
-            shell.openChat(row.channel)
+            onOpenChannel(row.channel)
         } label: {
             HStack(spacing: Theme.space3) {
                 if row.channel.isDM {
@@ -332,8 +293,6 @@ struct DrawerView: View {
                         .clipShape(Capsule())
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, Theme.rowVertical)
             .frame(minHeight: Theme.hitMin)
             .contentShape(Rectangle())
         }
