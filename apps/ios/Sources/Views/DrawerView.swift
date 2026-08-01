@@ -19,11 +19,11 @@ struct DrawerView: View {
     @State private var userAvatarURL: URL?
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 0) {
             channelList
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.bgSurface)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.bgApp)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -81,7 +81,7 @@ struct DrawerView: View {
 
         }
         .modifier(OptionalDrawerSearch(query: $query, isPresented: $showSearch))
-        .toolbarBackground(Theme.bgSurface, for: .navigationBar)
+        .toolbarBackground(Theme.bgApp, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .sheet(isPresented: $showWorkspaceAdmin) {
             if let workspace = shell.selectedWorkspace {
@@ -239,64 +239,64 @@ struct DrawerView: View {
 
     private var channelList: some View {
         List {
-            let channels = scopedRows.filter { !$0.channel.isDM }
-            let dms = scopedRows.filter { $0.channel.isDM }
-            if !channels.isEmpty {
-                Section("Channels") {
-                    ForEach(channels) { row in drawerRow(row) }
-                }
-            }
-            if !dms.isEmpty {
-                Section("Direct messages") {
-                    ForEach(dms) { row in drawerRow(row) }
+            if scopedRows.isEmpty {
+                ContentUnavailableView(
+                    query.isEmpty ? "No conversations" : "No results",
+                    systemImage: query.isEmpty ? "bubble.left.and.bubble.right" : "magnifyingglass",
+                    description: Text(query.isEmpty ? "Create a channel or start a direct message." : "Try a different search term.")
+                )
+                .listRowSeparator(.hidden)
+            } else {
+                ForEach(scopedRows) { row in
+                    drawerRow(row)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .listRowSeparator(.visible)
+                        .listRowSeparatorTint(Color(uiColor: .separator))
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 80 }
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Theme.bgApp)
+        .refreshable { await convo.load() }
     }
 
     private func drawerRow(_ row: ConversationRow) -> some View {
         Button {
             onOpenChannel(row.channel)
         } label: {
-            HStack(spacing: Theme.space3) {
-                if row.channel.isDM {
-                    ChannelAvatarView(channel: row.channel, size: 36)
-                } else if row.channel.isVoice {
-                    Image(systemName: "waveform")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 36, height: 36)
-                        .background(Theme.bgRaised)
-                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                } else {
-                    Text("#")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 36, height: 36)
-                        .background(Theme.bgRaised)
-                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                }
-                Text(row.channel.displayName)
-                    .font(.body)
-                    .foregroundStyle(Theme.textBody)
-                    .lineLimit(1)
-                Spacer(minLength: 6)
-                if row.unreadCount > 0 {
-                    Text(row.unreadCount > 99 ? "99+" : String(row.unreadCount))
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .frame(minWidth: 18)
-                        .background(Theme.accent)
-                        .clipShape(Capsule())
-                }
-            }
-            .frame(minHeight: Theme.hitMin)
-            .contentShape(Rectangle())
+            ConversationRowView(row: row)
         }
         .buttonStyle(.plain)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if row.unreadCount > 0 {
+                Button {
+                    Task { await markRead(row) }
+                } label: {
+                    Label("Mark Read", systemImage: "envelope.open")
+                }
+                .tint(.blue)
+            }
+        }
+        .contextMenu {
+            if row.unreadCount > 0 {
+                Button {
+                    Task { await markRead(row) }
+                } label: {
+                    Label("Mark Read", systemImage: "envelope.open")
+                }
+            }
+        }
+    }
+
+    private func markRead(_ row: ConversationRow) async {
+        do {
+            try await app.api?.markRead(channelId: row.channel.channelId)
+            convo.markRead(channelId: row.channel.channelId)
+        } catch {
+            // Keep the badge if the server did not accept the read receipt.
+        }
     }
 
 }

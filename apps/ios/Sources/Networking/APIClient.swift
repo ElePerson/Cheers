@@ -1002,6 +1002,50 @@ struct APIClient: Sendable {
         )
     }
 
+    func remoteGitLog(
+        channelId: String, botId: String, root: String? = nil,
+        limit: Int = 50, skip: Int = 0
+    ) async throws -> RemoteGitLog {
+        var query = [
+            URLQueryItem(name: "bot_id", value: botId),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "skip", value: String(skip)),
+        ]
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        return try await getJSON(
+            "/channels/\(channelId)/workspace/git/log", query: query, as: RemoteGitLog.self
+        )
+    }
+
+    func remoteGitCommitFiles(
+        channelId: String, botId: String, commit: String, root: String? = nil
+    ) async throws -> RemoteGitCommitFiles {
+        var query = [
+            URLQueryItem(name: "bot_id", value: botId),
+            URLQueryItem(name: "commit", value: commit),
+        ]
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        return try await getJSON(
+            "/channels/\(channelId)/workspace/git/commit-files", query: query,
+            as: RemoteGitCommitFiles.self
+        )
+    }
+
+    func remoteGitShow(
+        channelId: String, botId: String, commit: String, path: String? = nil,
+        root: String? = nil
+    ) async throws -> RemoteGitShow {
+        var query = [
+            URLQueryItem(name: "bot_id", value: botId),
+            URLQueryItem(name: "commit", value: commit),
+        ]
+        if let path { query.append(URLQueryItem(name: "path", value: path)) }
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        return try await getJSON(
+            "/channels/\(channelId)/workspace/git/show", query: query, as: RemoteGitShow.self
+        )
+    }
+
     // MARK: Approvals (ACP permission resolution)
 
     /// Resolve a pending permission request by option id (allow/reject).

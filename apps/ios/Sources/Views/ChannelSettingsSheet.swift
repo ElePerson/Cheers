@@ -37,82 +37,64 @@ struct ChannelSettingsSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Channel settings")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                if canManage {
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        if isSaving { ProgressView().controlSize(.small) } else { Text("Save") }
+        NavigationStack {
+            Form {
+                if let errorText {
+                    Section {
+                        Label(errorText, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(dirty ? Theme.link : Theme.textFaint)
-                    .disabled(!dirty || isSaving || name.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .frame(minHeight: 44)
                 }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if let errorText {
-                        Text(errorText)
-                            .font(.caption)
-                            .foregroundStyle(Theme.danger)
-                    }
-                    if savedNotice {
-                        Text("Saved")
-                            .font(.caption)
-                            .foregroundStyle(Theme.online)
-                    }
-
-                    field("Name") {
+                Section("General") {
+                    LabeledContent("Name") {
                         TextField("channel-name", text: $name)
+                            .multilineTextAlignment(.trailing)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .disabled(!canManage)
                     }
-
-                    field("Purpose") {
+                    LabeledContent("Purpose") {
                         TextField("What this channel is for", text: $purpose, axis: .vertical)
                             .lineLimit(1...4)
+                            .multilineTextAlignment(.trailing)
                             .disabled(!canManage)
                     }
-                    // The server COALESCEs purpose, so a null never clears it.
-                    // Say so rather than letting an emptied field silently revert.
                     if canManage && (channel.purpose?.isEmpty == false) && purpose.isEmpty {
                         Text("Clearing the purpose isn't supported by the server — it will keep the previous text.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.warning)
-                    }
-
-                    if canManage && !channel.isDM {
-                        Toggle(isOn: $isPublic) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Public channel")
-                                    .font(.subheadline)
-                                    .foregroundStyle(Theme.textPrimary)
-                                Text("Anyone in the workspace can join. Invite links require this.")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                        }
-                        .tint(Theme.accent)
-                    }
-
-                    if !channel.isDM {
-                        dangerZone
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .padding(16)
+
+                if canManage && !channel.isDM {
+                    Section {
+                        Toggle("Public channel", isOn: $isPublic)
+                    } footer: {
+                        Text("Anyone in the workspace can join. Invite links require this.")
+                    }
+                }
+
+                if !channel.isDM {
+                    Section {
+                        dangerZone
+                    } header: {
+                        Text("Channel access")
+                    }
+                }
+            }
+            .navigationTitle("Channel settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                if canManage {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(savedNotice ? "Saved" : "Save") { Task { await save() } }
+                            .disabled(!dirty || isSaving || name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Theme.bgSurface)
         .task {
             name = channel.name
             purpose = channel.purpose ?? ""
@@ -137,15 +119,12 @@ struct ChannelSettingsSheet: View {
 
     @ViewBuilder
     private var dangerZone: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        Group {
             if myRole != nil {
                 Button {
                     confirmLeave = true
                 } label: {
                     Label("Leave channel", systemImage: "rectangle.portrait.and.arrow.right")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
                 }
             }
             if canManage {
@@ -153,25 +132,9 @@ struct ChannelSettingsSheet: View {
                     confirmDelete = true
                 } label: {
                     Label("Delete channel", systemImage: "trash")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.danger)
-                        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
                 }
+                .foregroundStyle(.red)
             }
-        }
-    }
-
-    private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.textMuted)
-            content()
-                .font(.subheadline)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 11)
-                .background(Theme.bgRaised, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
     }
 

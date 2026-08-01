@@ -16,11 +16,8 @@
 		CE0000000000000000000207 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000107 /* AppModel.swift */; };
 		CE0000000000000000000208 /* ConversationListModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000108 /* ConversationListModel.swift */; };
 		CE0000000000000000000209 /* ChatModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000109 /* ChatModel.swift */; };
-		CE0000000000000000000225 /* ChatModelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000126 /* ChatModelStore.swift */; };
-		CE0000000000000000000224 /* MessageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000125 /* MessageStore.swift */; };
 		CE000000000000000000020A /* AvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000010A /* AvatarView.swift */; };
 		CE000000000000000000020B /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000010B /* LoginView.swift */; };
-		CE0000000000000000000420 /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000421 /* RegisterView.swift */; };
 		CE000000000000000000020C /* ConversationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000010C /* ConversationListView.swift */; };
 		CE000000000000000000020D /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000010D /* ChatView.swift */; };
 		CE000000000000000000020E /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000010E /* MessageBubble.swift */; };
@@ -33,26 +30,27 @@
 		CE0000000000000000000215 /* AppShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000116 /* AppShellView.swift */; };
 		CE0000000000000000000216 /* DrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000117 /* DrawerView.swift */; };
 		CE0000000000000000000217 /* ChatsHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000118 /* ChatsHomeView.swift */; };
-		CE0000000000000000000222 /* ViewBoards.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000123 /* ViewBoards.swift */; };
-		CE0000000000000000000223 /* WorkbenchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000124 /* WorkbenchSheet.swift */; };
-		CE0000000000000000000221 /* ChannelSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000122 /* ChannelSettingsSheet.swift */; };
-		CE0000000000000000000220 /* MembersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000121 /* MembersSheet.swift */; };
 		CE0000000000000000000218 /* ShellComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000119 /* ShellComponents.swift */; };
 		CE0000000000000000000219 /* PlaceholderScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000011A /* PlaceholderScreens.swift */; };
 		CE000000000000000000021A /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000011B /* ActivityView.swift */; };
 		CE000000000000000000021B /* AgentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000011C /* AgentsView.swift */; };
-		CE000000000000000000040D /* BotOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000040C /* BotOnboardingView.swift */; };
 		CE000000000000000000021C /* ApprovalCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000011D /* ApprovalCardView.swift */; };
-		CE0000000000000000000440 /* AuthRequiredCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000441 /* AuthRequiredCardView.swift */; };
 		CE000000000000000000021D /* ApprovalSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000011E /* ApprovalSheetView.swift */; };
 		CE000000000000000000021E /* PushRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000011F /* PushRouter.swift */; };
 		CE000000000000000000021F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000120 /* Assets.xcassets */; };
+		CE0000000000000000000220 /* MembersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000121 /* MembersSheet.swift */; };
+		CE0000000000000000000221 /* ChannelSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000122 /* ChannelSettingsSheet.swift */; };
+		CE0000000000000000000222 /* ViewBoards.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000123 /* ViewBoards.swift */; };
+		CE0000000000000000000223 /* WorkbenchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000124 /* WorkbenchSheet.swift */; };
+		CE0000000000000000000224 /* MessageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000125 /* MessageStore.swift */; };
+		CE0000000000000000000225 /* ChatModelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000126 /* ChatModelStore.swift */; };
+		CE0000000000000000000230 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000128 /* PrivacyInfo.xcprivacy */; };
+		CE000000000000000000040D /* BotOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000040C /* BotOnboardingView.swift */; };
 		CE0000000000000000000410 /* VoiceRoomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000411 /* VoiceRoomModel.swift */; };
 		CE0000000000000000000412 /* VoiceMeetingStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000413 /* VoiceMeetingStrip.swift */; };
 		CE0000000000000000000414 /* TaskClaimConfirmationFooter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000415 /* TaskClaimConfirmationFooter.swift */; };
 		CE0000000000000000000416 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000418 /* LiveKit */; };
-		CE0000000000000000000230 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000128 /* PrivacyInfo.xcprivacy */; };
-		CE0000000000000000000450 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000451 /* Localizable.xcstrings */; };
+		CE0000000000000000000420 /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000421 /* RegisterView.swift */; };
 		CE0000000000000000000430 /* TwoFactorSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000422 /* TwoFactorSettingsView.swift */; };
 		CE0000000000000000000431 /* NewWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000423 /* NewWorkspaceSheet.swift */; };
 		CE0000000000000000000432 /* BotDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000424 /* BotDetailView.swift */; };
@@ -61,6 +59,8 @@
 		CE0000000000000000000435 /* ForgotPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000427 /* ForgotPasswordView.swift */; };
 		CE0000000000000000000436 /* FriendsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000428 /* FriendsView.swift */; };
 		CE0000000000000000000437 /* GoogleOAuthSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000429 /* GoogleOAuthSession.swift */; };
+		CE0000000000000000000440 /* AuthRequiredCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000441 /* AuthRequiredCardView.swift */; };
+		CE0000000000000000000450 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000451 /* Localizable.xcstrings */; };
 		CE0000000000000000000452 /* BotTracePanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000453 /* BotTracePanelView.swift */; };
 		CE1000000000000000000001 /* ServerIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000011 /* ServerIdentity.swift */; };
 		CE1000000000000000000002 /* ReleaseReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000012 /* ReleaseReadinessTests.swift */; };
@@ -94,16 +94,14 @@
 		CE0000000000000000000107 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		CE0000000000000000000108 /* ConversationListModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationListModel.swift; sourceTree = "<group>"; };
 		CE0000000000000000000109 /* ChatModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModel.swift; sourceTree = "<group>"; };
-		CE0000000000000000000126 /* ChatModelStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModelStore.swift; sourceTree = "<group>"; };
-		CE0000000000000000000125 /* MessageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageStore.swift; sourceTree = "<group>"; };
 		CE000000000000000000010A /* AvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarView.swift; sourceTree = "<group>"; };
 		CE000000000000000000010B /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
-		CE0000000000000000000421 /* RegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterView.swift; sourceTree = "<group>"; };
 		CE000000000000000000010C /* ConversationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationListView.swift; sourceTree = "<group>"; };
 		CE000000000000000000010D /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		CE000000000000000000010E /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
 		CE000000000000000000010F /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000110 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		CE0000000000000000000111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		CE0000000000000000000112 /* ShellModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellModel.swift; sourceTree = "<group>"; };
 		CE0000000000000000000113 /* ActivityModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityModel.swift; sourceTree = "<group>"; };
 		CE0000000000000000000114 /* AgentsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsModel.swift; sourceTree = "<group>"; };
@@ -111,29 +109,28 @@
 		CE0000000000000000000116 /* AppShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000117 /* DrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawerView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000118 /* ChatsHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatsHomeView.swift; sourceTree = "<group>"; };
-		CE0000000000000000000123 /* ViewBoards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewBoards.swift; sourceTree = "<group>"; };
-		CE0000000000000000000124 /* WorkbenchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchSheet.swift; sourceTree = "<group>"; };
-		CE0000000000000000000122 /* ChannelSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelSettingsSheet.swift; sourceTree = "<group>"; };
-		CE0000000000000000000121 /* MembersSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MembersSheet.swift; sourceTree = "<group>"; };
 		CE0000000000000000000119 /* ShellComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellComponents.swift; sourceTree = "<group>"; };
 		CE000000000000000000011A /* PlaceholderScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceholderScreens.swift; sourceTree = "<group>"; };
 		CE000000000000000000011B /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		CE000000000000000000011C /* AgentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsView.swift; sourceTree = "<group>"; };
-		CE000000000000000000040C /* BotOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotOnboardingView.swift; sourceTree = "<group>"; };
 		CE000000000000000000011D /* ApprovalCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalCardView.swift; sourceTree = "<group>"; };
-		CE0000000000000000000441 /* AuthRequiredCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthRequiredCardView.swift; sourceTree = "<group>"; };
 		CE000000000000000000011E /* ApprovalSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalSheetView.swift; sourceTree = "<group>"; };
 		CE000000000000000000011F /* PushRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRouter.swift; sourceTree = "<group>"; };
 		CE0000000000000000000120 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		CE0000000000000000000111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		CE0000000000000000000121 /* MembersSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MembersSheet.swift; sourceTree = "<group>"; };
+		CE0000000000000000000122 /* ChannelSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelSettingsSheet.swift; sourceTree = "<group>"; };
+		CE0000000000000000000123 /* ViewBoards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewBoards.swift; sourceTree = "<group>"; };
+		CE0000000000000000000124 /* WorkbenchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchSheet.swift; sourceTree = "<group>"; };
+		CE0000000000000000000125 /* MessageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageStore.swift; sourceTree = "<group>"; };
+		CE0000000000000000000126 /* ChatModelStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModelStore.swift; sourceTree = "<group>"; };
 		CE0000000000000000000127 /* Cheers.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cheers.entitlements; sourceTree = "<group>"; };
 		CE0000000000000000000128 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		CE0000000000000000000451 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
-		CE0000000000000000000453 /* BotTracePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotTracePanelView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000402 /* Cheers.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cheers.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CE000000000000000000040C /* BotOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotOnboardingView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000411 /* VoiceRoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRoomModel.swift; sourceTree = "<group>"; };
 		CE0000000000000000000413 /* VoiceMeetingStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceMeetingStrip.swift; sourceTree = "<group>"; };
 		CE0000000000000000000415 /* TaskClaimConfirmationFooter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskClaimConfirmationFooter.swift; sourceTree = "<group>"; };
+		CE0000000000000000000421 /* RegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000422 /* TwoFactorSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoFactorSettingsView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000423 /* NewWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewWorkspaceSheet.swift; sourceTree = "<group>"; };
 		CE0000000000000000000424 /* BotDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotDetailView.swift; sourceTree = "<group>"; };
@@ -142,6 +139,9 @@
 		CE0000000000000000000427 /* ForgotPasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgotPasswordView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000428 /* FriendsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000429 /* GoogleOAuthSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuthSession.swift; sourceTree = "<group>"; };
+		CE0000000000000000000441 /* AuthRequiredCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthRequiredCardView.swift; sourceTree = "<group>"; };
+		CE0000000000000000000451 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		CE0000000000000000000453 /* BotTracePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotTracePanelView.swift; sourceTree = "<group>"; };
 		CE1000000000000000000011 /* ServerIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerIdentity.swift; sourceTree = "<group>"; };
 		CE1000000000000000000012 /* ReleaseReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseReadinessTests.swift; sourceTree = "<group>"; };
 		CE1000000000000000000013 /* AuthenticationAccessibilityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationAccessibilityUITests.swift; sourceTree = "<group>"; };
@@ -330,10 +330,10 @@
 			);
 			dependencies = (
 			);
+			name = Cheers;
 			packageProductDependencies = (
 				CE0000000000000000000418 /* LiveKit */,
 			);
-			name = Cheers;
 			productName = Cheers;
 			productReference = CE0000000000000000000402 /* Cheers.app */;
 			productType = "com.apple.product-type.application";
@@ -407,12 +407,12 @@
 				"zh-Hans",
 			);
 			mainGroup = CE0000000000000000000301;
-			productRefGroup = CE0000000000000000000302 /* Products */;
-			projectDirPath = "";
-			projectRoot = "";
 			packageReferences = (
 				CE0000000000000000000417 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
 			);
+			productRefGroup = CE0000000000000000000302 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
 			targets = (
 				CE0000000000000000000401 /* Cheers */,
 				CE1000000000000000000051 /* CheersTests */,
@@ -749,7 +749,10 @@
 		CE0000000000000000000417 /* XCRemoteSwiftPackageReference "client-sdk-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/livekit/client-sdk-swift.git";
-			requirement = { kind = upToNextMajorVersion; minimumVersion = 2.9.0; };
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.0;
+			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 

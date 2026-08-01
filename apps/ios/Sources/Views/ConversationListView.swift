@@ -20,58 +20,58 @@ struct ConversationRowView: View {
     let row: ConversationRow
 
     var body: some View {
-        HStack(spacing: Theme.space3) {
-            ChannelAvatarView(channel: row.channel, size: 46)
+        HStack(alignment: .top, spacing: 12) {
+            ChannelAvatarView(channel: row.channel, size: 52)
 
-            VStack(alignment: .leading, spacing: Theme.space1) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(row.channel.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(.body.weight(row.unreadCount > 0 ? .semibold : .medium))
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     if let ws = row.workspaceName {
-                        Text(ws)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(Theme.textMuted)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1.5)
-                            .background(Theme.bgRaised)
-                            .clipShape(Capsule())
+                        Text("· \(ws)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-                    Spacer(minLength: Theme.space2)
+                    Spacer(minLength: 8)
                     Text(TimeFormat.listStamp(row.lastActivity))
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(Theme.textFaint)
+                        .foregroundStyle(row.unreadCount > 0 ? Color.accentColor : Color.secondary)
+                        .lineLimit(1)
                 }
 
-                HStack(alignment: .top) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(previewLine)
                         .font(.subheadline)
-                        .foregroundStyle(Theme.textMuted)
-                        .lineLimit(1)
-                    Spacer(minLength: Theme.space2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 4)
                     if row.unreadCount > 0 {
                         Text(row.unreadCount > 99 ? "99+" : String(row.unreadCount))
-                            .font(.caption.weight(.bold))
+                            .font(.caption2.weight(.bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .frame(minWidth: 18)
-                            .background(Theme.accent)
+                            .background(Color.accentColor)
                             .clipShape(Capsule())
                     }
                 }
             }
         }
-        .padding(.vertical, Theme.rowVertical)
-        .frame(minHeight: Theme.hitMin)
+        .padding(.vertical, 8)
+        .frame(minHeight: 68)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private var previewLine: String {
         var text = row.previewText
-        if text.count > 120 {
-            text = String(text.prefix(120)) + "…"
+        if text.count > 160 {
+            text = String(text.prefix(160)) + "…"
         }
         return text
     }

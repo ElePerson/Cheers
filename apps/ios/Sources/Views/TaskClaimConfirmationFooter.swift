@@ -165,7 +165,7 @@ struct TaskClaimManagementSheet: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(claim.summary).fontWeight(.semibold)
                                 Text("\(claim.botName) · \(Int(claim.confidence * 100))% · \(claim.impact)")
-                                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -197,7 +197,10 @@ struct TaskClaimManagementSheet: View {
                     Text("The bot may inspect channel activity and propose work. A human confirmation is always required before execution.")
                 }
                 if let errorText {
-                    Section { Text(errorText).foregroundStyle(Theme.danger) }
+                    Section {
+                        Label(errorText, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
                 }
             }
             .navigationTitle("Task claims")

@@ -68,7 +68,6 @@ struct MembersSheet: View {
                     }
                 }
         }
-        .background(Theme.bgSurface)
         .task { await load() }
         .sheet(isPresented: $showInvite) {
             InviteSheet(channel: channel, onChanged: { Task { await load() } })
@@ -133,15 +132,11 @@ struct MembersSheet: View {
         } else {
             List(filteredMembers) { member in
                 memberRow(member)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 8))
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
             .refreshable {
                 await load()
             }
-            .scrollContentBackground(.hidden)
-            .background(Theme.bgSurface)
         }
     }
 
@@ -161,7 +156,7 @@ struct MembersSheet: View {
                 HStack(spacing: 5) {
                     Text(member.name)
                         .font(.subheadline)
-                        .foregroundStyle(Theme.textPrimary)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     if member.isBot {
                         Text("BOT")
@@ -180,7 +175,7 @@ struct MembersSheet: View {
                     } else if let role = member.role, role != "member" {
                         Text(role.capitalized)
                             .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -305,93 +300,62 @@ struct InviteSheet: View {
     @State private var isCreating = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Add to #\(channel.name)")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Button("Done") { dismiss() }
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.link)
-                    .frame(minHeight: 44)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker("Invite method", selection: $mode) {
+                    ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .padding()
 
-            Picker("", selection: $mode) {
-                ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                switch mode {
+                case .direct: directInvite
+                case .link: linkInvite
+                }
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-
-            if let errorText {
-                Text(errorText)
-                    .font(.caption)
-                    .foregroundStyle(Theme.danger)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 10)
+            .navigationTitle("Add to #\(channel.name)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
             }
-            if let notice {
-                Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(Theme.online)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 10)
-            }
-
-            switch mode {
-            case .direct: directInvite
-            case .link:   linkInvite
-            }
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Theme.bgSurface)
     }
 
     // MARK: Direct
 
     private var directInvite: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.textMuted)
-                TextField("Search people and bots", text: $query)
-                    .font(.subheadline)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .onChange(of: query) { _, new in scheduleSearch(new) }
-                if isSearching { ProgressView().controlSize(.small) }
+        List {
+            if let errorText {
+                Section { Label(errorText, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Theme.bgRaised)
-            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .padding(16)
-
-            if query.count < 2 {
-                Text("Only workspace members can be invited to a channel. Use an invite link to bring in someone new.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.horizontal, 16)
+            if let notice {
+                Section { Label(notice, systemImage: "checkmark.circle").foregroundStyle(.green) }
+            }
+            if query.trimmingCharacters(in: .whitespacesAndNewlines).count < 2 {
+                Section {
+                    ContentUnavailableView(
+                        "Find workspace members",
+                        systemImage: "person.badge.plus",
+                        description: Text("Search by name. Use an invite link to bring in someone new.")
+                    )
+                }
+            } else if isSearching {
+                Section { ProgressView("Searching…") }
             } else if results.isEmpty && !isSearching {
-                Text("No matches")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.textMuted)
-                    .padding(.horizontal, 16)
+                Section { ContentUnavailableView.search(text: query) }
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(results) { item in
-                            candidateRow(item)
-                        }
-                    }
+                Section("Results") {
+                    ForEach(results) { item in candidateRow(item) }
                 }
             }
         }
+        .listStyle(.insetGrouped)
+        .searchable(text: $query, prompt: "Search people and bots")
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .onChange(of: query) { _, new in scheduleSearch(new) }
     }
 
     private func candidateRow(_ item: InvitableItem) -> some View {
@@ -405,7 +369,7 @@ struct InviteSheet: View {
                     HStack(spacing: 5) {
                         Text(item.name)
                             .font(.subheadline)
-                            .foregroundStyle(Theme.textPrimary)
+                            .foregroundStyle(.primary)
                         if item.isBot {
                             Text("BOT")
                                 .font(.caption2.weight(.bold))
@@ -417,17 +381,16 @@ struct InviteSheet: View {
                     if already {
                         Text("Already in this channel")
                             .font(.caption)
-                            .foregroundStyle(Theme.textMuted)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
                 if !already {
                     Image(systemName: "plus.circle")
                         .font(.title3)
-                        .foregroundStyle(Theme.link)
+                        .foregroundStyle(.tint)
                 }
             }
-            .padding(.horizontal, 16)
             .frame(minHeight: 52)
             .contentShape(Rectangle())
             .opacity(already ? 0.45 : 1)
@@ -477,45 +440,36 @@ struct InviteSheet: View {
 
     @ViewBuilder
     private var linkInvite: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        List {
+            if let errorText {
+                Section { Label(errorText, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+            }
+            if let notice {
+                Section { Label(notice, systemImage: "checkmark.circle").foregroundStyle(.green) }
+            }
             if channel.channelType != "public" {
-                infoText("Invite links only work for public channels — a bearer link must never be a back door into a private one.")
+                Section { infoText("Invite links only work for public channels — a bearer link must never be a back door into a private one.") }
             } else if !linksAllowed {
-                infoText("Only a workspace owner or admin can create invite links.")
+                Section { infoText("Only a workspace owner or admin can create invite links.") }
             } else {
-                Button {
-                    Task { await createLink() }
-                } label: {
-                    HStack(spacing: 7) {
-                        if isCreating {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "link.badge.plus")
-                        }
-                        Text("Create invite link")
+                Section {
+                    Button { Task { await createLink() } } label: {
+                        if isCreating { ProgressView() }
+                        else { Label("Create invite link", systemImage: "link.badge.plus") }
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 46)
-                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .disabled(isCreating)
                 }
-                .disabled(isCreating)
-                .padding(.horizontal, 16)
 
                 if links.isEmpty && linksLoaded {
-                    infoText("No active links for this channel yet.")
+                    Section { ContentUnavailableView("No active links", systemImage: "link") }
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(links) { link in
-                                linkRow(link)
-                            }
-                        }
+                    Section("Active links") {
+                        ForEach(links) { link in linkRow(link) }
                     }
                 }
             }
         }
-        .padding(.top, 14)
+        .listStyle(.insetGrouped)
         .task { await loadLinks() }
     }
 
@@ -529,12 +483,11 @@ struct InviteSheet: View {
             HStack(spacing: 10) {
                 Text(usageLabel(link))
                     .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 ShareLink(item: inviteURL(link)) {
                     Image(systemName: "square.and.arrow.up")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.link)
                         .frame(width: 44, height: 36)
                 }
                 Button {
@@ -543,7 +496,6 @@ struct InviteSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.link)
                         .frame(width: 44, height: 36)
                 }
                 Button {
@@ -551,13 +503,11 @@ struct InviteSheet: View {
                 } label: {
                     Image(systemName: "trash")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.danger)
+                        .foregroundStyle(.red)
                         .frame(width: 44, height: 36)
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 
     /// The link must point at the *web deployment*, not any app scheme — the
@@ -582,9 +532,7 @@ struct InviteSheet: View {
 
     private func infoText(_ text: String) -> some View {
         Text(text)
-            .font(.caption)
-            .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, 16)
+            .foregroundStyle(.secondary)
     }
 
     private func loadLinks() async {

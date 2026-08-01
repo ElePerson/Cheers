@@ -331,7 +331,7 @@ struct ChatView: View {
                 case .settings:  ChannelSettingsSheet(channel: model.channel)
                 }
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
         .sheet(item: $forwardMessage) { message in

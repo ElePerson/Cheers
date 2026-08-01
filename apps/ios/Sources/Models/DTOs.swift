@@ -2004,6 +2004,43 @@ struct RemoteGitStatusEntry: Decodable, Identifiable, Hashable {
 
 struct RemoteGitDiff: Decodable { let diff: String; let staged: Bool }
 
+struct RemoteGitLog: Decodable {
+    let commits: [RemoteGitCommit]
+    let skip: Int
+    let limit: Int
+}
+
+struct RemoteGitCommit: Decodable, Identifiable, Hashable {
+    let hash: String
+    let author: String
+    let date: String
+    let subject: String
+    var id: String { hash }
+}
+
+struct RemoteGitCommitFiles: Decodable {
+    let commit: String
+    let files: [RemoteGitCommitFile]
+}
+
+struct RemoteGitCommitFile: Decodable, Identifiable, Hashable {
+    let status: String
+    let path: String
+    let oldPath: String?
+    var id: String { "\(status):\(oldPath ?? ""): \(path)" }
+
+    enum CodingKeys: String, CodingKey {
+        case status, path
+        case oldPath = "old_path"
+    }
+}
+
+struct RemoteGitShow: Decodable {
+    let commit: String
+    let path: String?
+    let diff: String
+}
+
 // MARK: - Durable agent-trace timeline (docs/arch/TRACE_PERSISTENCE.md)
 
 /// One persisted step of a bot turn (`message_traces`), including interleaved

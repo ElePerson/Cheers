@@ -29,31 +29,27 @@ struct BotTracePanelView: View {
         if durableEvents?.isEmpty == true, !isRunning {
             EmptyView()
         } else {
-            VStack(spacing: 0) {
-                Divider()
-                    .overlay(Theme.border.opacity(0.45))
-
-                Button {
-                    showingSheet = true
-                } label: {
-                    HStack(spacing: Theme.space2) {
-                        statusIcon
-                            .frame(width: 16)
-                        Text(summary)
-                            .font(.caption.weight(.medium))
-                            .lineLimit(1)
-                        Spacer(minLength: Theme.space2)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(isRunning ? Theme.textSecondary : Theme.textMuted)
-                    .frame(minHeight: Theme.hitMin)
-                    .contentShape(Rectangle())
+            Button {
+                showingSheet = true
+            } label: {
+                HStack(spacing: 8) {
+                    statusIcon
+                        .frame(width: 18)
+                    Text(summary)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(summary)
-                .accessibilityHint("Shows this message's agent activity")
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(summary)
+            .accessibilityHint("Shows this message's agent activity")
             .sheet(isPresented: $showingSheet) {
                 TraceActivitySheet(
                     events: displayedEvents,
@@ -62,9 +58,8 @@ struct BotTracePanelView: View {
                     errorText: errorText,
                     retry: { Task { await loadDurableTrace() } }
                 )
-                .presentationDetents([.fraction(0.85), .large])
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(Theme.bgSurface)
                 .task { await loadDurableTrace() }
             }
             .onChange(of: liveEvents) { _, latest in
@@ -126,14 +121,37 @@ private struct TraceActivitySheet: View {
     let loading: Bool
     let errorText: String?
     let retry: () -> Void
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ChannelActionSheet(
-            "Agent activity",
-            systemImage: "bolt.horizontal.circle",
-            showsActionBar: isRunning
-        ) {
-            Group {
+        NavigationStack {
+            content
+                .navigationTitle("Agent activity")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                    if isRunning {
+                        ToolbarItem(placement: .bottomBar) {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("Running")
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .navigationDestination(for: TraceEntryDto.self) { entry in
+                    TraceDetailView(entry: entry)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        Group {
                 if events.isEmpty, loading {
                     ProgressView("Loading activity…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -164,34 +182,11 @@ private struct TraceActivitySheet: View {
                                     TraceStepRow(entry: entry)
                                 }
                             }
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(
-                                top: Theme.space1,
-                                leading: Theme.space4,
-                                bottom: Theme.space1,
-                                trailing: Theme.space4
-                            ))
                         }
                     }
-                    .listStyle(.plain)
-                    .listRowSpacing(Theme.space1)
-                    .scrollContentBackground(.hidden)
-                    .background(Theme.bgSurface)
+                    .listStyle(.insetGrouped)
                 }
             }
-            .background(Theme.bgSurface)
-            .navigationDestination(for: TraceEntryDto.self) { entry in
-                TraceDetailView(entry: entry)
-            }
-        } actions: {
-            HStack(spacing: Theme.space2) {
-                ProgressView().controlSize(.mini)
-                Text("Running")
-            }
-            .font(.caption.weight(.medium))
-            .foregroundStyle(Theme.textSecondary)
-            .frame(maxWidth: .infinity)
-        }
     }
 }
 
@@ -199,25 +194,28 @@ private struct TraceStepRow: View {
     let entry: TraceEntryDto
 
     var body: some View {
-        HStack(alignment: .top, spacing: Theme.space3) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: entry.category.symbol)
-                .font(.subheadline.weight(.semibold))
+                .font(.body)
                 .foregroundStyle(entry.statusTone)
-                .frame(width: 18, height: 22)
+                .frame(width: 24)
 
-            VStack(alignment: .leading, spacing: Theme.space1) {
-                Text(entry.category.label)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.compactLabel)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
                 if let target = entry.targetLabel {
-                    Text(target)
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(2)
+                    if target != entry.compactLabel && !entry.compactLabel.contains(target) {
+                        Text(target)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
 
-            Spacer(minLength: Theme.space2)
+            Spacer(minLength: 8)
 
             HStack(spacing: Theme.space2) {
                 if let duration = entry.durationLabel {
@@ -227,9 +225,9 @@ private struct TraceStepRow: View {
                 }
                 statusGlyph
             }
-            .frame(minHeight: 22)
         }
-        .frame(minHeight: Theme.hitMin)
+        .padding(.vertical, 4)
+        .frame(minHeight: 44)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
@@ -252,20 +250,21 @@ private struct TraceDetailView: View {
 
     var body: some View {
         Form {
-            Section {
-                VStack(alignment: .leading, spacing: Theme.space2) {
-                    Text(entry.detailTitle)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    HStack(spacing: Theme.space2) {
-                        Image(systemName: entry.status == "failed" ? "xmark.circle" : "checkmark.circle")
-                        Text(entry.statusLabel)
-                        if let duration = entry.durationLabel { Text("· \(duration)") }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(entry.status == "failed" ? Theme.danger : Theme.textSecondary)
+            Section("Overview") {
+                LabeledContent("Type", value: entry.category.label)
+                LabeledContent("Status") {
+                    Label(
+                        entry.statusLabel,
+                        systemImage: entry.status == "failed" ? "xmark.circle" : statusSymbol
+                    )
+                    .foregroundStyle(entry.status == "failed" ? Color.red : Color.secondary)
                 }
-                .padding(.vertical, Theme.space1)
+                if let duration = entry.durationLabel {
+                    LabeledContent("Duration", value: duration)
+                }
+                if let target = entry.targetLabel {
+                    LabeledContent("Target", value: target)
+                }
             }
 
             if let path = entry.path {
@@ -277,12 +276,16 @@ private struct TraceDetailView: View {
             }
 
             if let diff = entry.diff {
-                Section("Changes") {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        Text(diff)
+                Section("Changes · +\(diffAdditions) −\(diffDeletions)") {
+                    ForEach(Array(diff.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, raw in
+                        let line = String(raw)
+                        Text(line.isEmpty ? " " : line)
                             .font(.caption.monospaced())
-                            .foregroundStyle(Theme.textBody)
+                            .foregroundStyle(diffForeground(line))
                             .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .listRowBackground(diffBackground(line))
+                            .listRowSeparator(.hidden)
                     }
                 }
             }
@@ -303,10 +306,42 @@ private struct TraceDetailView: View {
                 }
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(Theme.bgApp)
         .navigationTitle(entry.category.label)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var statusSymbol: String {
+        switch entry.status {
+        case "pending", "in_progress": "circle.dotted"
+        default: "checkmark.circle"
+        }
+    }
+
+    private var diffLines: [String] {
+        entry.diff?.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) ?? []
+    }
+
+    private var diffAdditions: Int {
+        diffLines.filter { $0.hasPrefix("+") && !$0.hasPrefix("+++") }.count
+    }
+
+    private var diffDeletions: Int {
+        diffLines.filter { $0.hasPrefix("-") && !$0.hasPrefix("---") }.count
+    }
+
+    private func diffForeground(_ line: String) -> Color {
+        if line.hasPrefix("+++") || line.hasPrefix("---") || line.hasPrefix("diff ") { return .secondary }
+        if line.hasPrefix("@@") { return .blue }
+        if line.hasPrefix("+") { return .green }
+        if line.hasPrefix("-") { return .red }
+        return .primary
+    }
+
+    private func diffBackground(_ line: String) -> Color {
+        if line.hasPrefix("+") && !line.hasPrefix("+++") { return Color.green.opacity(0.08) }
+        if line.hasPrefix("-") && !line.hasPrefix("---") { return Color.red.opacity(0.08) }
+        if line.hasPrefix("@@") { return Color.blue.opacity(0.08) }
+        return .clear
     }
 
     @ViewBuilder
@@ -314,7 +349,6 @@ private struct TraceDetailView: View {
         Section {
             Text(value.prettyPrinted)
                 .font(.caption.monospaced())
-                .foregroundStyle(Theme.textBody)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } header: {
