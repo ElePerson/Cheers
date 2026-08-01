@@ -670,7 +670,7 @@ struct ChangePasswordResponse: Decodable {
 
 // MARK: - Workspaces (server/src/api/workspaces.rs)
 
-struct WorkspaceDto: Decodable, Identifiable, Hashable {
+struct WorkspaceDto: Codable, Identifiable, Hashable {
     let workspaceId: String
     let name: String
     let avatarUrl: String?
@@ -730,7 +730,7 @@ struct AuthSessionSummary: Decodable, Identifiable, Hashable {
 
 // MARK: - Channels (server/src/api/channels.rs)
 
-struct ChannelDto: Decodable, Identifiable, Hashable {
+struct ChannelDto: Codable, Identifiable, Hashable {
     let channelId: String
     let workspaceId: String?
     let name: String
@@ -2017,6 +2017,7 @@ struct TraceEntryDto: Codable, Identifiable, Hashable {
     var status: String?
     var title: String?
     var message: String?
+    var data: JSONValue?
     var requestId: String?
     var approvalKind: String?
     var decision: String?
@@ -2025,7 +2026,7 @@ struct TraceEntryDto: Codable, Identifiable, Hashable {
     var createdAt: String
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, phase, status, title, message, decision
+        case id, kind, phase, status, title, message, data, decision
         case msgId = "msg_id"
         case traceSeq = "trace_seq"
         case requestId = "request_id"

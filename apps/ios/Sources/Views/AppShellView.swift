@@ -8,6 +8,7 @@ import SwiftUI
 struct AppShellView: View {
     @Environment(AppModel.self) private var app
     @Environment(ShellModel.self) private var shell
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Shared conversation data for both the home list and the drawer channel list.
     @State private var convo = ConversationListModel()
@@ -96,6 +97,27 @@ struct AppShellView: View {
             shell.restoreCurrentChannel(from: convo.rows)
             activity.seed(from: convo.rows)
             await activity.loadInvites()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task {
+                // Re-pull durable navigation data after suspension. Realtime
+                // heals messages, while these REST reads heal workspace/channel
+                // membership changes that happened while the app was asleep.
+                await shell.loadWorkspaces()
+                await convo.load()
+                if let current = shell.currentChannel {
+                    if let fresh = convo.rows.first(where: { $0.channel.channelId == current.channelId }) {
+                        shell.replaceCurrentChannel(fresh.channel)
+                    } else if convo.errorMessage == nil {
+                        shell.clearCurrentChannel(ifMatching: current.channelId)
+                    }
+                }
+                if let channel = shell.currentChannel {
+                    await app.chatModels.model(for: channel).refreshMembers()
+                }
+                await activity.loadInvites()
+            }
         }
         }
     }

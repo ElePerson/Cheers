@@ -60,7 +60,6 @@ struct MessageBubbleView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let message: MessageDto
     let isOwn: Bool
-    let showSenderName: Bool
     let showAvatar: Bool
     let isLastInGroup: Bool
     /// Preformatted when the channel's presentation model changes, not while
@@ -74,96 +73,69 @@ struct MessageBubbleView: View {
     var onTapFile: ((MessageFileRef) -> Void)? = nil
     var onReport: (() -> Void)? = nil
     var onBlock: (() -> Void)? = nil
-    @State private var copied = false
-
+    var onStop: (() -> Void)? = nil
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            if isOwn {
-                Spacer(minLength: dynamicTypeSize.isAccessibilitySize ? 8 : 60)
-            } else {
-                avatarGutter
+        VStack(alignment: isOwn ? .trailing : .leading, spacing: Theme.space2) {
+            if !isOwn, showAvatar {
+                senderHeader
             }
-            VStack(alignment: isOwn ? .trailing : .leading, spacing: 1) {
+
+            HStack(alignment: .top, spacing: Theme.space2) {
+                if isOwn {
+                    Spacer(minLength: dynamicTypeSize.isAccessibilitySize ? Theme.space2 : Theme.space5)
+                }
                 bubble
-                if message.isBot, message.isPartial != true, !message.content.isEmpty {
-                    quickActions
-                }
-            }
-            if !isOwn {
-                Spacer(minLength: dynamicTypeSize.isAccessibilitySize ? 8 : 60)
-            }
-        }
-        .padding(.horizontal, Theme.space3)
-        .padding(.top, showAvatar ? Theme.space1 : 2)
-        .padding(.bottom, isLastInGroup ? Theme.space2 : 2)
-    }
-
-    private var quickActions: some View {
-        HStack(spacing: 0) {
-            quickAction(copied ? "checkmark" : "doc.on.doc", label: copied ? "Copied" : "Copy text") {
-                UIPasteboard.general.string = message.content
-                NativeFeedback.selection()
-                copied = true
-                Task {
-                    try? await Task.sleep(for: .seconds(1.2))
-                    copied = false
-                }
-            }
-            if let onReply {
-                quickAction("arrowshape.turn.up.left", label: "Reply") {
-                    NativeFeedback.lightImpact()
-                    onReply()
-                }
-            }
-            if let onForward {
-                quickAction("arrowshape.turn.up.right", label: "Forward") {
-                    NativeFeedback.lightImpact()
-                    onForward()
-                }
-            }
-            if onReport != nil || onBlock != nil {
-                Menu {
-                    if let onReport {
-                        Button(role: .destructive) { onReport() } label: {
-                            Label("Report message", systemImage: "exclamationmark.bubble")
-                        }
+                if message.isBot, message.isPartial == true, let onStop {
+                    Button {
+                        NativeFeedback.lightImpact()
+                        onStop()
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.caption.weight(.semibold))
                     }
-                    if message.senderType == "user", let onBlock {
-                        Button(role: .destructive) { onBlock() } label: {
-                            Label("Block user", systemImage: "hand.raised")
-                        }
-                    }
-                } label: {
-                    quickActionLabel("ellipsis", label: "More message actions")
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.small)
+                    .tint(Theme.textSecondary)
+                    .frame(width: Theme.hitMin, height: Theme.hitMin)
+                    .accessibilityLabel("Stop response")
+                    .accessibilityHint("Stops this response and any bot-to-bot chain it started")
+                }
+                if !isOwn {
+                    Spacer(minLength: dynamicTypeSize.isAccessibilitySize ? Theme.space2 : Theme.space5)
                 }
             }
         }
-        .foregroundStyle(Theme.textSecondary)
-        .padding(.horizontal, 2)
+        .padding(.horizontal, Theme.space5)
+        .padding(.top, showAvatar ? Theme.space3 : Theme.space1)
+        .padding(.bottom, isLastInGroup ? Theme.space3 : Theme.space1)
     }
 
-    private func quickAction(_ systemName: String, label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            quickActionLabel(systemName, label: label)
+    private var senderHeader: some View {
+        HStack(spacing: Theme.space2) {
+            AvatarView(
+                seedId: message.senderId ?? message.msgId,
+                name: message.senderName,
+                size: 32,
+                monochrome: true
+            )
+            Text(message.senderName ?? (message.isBot ? String(localized: "Bot") : String(localized: "Unknown")))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+            if message.isBot {
+                Text("BOT")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, Theme.space1)
+                    .padding(.vertical, 2)
+                    .background(Theme.bgSelected)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            Spacer(minLength: 0)
+            timeLabel
         }
-        .buttonStyle(.plain)
-    }
-
-    private func quickActionLabel(_ systemName: String, label: LocalizedStringKey) -> some View {
-        Image(systemName: systemName)
-            .font(.system(size: 14, weight: .medium))
-            .frame(width: 38, height: 36)
-            .contentShape(Rectangle())
-            .accessibilityLabel(Text(label))
-    }
-
-    @ViewBuilder
-    private var avatarGutter: some View {
-        if showAvatar {
-            AvatarView(seedId: message.senderId ?? message.msgId, name: message.senderName, size: 28, monochrome: true)
-        } else {
-            Color.clear.frame(width: 28, height: 1)
-        }
+        .frame(minHeight: 32)
     }
 
     private var bubble: some View {
@@ -171,27 +143,11 @@ struct MessageBubbleView: View {
             if let repliedTo {
                 replyQuote(repliedTo)
             }
-            if showSenderName {
-                HStack(spacing: 5) {
-                    // Hierarchy via weight, not color (HIG): neutral semibold name.
-                    Text(message.senderName ?? (message.isBot ? String(localized: "Bot") : String(localized: "Unknown")))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    if message.isBot {
-                        Text("BOT")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Theme.textSecondary)
-                            .padding(.horizontal, Theme.space1)
-                            .padding(.vertical, 2)
-                            .background(Theme.bgSelected)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
-                }
-            }
-
-            if isTyping {
-                TypingDotsView()
+            if isAwaitingContent {
+                ProgressView()
+                    .controlSize(.small)
                     .padding(.vertical, 4)
+                    .accessibilityLabel("Response in progress")
             } else if message.isPartial == true {
                 // Streaming deltas can arrive many times per second. Keep
                 // them intentionally plain until message_done supplies the
@@ -217,12 +173,6 @@ struct MessageBubbleView: View {
                 }
             }
 
-            if !isTyping {
-                HStack(spacing: 0) {
-                    Spacer(minLength: 24)
-                    timeLabel
-                }
-            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -272,7 +222,7 @@ struct MessageBubbleView: View {
 
     private var timeLabel: some View {
         HStack(spacing: 4) {
-            if !isTyping, message.isPartial == true {
+            if !isAwaitingContent, message.isPartial == true {
                 // Streaming: pulsing caret substitute.
                 Circle()
                     .fill(Theme.textSecondary)
@@ -286,7 +236,7 @@ struct MessageBubbleView: View {
         .padding(.bottom, 1)
     }
 
-    private var isTyping: Bool {
+    private var isAwaitingContent: Bool {
         message.isPartial == true && message.content.isEmpty
     }
 
@@ -310,32 +260,6 @@ struct MessageBubbleView: View {
             topTrailingRadius: 16,
             style: .continuous
         )
-    }
-}
-
-// MARK: - Typing dots
-
-struct TypingDotsView: View {
-    @State private var phase = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(Theme.textMuted)
-                    .frame(width: 6, height: 6)
-                    .offset(y: phase ? -3 : 1)
-                    .animation(
-                        reduceMotion ? nil : .easeInOut(duration: 0.45)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.15),
-                        value: phase
-                    )
-            }
-        }
-        .onAppear { phase = !reduceMotion }
-        .accessibilityLabel("Typing")
     }
 }
 

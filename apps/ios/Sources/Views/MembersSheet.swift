@@ -9,9 +9,11 @@ import SwiftUI
 /// fall back to the global admin role on the session.
 struct MembersSheet: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
     let channel: ChannelDto
 
     @State private var members: [ChannelMemberDto] = []
+    @State private var query = ""
     @State private var isLoading = true
     @State private var errorText: String?
     @State private var showInvite = false
@@ -36,12 +38,36 @@ struct MembersSheet: View {
         isGlobalAdmin || myRole == "owner" || myRole == "admin"
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
-            content
+    private var filteredMembers: [ChannelMemberDto] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return members }
+        return members.filter {
+            $0.name.localizedCaseInsensitiveContains(needle)
+                || ($0.role?.localizedCaseInsensitiveContains(needle) ?? false)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    var body: some View {
+        NavigationStack {
+            content
+                .navigationTitle(members.isEmpty ? "Members" : "Members (\(members.filter { !$0.isPending }.count))")
+                .navigationBarTitleDisplayMode(.inline)
+                .searchable(text: $query, prompt: "Search members")
+                .toolbar {
+                    if canManage && !channel.isDM {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button {
+                                showInvite = true
+                            } label: {
+                                Label("Invite", systemImage: "person.badge.plus")
+                            }
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
         .background(Theme.bgSurface)
         .task { await load() }
         .sheet(isPresented: $showInvite) {
@@ -84,50 +110,38 @@ struct MembersSheet: View {
         }
     }
 
-    private var header: some View {
-        HStack {
-            Text("Members")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-            if !members.isEmpty {
-                Text("\(members.filter { !$0.isPending }.count)")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            Spacer()
-            if canManage && !channel.isDM {
-                Button {
-                    showInvite = true
-                } label: {
-                    Label("Invite", systemImage: "person.badge.plus")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.link)
-                }
-                .frame(minHeight: 44)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-
     @ViewBuilder
     private var content: some View {
         if isLoading {
-            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 28)
+            ProgressView("Loading members…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let errorText {
-            Text(errorText)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.danger)
-                .padding(16)
-        } else {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(members) { member in
-                        memberRow(member)
-                    }
-                }
-                .padding(.vertical, 4)
+            ContentUnavailableView {
+                Label("Couldn’t load members", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(errorText)
+            } actions: {
+                Button("Retry") { Task { await load() } }
+                    .buttonStyle(.borderedProminent)
             }
+        } else if filteredMembers.isEmpty {
+            ContentUnavailableView(
+                query.isEmpty ? "No members" : "No matching members",
+                systemImage: query.isEmpty ? "person.2" : "magnifyingglass",
+                description: Text(query.isEmpty ? "Invite someone to start this channel." : "Try a different name or role.")
+            )
+        } else {
+            List(filteredMembers) { member in
+                memberRow(member)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 8))
+            }
+            .listStyle(.plain)
+            .refreshable {
+                await load()
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.bgSurface)
         }
     }
 
@@ -173,7 +187,6 @@ struct MembersSheet: View {
             Spacer(minLength: 8)
             rowMenu(member)
         }
-        .padding(.horizontal, 16)
         .frame(minHeight: 52)
     }
 

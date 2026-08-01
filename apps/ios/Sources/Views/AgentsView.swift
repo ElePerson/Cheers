@@ -9,9 +9,19 @@ struct FleetView: View {
     @State private var model = AgentsModel()
     @State private var showOnboarding = false
     @State private var selectedBot: BotDto?
+    @State private var searchText = ""
+    @State private var searchPresented = false
+
+    private var filteredBots: [BotDto] {
+        guard !searchText.isEmpty else { return model.bots }
+        return model.bots.filter { bot in
+            bot.name.localizedCaseInsensitiveContains(searchText)
+                || (bot.statusText?.localizedCaseInsensitiveContains(searchText) ?? false)
+        }
+    }
 
     var body: some View {
-        ScreenScaffold(title: "Fleet") {
+        ScreenScaffold(title: "Fleet", titleDisplayMode: .inline) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if activity.pending.count > 0 {
@@ -39,29 +49,21 @@ struct FleetView: View {
                         .buttonStyle(.plain)
                     }
 
-                    HStack {
-                        sectionHeader("Bots")
-                        Spacer()
-                        Button { showOnboarding = true } label: {
-                            Label("Add", systemImage: "plus")
-                                .font(.system(size: 12.5, weight: .semibold))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.accent)
-                        .padding(.top, 12)
-                    }
+                    sectionHeader("Bots")
                     summaryStrip.padding(.vertical, 2)
                     if model.isLoading && model.bots.isEmpty {
                         ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
                     } else if model.bots.isEmpty {
                         emptyState
+                    } else if filteredBots.isEmpty {
+                        ContentUnavailableView.search(text: searchText)
                     } else {
-                        ForEach(model.bots) { bot in
+                        ForEach(filteredBots) { bot in
                             Button { selectedBot = bot } label: {
                                 botRow(bot)
                             }
                             .buttonStyle(.plain)
-                            if bot.id != model.bots.last?.id {
+                            if bot.id != filteredBots.last?.id {
                                 Divider().overlay(Theme.border).padding(.leading, 60)
                             }
                         }
@@ -71,6 +73,25 @@ struct FleetView: View {
                 .padding(.vertical, 8)
             }
             .refreshable { await model.load(); await activity.loadInvites() }
+        }
+        .searchable(
+            text: $searchText,
+            isPresented: $searchPresented,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search fleet"
+        )
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("Add", systemImage: "plus") {
+                    showOnboarding = true
+                }
+                .labelStyle(.iconOnly)
+
+                Button("Search", systemImage: "magnifyingglass") {
+                    searchPresented = true
+                }
+                .labelStyle(.iconOnly)
+            }
         }
         .task {
             model.attach(app)

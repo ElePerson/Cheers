@@ -6,13 +6,12 @@ struct FriendsView: View {
     @Environment(ShellModel.self) private var shell
 
     private enum Tab: String, CaseIterable, Identifiable {
-        case friends, requests, add, blocked
+        case friends, requests, blocked
         var id: String { rawValue }
         var title: String {
             switch self {
             case .friends: return String(localized: "Friends")
             case .requests: return String(localized: "Requests")
-            case .add: return String(localized: "Add")
             case .blocked: return String(localized: "Blocked")
             }
         }
@@ -25,50 +24,98 @@ struct FriendsView: View {
     @State private var blocked: [BlockedUserDto] = []
     @State private var addQuery = ""
     @State private var searchHit: UserSearchResultDto?
+    @State private var showAddFriend = false
+    @State private var friendToRemove: FriendDto?
+    @State private var friendToBlock: FriendDto?
     @State private var isLoading = true
     @State private var isBusy = false
     @State private var errorText: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("Tab", selection: $tab) {
-                ForEach(Tab.allCases) { t in
-                    Text(
-                        t == .requests && !incoming.isEmpty
-                            ? String(localized: "Requests (\(incoming.count))")
-                            : t.title
-                    )
-                    .tag(t)
+        ScreenScaffold(title: "Friends", titleDisplayMode: .inline) {
+            VStack(spacing: 0) {
+                Picker("Tab", selection: $tab) {
+                    ForEach(Tab.allCases) { t in
+                        Text(
+                            t == .requests && !incoming.isEmpty
+                                ? String(localized: "Requests (\(incoming.count))")
+                                : t.title
+                        )
+                        .tag(t)
+                    }
                 }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, Theme.space4)
-            .padding(.vertical, Theme.space2)
+                .pickerStyle(.segmented)
+                .padding(.horizontal, Theme.space4)
+                .padding(.top, Theme.space2)
+                .padding(.bottom, Theme.space1)
 
-            if let errorText {
-                Text(errorText)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.danger)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-            }
-
-            Group {
-                if isLoading {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    switch tab {
-                    case .friends: friendsList
-                    case .requests: requestsList
-                    case .add: addForm
-                    case .blocked: blockedList
+                Group {
+                    if isLoading {
+                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        switch tab {
+                        case .friends: friendsList
+                        case .requests: requestsList
+                        case .blocked: blockedList
+                        }
                     }
                 }
             }
         }
-        .background(Theme.bgApp)
-        .navigationTitle("Friends")
-        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Add Friend", systemImage: "person.badge.plus") {
+                    showAddFriend = true
+                }
+                .labelStyle(.iconOnly)
+            }
+        }
+        .sheet(isPresented: $showAddFriend, onDismiss: resetAddForm) {
+            addFriendSheet
+        }
+        .alert(
+            "Something went wrong",
+            isPresented: Binding(
+                get: { errorText != nil },
+                set: { if !$0 { errorText = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { errorText = nil }
+        } message: {
+            Text(errorText ?? "")
+        }
+        .confirmationDialog(
+            "Remove friend?",
+            isPresented: Binding(
+                get: { friendToRemove != nil },
+                set: { if !$0 { friendToRemove = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove Friend", role: .destructive) {
+                guard let friend = friendToRemove else { return }
+                friendToRemove = nil
+                Task { await remove(friendId: friend.friendId) }
+            }
+            Button("Cancel", role: .cancel) { friendToRemove = nil }
+        }
+        .confirmationDialog(
+            "Block this person?",
+            isPresented: Binding(
+                get: { friendToBlock != nil },
+                set: { if !$0 { friendToBlock = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Block", role: .destructive) {
+                guard let friend = friendToBlock else { return }
+                friendToBlock = nil
+                Task { await block(userId: friend.friendId) }
+            }
+            Button("Cancel", role: .cancel) { friendToBlock = nil }
+        } message: {
+            Text("They won’t be able to contact you or send a friend request.")
+        }
         .task { await reload() }
         .onChange(of: tab) { _, _ in
             errorText = nil
@@ -76,166 +123,255 @@ struct FriendsView: View {
     }
 
     private var friendsList: some View {
-        List {
+        Group {
             if friends.isEmpty {
-                Text("No friends yet. Use Add to find people by username or user ID.")
-                    .foregroundStyle(Theme.textSecondary)
-            } else {
-                ForEach(friends) { friend in
-                    HStack(spacing: Theme.space3) {
-                        AvatarView(
-                            seedId: friend.friendId,
-                            name: friend.displayName ?? friend.username,
-                            size: Theme.avatarList,
-                            monochrome: true
-                        )
-                        VStack(alignment: .leading, spacing: Theme.space1) {
-                            Text(friend.displayName ?? friend.username)
-                                .font(.system(size: 15, weight: .medium))
-                            Text("@\(friend.username)")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.textMuted)
-                        }
-                        Spacer()
-                        Button {
-                            Task { await openDM(userId: friend.friendId) }
-                        } label: {
-                            Image(systemName: "bubble.left")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(Theme.textSecondary)
-                                .frame(width: Theme.hitMin, height: Theme.hitMin)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel(String(localized: "Open direct message"))
-                        .disabled(isBusy)
+                ContentUnavailableView {
+                    Label("No Friends Yet", systemImage: "person.2")
+                } description: {
+                    Text("Add someone by username or user ID to start a conversation.")
+                } actions: {
+                    Button("Add Friend", systemImage: "person.badge.plus") {
+                        showAddFriend = true
                     }
-                    .listRowInsets(EdgeInsets(
-                        top: Theme.rowVertical,
-                        leading: Theme.space4,
-                        bottom: Theme.rowVertical,
-                        trailing: Theme.space2
-                    ))
-                    .swipeActions {
-                        Button(role: .destructive) {
-                            Task { await remove(friendId: friend.friendId) }
-                        } label: {
-                            Label("Remove", systemImage: "person.badge.minus")
+                    .buttonStyle(.borderedProminent)
+                }
+            } else {
+                List {
+                    ForEach(friends) { friend in
+                        HStack(spacing: Theme.space3) {
+                            AvatarView(
+                                seedId: friend.friendId,
+                                name: friend.displayName ?? friend.username,
+                                size: Theme.avatarList,
+                                imageURL: resolveAvatarURL(friend.avatarURL)
+                            )
+                            VStack(alignment: .leading, spacing: Theme.space1) {
+                                Text(friend.displayName ?? friend.username)
+                                    .font(.body)
+                                Text("@\(friend.username)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button {
+                                Task { await openDM(userId: friend.friendId) }
+                            } label: {
+                                Image(systemName: "bubble.left")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .frame(width: Theme.hitMin, height: Theme.hitMin)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel(String(localized: "Open direct message"))
+                            .disabled(isBusy)
                         }
-                        Button(role: .destructive) {
-                            Task { await block(userId: friend.friendId) }
-                        } label: {
-                            Label("Block", systemImage: "hand.raised")
+                        .listRowInsets(EdgeInsets(
+                            top: Theme.rowVertical,
+                            leading: Theme.space4,
+                            bottom: Theme.rowVertical,
+                            trailing: Theme.space2
+                        ))
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                friendToRemove = friend
+                            } label: {
+                                Label("Remove", systemImage: "person.badge.minus")
+                            }
+                            Button(role: .destructive) {
+                                friendToBlock = friend
+                            } label: {
+                                Label("Block", systemImage: "hand.raised")
+                            }
                         }
                     }
                 }
+                .listStyle(.plain)
+                .refreshable { await reload() }
             }
         }
-        .listStyle(.plain)
     }
 
     private var requestsList: some View {
-        List {
-            Section("Incoming") {
-                if incoming.isEmpty {
-                    Text("None").foregroundStyle(Theme.textMuted)
-                } else {
-                    ForEach(incoming) { req in
-                        requestRow(req, incoming: true)
+        Group {
+            if incoming.isEmpty && outgoing.isEmpty {
+                ContentUnavailableView(
+                    "No Friend Requests",
+                    systemImage: "person.crop.circle.badge.checkmark",
+                    description: Text("Incoming and sent requests will appear here.")
+                )
+            } else {
+                List {
+                    if !incoming.isEmpty {
+                        Section("Incoming") {
+                            ForEach(incoming) { req in
+                                requestRow(req, incoming: true)
+                            }
+                        }
+                    }
+                    if !outgoing.isEmpty {
+                        Section("Sent") {
+                            ForEach(outgoing) { req in
+                                requestRow(req, incoming: false)
+                            }
+                        }
                     }
                 }
-            }
-            Section("Outgoing") {
-                if outgoing.isEmpty {
-                    Text("None").foregroundStyle(Theme.textMuted)
-                } else {
-                    ForEach(outgoing) { req in
-                        requestRow(req, incoming: false)
-                    }
-                }
+                .listStyle(.insetGrouped)
+                .refreshable { await reload() }
             }
         }
-        .listStyle(.insetGrouped)
     }
 
     @ViewBuilder
     private func requestRow(_ req: FriendRequestDto, incoming: Bool) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: Theme.space3) {
+            AvatarView(
+                seedId: req.userId,
+                name: req.displayName ?? req.username,
+                size: Theme.avatarList,
+                imageURL: resolveAvatarURL(req.avatarURL)
+            )
+            VStack(alignment: .leading, spacing: Theme.space1) {
                 Text(req.displayName ?? req.username)
                 Text("@\(req.username)")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textMuted)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
             if incoming {
                 Button("Accept") {
                     Task { await accept(userId: req.userId) }
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 .disabled(isBusy)
             }
+        }
+        .swipeActions {
             Button(incoming ? "Decline" : "Cancel", role: .destructive) {
                 Task { await remove(friendId: req.userId) }
             }
-            .disabled(isBusy)
         }
     }
 
-    private var addForm: some View {
-        Form {
-            Section {
-                TextField("Username or user ID", text: $addQuery)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body)
-                Button {
-                    Task { await search() }
-                } label: {
-                    if isBusy { ProgressView() } else { Text("Look up") }
-                }
-                .disabled(isBusy || addQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            } footer: {
-                Text("Enter an exact username or user ID. Email and partial-name search are not supported.")
-            }
-
-            if let hit = searchHit {
-                Section("Result") {
-                    LabeledContent("Username", value: "@\(hit.username)")
-                    if let name = hit.displayName {
-                        LabeledContent("Name", value: name)
-                    }
-                    Button("Send friend request") {
-                        Task { await sendRequest(userId: hit.userId) }
-                    }
-                    .disabled(isBusy)
-                }
-            }
-        }
-    }
-
-    private var blockedList: some View {
-        List {
-            if blocked.isEmpty {
-                Text("No blocked users.").foregroundStyle(Theme.textSecondary)
-            } else {
-                ForEach(blocked) { user in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(user.displayName ?? user.username)
-                            Text("@\(user.username)")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.textMuted)
+    private var addFriendSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Username or user ID", text: $addQuery)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                        .onSubmit {
+                            guard !addQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                            Task { await search() }
                         }
-                        Spacer()
-                        Button("Unblock") {
-                            Task { await unblock(userId: user.userId) }
+                    Button {
+                        Task { await search() }
+                    } label: {
+                        if isBusy {
+                            ProgressView()
+                        } else {
+                            Label("Look Up", systemImage: "magnifyingglass")
+                        }
+                    }
+                    .disabled(isBusy || addQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                } footer: {
+                    Text("Enter an exact username or user ID.")
+                }
+
+                if let hit = searchHit {
+                    Section("Result") {
+                        HStack(spacing: Theme.space3) {
+                            AvatarView(
+                                seedId: hit.userId,
+                                name: hit.displayName ?? hit.username,
+                                size: Theme.avatarList,
+                                imageURL: resolveAvatarURL(hit.avatarURL)
+                            )
+                            VStack(alignment: .leading, spacing: Theme.space1) {
+                                Text(hit.displayName ?? hit.username)
+                                Text("@\(hit.username)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Button("Send Friend Request", systemImage: "person.badge.plus") {
+                            Task { await sendRequest(userId: hit.userId) }
                         }
                         .disabled(isBusy)
                     }
                 }
             }
+            .navigationTitle("Add Friend")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showAddFriend = false }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
-        .listStyle(.plain)
+    }
+
+    private func resetAddForm() {
+        addQuery = ""
+        searchHit = nil
+        errorText = nil
+    }
+
+    private func resolveAvatarURL(_ raw: String?) -> URL? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let absolute = URL(string: raw), absolute.scheme != nil { return absolute }
+        guard let base = app.baseURL,
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return URL(string: raw, relativeTo: components.url)?.absoluteURL
+    }
+
+    private var blockedList: some View {
+        Group {
+            if blocked.isEmpty {
+                ContentUnavailableView(
+                    "No Blocked Users",
+                    systemImage: "hand.raised",
+                    description: Text("People you block will appear here.")
+                )
+            } else {
+                List {
+                    ForEach(blocked) { user in
+                        HStack(spacing: Theme.space3) {
+                            AvatarView(
+                                seedId: user.userId,
+                                name: user.displayName ?? user.username,
+                                size: Theme.avatarList,
+                                imageURL: resolveAvatarURL(user.avatarURL)
+                            )
+                            VStack(alignment: .leading, spacing: Theme.space1) {
+                                Text(user.displayName ?? user.username)
+                                Text("@\(user.username)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Unblock") {
+                                Task { await unblock(userId: user.userId) }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(isBusy)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .refreshable { await reload() }
+            }
+        }
     }
 
     private func reload() async {
@@ -285,6 +421,7 @@ struct FriendsView: View {
             addQuery = ""
             await reload()
             tab = .requests
+            showAddFriend = false
         } catch {
             errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }

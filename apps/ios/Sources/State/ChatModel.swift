@@ -73,6 +73,12 @@ final class ChatModel {
     /// Channel members (users + bots) as picker entries, group tokens included —
     /// the composer's @-mention pool.
     private(set) var mentionPool: [MentionCandidate] = MentionCandidate.groups
+    /// Live per-message agent activity. Kept after completion so the status
+    /// control does not move or lose its count when the final token arrives.
+    private(set) var liveTraceEvents: [String: [TraceEntryDto]] = [:]
+    /// Small observation token used by the UIKit-backed timeline to reconfigure
+    /// only the owning message row when a trace frame arrives.
+    private(set) var traceRevision = 0
     /// Mentions the user has picked in the current draft. Routing source of
     /// truth: only entries whose "@label" token survives in the text are sent.
     var pickedMentions: [MentionCandidate] = []
@@ -96,6 +102,7 @@ final class ChatModel {
     /// (the gateway's `message`/`message_done` frames omit `sender_name`).
     @ObservationIgnored private var memberNames: [String: String] = [:]
     @ObservationIgnored private var taskClaimPoll: Task<Void, Never>?
+    @ObservationIgnored private var memberRefreshTask: Task<Void, Never>?
 
     init(channel: ChannelDto) {
         self.channel = channel
@@ -137,6 +144,8 @@ final class ChatModel {
         listenerId = nil
         taskClaimPoll?.cancel()
         taskClaimPoll = nil
+        memberRefreshTask?.cancel()
+        memberRefreshTask = nil
         if messages.count > Self.detachKeepCount {
             messages = Array(messages.suffix(Self.detachKeepCount))
             hasMoreBefore = true
@@ -275,7 +284,7 @@ final class ChatModel {
     /// Refreshes the member-name map, bot roster and @-mention pool; a failure
     /// is non-fatal. Also runs on warm re-entry, so a member who joined while
     /// we were away shows up in the picker without a cold reload.
-    private func refreshMembers() async {
+    func refreshMembers() async {
         guard let api = app?.api else { return }
         guard let members = try? await api.listMembers(channelId: channel.channelId) else { return }
         memberNames = Dictionary(
@@ -294,6 +303,21 @@ final class ChatModel {
                     sublabel: member.username
                 )
             }
+    }
+
+    func traceEvents(for msgId: String) -> [TraceEntryDto] {
+        liveTraceEvents[msgId] ?? []
+    }
+
+    /// Presence and profile frames can arrive in bursts. Coalesce them into one
+    /// authoritative member read so @ mentions and sender names heal live.
+    private func scheduleMemberRefresh() {
+        memberRefreshTask?.cancel()
+        memberRefreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, !Task.isCancelled else { return }
+            await self.refreshMembers()
+        }
     }
 
     func loadOlder() async {
@@ -542,6 +566,7 @@ final class ChatModel {
             // been cleared after a 4403 (stale channel) close. The server
             // treats repeat subscribes as idempotent.
             app?.socket.subscribe(channelId: channel.channelId)
+            scheduleMemberRefresh()
         case .subscribed(let channelId) where channelId == channel.channelId:
             Task { await catchUp() }
         case .message(let channelId, let message) where channelId == channel.channelId:
@@ -562,6 +587,12 @@ final class ChatModel {
             upsert(message)
             followBottomTick += 1
             markRead()
+        case .botTrace(let channelId, let payload) where channelId == channel.channelId:
+            upsertTrace(payload)
+        case .presence(let channelId, _) where channelId == channel.channelId:
+            scheduleMemberRefresh()
+        case .memberUpdated(let channelId, _) where channelId == channel.channelId:
+            scheduleMemberRefresh()
         case .messageDeleted(let channelId, let msgId) where channelId == channel.channelId:
             messages.removeAll { $0.msgId == msgId }
             if let store = app?.messageStore {
@@ -570,6 +601,40 @@ final class ChatModel {
         default:
             break
         }
+    }
+
+    private func upsertTrace(_ payload: BotTracePayload) {
+        let dataToolId = payload.data?["tool_call_id"]?.stringValue
+        let identity = payload.eventId
+            ?? payload.toolCallId
+            ?? payload.requestId
+            ?? dataToolId
+            ?? "\(payload.phase):\(payload.title ?? payload.message ?? "event")"
+        var events = liveTraceEvents[payload.msgId] ?? []
+        let entry = TraceEntryDto(
+            id: identity,
+            msgId: payload.msgId,
+            traceSeq: events.firstIndex(where: { $0.id == identity }) ?? events.count,
+            kind: payload.phase == "approval" ? "approval" : "trace",
+            phase: payload.phase,
+            status: payload.status,
+            title: payload.title,
+            message: payload.message,
+            data: payload.data,
+            requestId: payload.requestId ?? payload.data?["request_id"]?.stringValue,
+            approvalKind: payload.data?["approval_kind"]?.stringValue,
+            decision: payload.data?["decision"]?.stringValue,
+            optionId: payload.data?["option_id"]?.stringValue,
+            actorId: payload.data?["actor_id"]?.stringValue,
+            createdAt: payload.createdAt ?? TimeFormat.iso.string(from: Date())
+        )
+        if let index = events.firstIndex(where: { $0.id == identity }) {
+            events[index] = entry
+        } else {
+            events.append(entry)
+        }
+        liveTraceEvents[payload.msgId] = events
+        traceRevision &+= 1
     }
 
     // MARK: Ordering

@@ -1,6 +1,50 @@
 import Foundation
 import Observation
 
+/// Small user/server-scoped cache for navigation metadata. Message bodies stay
+/// in SwiftData; this cache only prevents the drawer from looking empty while
+/// the authoritative workspace/channel reads are in flight.
+enum NavigationCache {
+    enum Kind: String { case workspaces, conversations }
+
+    static func load<T: Decodable>(
+        _ type: T.Type,
+        kind: Kind,
+        userId: String?,
+        server: String
+    ) -> T? {
+        guard let key = key(kind: kind, userId: userId, server: server),
+              let data = UserDefaults.standard.data(forKey: key)
+        else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    static func save<T: Encodable>(
+        _ value: T,
+        kind: Kind,
+        userId: String?,
+        server: String
+    ) {
+        guard let key = key(kind: kind, userId: userId, server: server),
+              let data = try? JSONEncoder().encode(value)
+        else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    static func removeAll(userId: String?, server: String) {
+        for kind in [Kind.workspaces, .conversations] {
+            guard let key = key(kind: kind, userId: userId, server: server) else { continue }
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    private static func key(kind: Kind, userId: String?, server: String) -> String? {
+        guard let userId, !userId.isEmpty else { return nil }
+        let serverScope = Data(server.utf8).base64EncodedString()
+        return "navigation_cache.v1.\(kind.rawValue).\(userId).\(serverScope)"
+    }
+}
+
 /// Push destinations for the app shell's single NavigationStack. The chat itself
 /// is the ROOT surface (not pushed) — the drawer switches `currentChannel`; these
 /// are the secondary screens the drawer/chat push on top of it.
@@ -22,7 +66,15 @@ final class ShellModel {
     var drawerOpen = false
 
     /// nil = "All" (drawer shows every workspace's channels). Otherwise scopes to one.
-    var selectedWorkspaceId: String?
+    var selectedWorkspaceId: String? {
+        didSet {
+            if let selectedWorkspaceId {
+                UserDefaults.standard.set(selectedWorkspaceId, forKey: Self.selectedWorkspaceKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.selectedWorkspaceKey)
+            }
+        }
+    }
 
     /// The channel shown on the root chat surface (the app's home is a chat, not a list).
     var currentChannel: ChannelDto?
@@ -39,13 +91,37 @@ final class ShellModel {
     /// Team workspaces (from GET /workspaces) plus the personal workspace, if any.
     private(set) var workspaces: [WorkspaceDto] = []
     private(set) var personalWorkspace: WorkspaceDto?
+    private(set) var isLoadingWorkspaces = false
 
     @ObservationIgnored private weak var app: AppModel?
     @ObservationIgnored private var loadedOnce = false
     @ObservationIgnored private let lastChannelKey = "last_channel_id"
+    @ObservationIgnored private static let selectedWorkspaceKey = "selected_workspace_id"
+    @ObservationIgnored private var restoredCacheScope: String?
+
+    private struct WorkspaceCacheSnapshot: Codable {
+        let workspaces: [WorkspaceDto]
+        let personalWorkspace: WorkspaceDto?
+    }
+
+    init() {
+        selectedWorkspaceId = UserDefaults.standard.string(forKey: Self.selectedWorkspaceKey)
+    }
 
     func attach(_ app: AppModel) {
         self.app = app
+        let scope = "\(app.session?.userId ?? "")|\(app.serverURLString)"
+        guard restoredCacheScope != scope else { return }
+        restoredCacheScope = scope
+        if let cached = NavigationCache.load(
+            WorkspaceCacheSnapshot.self,
+            kind: .workspaces,
+            userId: app.session?.userId,
+            server: app.serverURLString
+        ) {
+            workspaces = cached.workspaces
+            personalWorkspace = cached.personalWorkspace
+        }
     }
 
     /// Pick the root chat on launch: the last-opened channel if still present,
@@ -70,6 +146,9 @@ final class ShellModel {
 
     func loadWorkspaces() async {
         guard let app, let api = app.api else { return }
+        guard !isLoadingWorkspaces else { return }
+        isLoadingWorkspaces = true
+        defer { isLoadingWorkspaces = false }
         do {
             async let teamsTask = api.listWorkspaces()
             async let personalTask = api.personalWorkspace()
@@ -77,6 +156,20 @@ final class ShellModel {
             // Personal workspace is non-fatal (its own endpoint may 404 on some deployments).
             personalWorkspace = try? await personalTask
             loadedOnce = true
+            NavigationCache.save(
+                WorkspaceCacheSnapshot(
+                    workspaces: workspaces,
+                    personalWorkspace: personalWorkspace
+                ),
+                kind: .workspaces,
+                userId: app.session?.userId,
+                server: app.serverURLString
+            )
+            if let selectedWorkspaceId {
+                let stillAvailable = workspaces.contains { $0.workspaceId == selectedWorkspaceId }
+                    || personalWorkspace?.workspaceId == selectedWorkspaceId
+                if !stillAvailable { self.selectedWorkspaceId = nil }
+            }
         } catch let error as APIError {
             if case .unauthorized = error { app.clearSession() }
         } catch {

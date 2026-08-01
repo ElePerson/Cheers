@@ -5,28 +5,53 @@ import SwiftUI
 struct ActivityView: View {
     var activity: ActivityModel
     @State private var sheetItem: ApprovalItem?
+    @State private var searchText = ""
+    @State private var searchPresented = false
 
-    private var isEmpty: Bool {
+    private var hasNoActivity: Bool {
         activity.pending.isEmpty && activity.invites.isEmpty
     }
 
+    private var filteredPending: [ApprovalItem] {
+        guard !searchText.isEmpty else { return activity.pending }
+        return activity.pending.filter { item in
+            item.botName.localizedCaseInsensitiveContains(searchText)
+                || item.request.title.localizedCaseInsensitiveContains(searchText)
+                || (item.request.command?.localizedCaseInsensitiveContains(searchText) ?? false)
+        }
+    }
+
+    private var filteredInvites: [NotificationDto] {
+        guard !searchText.isEmpty else { return activity.invites }
+        return activity.invites.filter { invite in
+            invite.title.localizedCaseInsensitiveContains(searchText)
+                || (invite.invitedBy?.localizedCaseInsensitiveContains(searchText) ?? false)
+        }
+    }
+
+    private var hasNoSearchResults: Bool {
+        filteredPending.isEmpty && filteredInvites.isEmpty
+    }
+
     var body: some View {
-        ScreenScaffold(title: "Activity") {
+        ScreenScaffold(title: "Activity", titleDisplayMode: .inline) {
             Group {
-                if isEmpty {
+                if hasNoActivity {
                     ComingSoon(icon: "bell.badge", text: "Approvals and invites appear here")
+                } else if hasNoSearchResults {
+                    ContentUnavailableView.search(text: searchText)
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
-                            if !activity.pending.isEmpty {
+                            if !filteredPending.isEmpty {
                                 sectionHeader("Needs approval", icon: "shield.lefthalf.filled", tint: Theme.warning)
-                                ForEach(activity.pending) { item in
+                                ForEach(filteredPending) { item in
                                     approvalCard(item)
                                 }
                             }
-                            if !activity.invites.isEmpty {
+                            if !filteredInvites.isEmpty {
                                 sectionHeader("Invites", icon: "envelope", tint: Theme.accent)
-                                ForEach(activity.invites) { invite in
+                                ForEach(filteredInvites) { invite in
                                     inviteCard(invite)
                                 }
                             }
@@ -36,6 +61,20 @@ struct ActivityView: View {
                     }
                     .refreshable { await activity.loadInvites() }
                 }
+            }
+        }
+        .searchable(
+            text: $searchText,
+            isPresented: $searchPresented,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search activity"
+        )
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Search", systemImage: "magnifyingglass") {
+                    searchPresented = true
+                }
+                .labelStyle(.iconOnly)
             }
         }
         .sheet(item: $sheetItem) { item in

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The navigation hub. Top: a compact workspace bar (long-press to switch).
 /// Middle: the selected workspace's channels and DMs. Bottom: a compact nav chip
@@ -11,40 +12,133 @@ struct DrawerView: View {
     var bottomInset: CGFloat = 0
 
     @State private var query = ""
+    @State private var showSearch = false
     @State private var newAsDM = false
     @State private var showNew = false
     @State private var showNewWorkspace = false
     @State private var showWorkspaceAdmin = false
+    @State private var workspaceAvatarImages: [String: UIImage] = [:]
+    @State private var userAvatarURL: URL?
 
     var body: some View {
-        VStack(spacing: 10) {
-            workspaceBar
-                .padding(.top, topInset + 8)
-            searchField
-            channelList
-            navChips
-            footer
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+        NavigationStack {
+            VStack(spacing: 10) {
+                channelList
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.bgSurface)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Menu {
+                        workspaceMenu
+                    } label: {
+                        HStack(spacing: 8) {
+                            workspaceGlyph
+                            Text(shell.selectedWorkspace?.name ?? "All conversations")
+                                .font(.headline)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityLabel("Choose workspace")
+                }
 
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.textMuted)
-            TextField("Search conversations", text: $query)
-                .font(.body)
-                .foregroundStyle(Theme.textPrimary)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Menu {
+                        Button("New channel", systemImage: "number") {
+                            newAsDM = false
+                            showNew = true
+                        }
+                        Button("New direct message", systemImage: "person.crop.circle.badge.plus") {
+                            newAsDM = true
+                            showNew = true
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("New conversation")
+
+                    Button("Search", systemImage: "magnifyingglass") {
+                        showSearch = true
+                    }
+                    .labelStyle(.iconOnly)
+                }
+
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button {
+                        shell.push(.settings)
+                    } label: {
+                        AvatarView(
+                            seedId: app.session?.userId ?? "me",
+                            name: app.session?.displayName ?? app.session?.username,
+                            size: 28,
+                            imageURL: userAvatarURL
+                        )
+                    }
+                    .accessibilityLabel("Settings")
+
+                    Button {
+                        shell.push(.activity)
+                    } label: {
+                        Label(
+                            "Activity",
+                            systemImage: shell.pendingInvites + shell.pendingApprovals > 0
+                                ? "bell.badge.fill"
+                                : "bell"
+                        )
+                    }
+
+                    Button {
+                        shell.push(.fleet)
+                    } label: {
+                        Label("Fleet", systemImage: "dot.radiowaves.left.and.right")
+                    }
+
+                    Button {
+                        shell.push(.friends)
+                    } label: {
+                        Label("Friends", systemImage: "person.2")
+                    }
+                }
+            }
+            .modifier(OptionalDrawerSearch(query: $query, isPresented: $showSearch))
+            .toolbarBackground(Theme.bgSurface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(Theme.bgSurface, for: .bottomBar)
+            .toolbarBackground(.visible, for: .bottomBar)
+            .sheet(isPresented: $showWorkspaceAdmin) {
+                if let workspace = shell.selectedWorkspace {
+                    WorkspaceAdminSheet(workspace: workspace)
+                }
+            }
+            .sheet(isPresented: $showNew) {
+                NewConversationSheet(startAsDM: newAsDM)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showNewWorkspace) {
+                NewWorkspaceSheet()
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(Theme.bgRaised)
-        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .padding(.horizontal, 18)
-        .padding(.bottom, 10)
+        .padding(.top, topInset)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        .onChange(of: showSearch) { _, presented in
+            if !presented {
+                query = ""
+            }
+        }
+        .task(id: workspaceAvatarRevision) {
+            await loadWorkspaceAvatars()
+        }
+        .task(id: shell.drawerOpen) {
+            guard shell.drawerOpen else { return }
+            await loadUserAvatar()
+        }
     }
 
     // MARK: Workspace bar (compact — tap OR long-press to switch)
@@ -52,56 +146,6 @@ struct DrawerView: View {
     /// One compact row: the current workspace glyph + name, a chevron hint, and
     /// (for team workspaces) a settings gear that opens Manage workspace. Tap/long-press
     /// the name row opens the workspace switcher.
-    private var workspaceBar: some View {
-        HStack(spacing: 4) {
-            Menu {
-                workspaceMenu
-            } label: {
-                workspaceBarLabel
-            }
-            .contextMenu { workspaceMenu }
-
-            if let ws = shell.selectedWorkspace,
-               shell.personalWorkspace?.workspaceId != ws.workspaceId {
-                Button {
-                    showWorkspaceAdmin = true
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 16))
-                        .foregroundStyle(Theme.textMuted)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Manage \(ws.name)")
-                .padding(.trailing, 8)
-            }
-        }
-        .sheet(isPresented: $showWorkspaceAdmin) {
-            if let workspace = shell.selectedWorkspace {
-                WorkspaceAdminSheet(workspace: workspace)
-            }
-        }
-    }
-
-    private var workspaceBarLabel: some View {
-        HStack(spacing: 10) {
-            workspaceGlyph
-            Text(shell.selectedWorkspace?.name ?? "All conversations")
-                .font(.headline)
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
-            Image(systemName: "chevron.down")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.textMuted)
-            Spacer(minLength: 8)
-        }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 10)
-        .frame(minHeight: 44)              // HIG minimum tap target
-        .contentShape(Rectangle())
-    }
-
     private var workspaceGlyph: some View {
         Group {
             if let ws = shell.selectedWorkspace {
@@ -109,6 +153,12 @@ struct DrawerView: View {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(Theme.online)
                         .overlay(Image(systemName: "house.fill").font(.system(size: 14, weight: .medium)).foregroundStyle(.white))
+                } else if let image = workspaceAvatarImages[ws.workspaceId] {
+                    Image(uiImage: image)
+                        .resizable()
+                        .renderingMode(.original)
+                        .scaledToFill()
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 } else {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(Theme.avatarColor(for: ws.workspaceId))
@@ -120,7 +170,7 @@ struct DrawerView: View {
                     .overlay(Image(systemName: "square.grid.2x2").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.textSecondary))
             }
         }
-        .frame(width: 32, height: 32)
+        .frame(width: 28, height: 28)
     }
 
     @ViewBuilder
@@ -130,12 +180,37 @@ struct DrawerView: View {
             Button { shell.selectWorkspace(personal.workspaceId) } label: { Label("Personal", systemImage: "house") }
         }
         ForEach(shell.workspaces) { ws in
-            Button { shell.selectWorkspace(ws.workspaceId) } label: { Text(ws.name) }
+            Button { shell.selectWorkspace(ws.workspaceId) } label: {
+                if let image = workspaceAvatarImages[ws.workspaceId] {
+                    Label {
+                        Text(ws.name)
+                    } icon: {
+                        Image(uiImage: image)
+                            .resizable()
+                            .renderingMode(.original)
+                            .scaledToFill()
+                            .frame(width: 22, height: 22)
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    }
+                } else {
+                    Label(ws.name, systemImage: "building.2")
+                }
+            }
+        }
+        if shell.isLoadingWorkspaces,
+           shell.personalWorkspace == nil,
+           shell.workspaces.isEmpty {
+            Label("Loading workspaces…", systemImage: "arrow.triangle.2.circlepath")
+                .foregroundStyle(Theme.textMuted)
         }
         Divider()
         Button { showNewWorkspace = true } label: {
             Label("New workspace", systemImage: "plus")
         }
+        Button { showWorkspaceAdmin = true } label: {
+            Label("Workspace Config", systemImage: "gearshape")
+        }
+        .disabled(!canConfigureSelectedWorkspace)
     }
 
     // MARK: Channel + DM list
@@ -148,6 +223,47 @@ struct DrawerView: View {
             return row.channel.displayName.lowercased().contains(q)
                 || row.previewText.lowercased().contains(q)
         }
+    }
+
+    private var workspaceAvatarRevision: String {
+        shell.workspaces
+            .map { "\($0.workspaceId):\($0.avatarUrl ?? "")" }
+            .joined(separator: "|")
+    }
+
+    private var canConfigureSelectedWorkspace: Bool {
+        guard let selected = shell.selectedWorkspace else { return false }
+        return shell.personalWorkspace?.workspaceId != selected.workspaceId
+    }
+
+    private func resolveAvatarURL(_ raw: String?) -> URL? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let absolute = URL(string: raw), absolute.scheme != nil { return absolute }
+        guard let base = app.baseURL,
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return URL(string: raw, relativeTo: components.url)?.absoluteURL
+    }
+
+    private func loadWorkspaceAvatars() async {
+        for workspace in shell.workspaces {
+            guard workspaceAvatarImages[workspace.workspaceId] == nil,
+                  let url = resolveAvatarURL(workspace.avatarUrl),
+                  let (data, response) = try? await URLSession.shared.data(from: url),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let image = UIImage(data: data)
+            else { continue }
+            workspaceAvatarImages[workspace.workspaceId] = image
+        }
+    }
+
+    private func loadUserAvatar() async {
+        guard let profile = try? await app.api?.getMe() else { return }
+        userAvatarURL = resolveAvatarURL(profile.avatarURL)
     }
 
     private var channelList: some View {
@@ -224,95 +340,26 @@ struct DrawerView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: Navigation chips + footer
+}
 
-    private var navChips: some View {
-        HStack(spacing: 7) {
-            navChip(
-                "Activity",
-                systemName: "bell.badge",
-                route: .activity,
-                badge: shell.pendingInvites + shell.pendingApprovals,
-                badgeColor: shell.pendingApprovals > 0 ? Theme.warning : Theme.accent
+/// `searchable` reserves navigation-bar drawer space even while inactive on
+/// some iOS versions. Attach it only for an explicit search session so the
+/// closed drawer stays compact.
+private struct OptionalDrawerSearch: ViewModifier {
+    @Binding var query: String
+    @Binding var isPresented: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isPresented {
+            content.searchable(
+                text: $query,
+                isPresented: $isPresented,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "Search conversations"
             )
-            navChip("Fleet", systemName: "dot.radiowaves.left.and.right", route: .fleet)
-            navChip("Friends", systemName: "person.2", route: .friends)
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 14)
-    }
-
-    private func navChip(_ title: String, systemName: String, route: Route, badge: Int = 0, badgeColor: Color = Theme.accent) -> some View {
-        Button {
-            shell.push(route)
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: systemName).font(.system(size: 13))
-                Text(title).font(.system(size: 11.5, weight: .medium)).lineLimit(1).minimumScaleFactor(0.85)
-            }
-            .foregroundStyle(Theme.textBody)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-            .background(Theme.bgRaised)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(alignment: .topTrailing) {
-                if badge > 0 {
-                    Text(badge > 99 ? "99+" : String(badge))
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 4)
-                        .frame(minWidth: 16, minHeight: 16)
-                        .background(badgeColor)
-                        .clipShape(Capsule())
-                        .offset(x: 4, y: -5)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            Button { shell.push(.settings) } label: {
-                AvatarView(seedId: app.session?.userId ?? "me", name: app.session?.displayName ?? app.session?.username, size: 34)
-            }
-            .buttonStyle(.plain)
-            Button { shell.push(.settings) } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 16))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 40, height: 40)
-                    .background(Theme.bgRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            Spacer()
-            Button { newAsDM = false; showNew = true } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "plus").font(.system(size: 13, weight: .semibold))
-                    Text("New channel").font(.system(size: 14, weight: .semibold))
-                }
-                .foregroundStyle(Theme.bgApp)
-                .padding(.horizontal, 15)
-                .padding(.vertical, 11)
-                .background(Theme.textPrimary)
-                .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .onLongPressGesture { newAsDM = true; showNew = true }
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 9)
-        .padding(.bottom, max(bottomInset, 16))
-        .sheet(isPresented: $showNew) {
-            NewConversationSheet(startAsDM: newAsDM)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showNewWorkspace) {
-            NewWorkspaceSheet()
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
+        } else {
+            content
         }
     }
 }

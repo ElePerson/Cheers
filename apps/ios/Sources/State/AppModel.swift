@@ -390,6 +390,7 @@ final class AppModel {
 
     /// Local sign-out (used on 401 / invalidated token).
     func clearSession() {
+        NavigationCache.removeAll(userId: session?.userId, server: serverURLString)
         socket.disconnect()
         socketConnected = false
         chatModels.removeAll()
@@ -462,6 +463,14 @@ final class AppModel {
     /// 30 s) recovers immediately instead of leaving stale data on screen.
     func reconnectSocketIfNeeded() {
         guard session != nil, !socketConnected else { return }
+        connectSocket()
+    }
+
+    /// iOS may suspend a websocket without delivering a timely close callback.
+    /// Re-open it on foreground even when the last observed flag still says
+    /// connected; desired channel subscriptions are retained and replayed.
+    func resumeRealtimeAfterForeground() {
+        guard session != nil else { return }
         connectSocket()
     }
 

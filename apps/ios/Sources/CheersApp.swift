@@ -41,7 +41,7 @@ struct RootView: View {
             if phase == .active {
                 Task {
                     await app.refreshSessionIfNeeded()
-                    app.reconnectSocketIfNeeded()
+                    app.resumeRealtimeAfterForeground()
                 }
             }
         }
