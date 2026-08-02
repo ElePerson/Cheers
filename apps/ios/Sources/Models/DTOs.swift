@@ -2157,7 +2157,12 @@ enum TraceEventContract {
     }
 
     static func coalesce(_ sources: [TraceEventDto]...) -> [TraceEventDto] {
-        let ordered = sources.flatMap { $0 }.enumerated().sorted { left, right in
+        let ordered = sources.flatMap { $0 }
+            // Thought chunks are ephemeral stream state rather than lifecycle
+            // steps. Older connectors emitted them without a durable traceSeq,
+            // which placed "Thinking…" after prompt_finished on live screens.
+            .filter { $0.phase != "agent_thought_chunk" }
+            .enumerated().sorted { left, right in
             switch (left.element.traceSeq, right.element.traceSeq) {
             case let (lhs?, rhs?) where lhs != rhs: return lhs < rhs
             case (_?, nil): return true
