@@ -239,6 +239,32 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(merged.status, "completed")
     }
 
+    func testTraceCoalescingDropsTransientThoughtChunks() throws {
+        let finished = try traceEvent("""
+        {
+          "id":"finished-1",
+          "msg_id":"message-1",
+          "trace_seq":3,
+          "phase":"prompt_finished",
+          "status":"completed",
+          "created_at":"2026-08-02T09:00:02Z"
+        }
+        """)
+        let thought = try traceEvent("""
+        {
+          "id":"thought-1",
+          "msg_id":"message-1",
+          "producer_seq":2,
+          "phase":"agent_thought_chunk",
+          "status":"running",
+          "created_at":"2026-08-02T09:00:01Z"
+        }
+        """)
+
+        let events = TraceEventContract.coalesce([finished], [thought])
+        XCTAssertEqual(events.map(\.id), ["finished-1"])
+    }
+
     private func permissionRequest(_ json: String) throws -> PermissionRequest {
         let value = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
         return try XCTUnwrap(PermissionRequest(contentData: value))

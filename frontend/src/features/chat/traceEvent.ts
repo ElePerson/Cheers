@@ -140,6 +140,10 @@ export function coalesceTraceEvents(
     .flat()
     .map((event, arrival) => ({ event: normalizeTraceEvent(event), arrival }))
     .filter((item): item is { event: TraceEvent; arrival: number } => !!item.event)
+    // ACP thought chunks are ephemeral stream state, not user-actionable steps.
+    // Old connectors emitted them without a durable trace_seq, which caused the
+    // coalescer to append "Thinking…" after prompt_finished on live screens.
+    .filter((item) => item.event.phase !== "agent_thought_chunk")
     .sort((left, right) => {
       const leftSeq = left.event.trace_seq;
       const rightSeq = right.event.trace_seq;
