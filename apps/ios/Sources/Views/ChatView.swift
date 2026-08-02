@@ -207,7 +207,7 @@ private enum ChatTimelineItem: Identifiable, Hashable {
     case system(MessageDto)
     case bubble(
         MessageDto,
-        traceEvents: [TraceEntryDto],
+        traceEvents: [TraceEventDto],
         isOwn: Bool,
         showAvatar: Bool,
         isLast: Bool,

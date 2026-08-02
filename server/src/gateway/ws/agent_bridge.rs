@@ -1121,6 +1121,31 @@ async fn handle_trace_frame(frame: &Value, state: &AppState, bot: &BotInfo) {
         return;
     }
 
+    // Build the public event once. The same canonical id is persisted and sent
+    // live, so REST replay and WebSocket delivery deduplicate even for phases
+    // (plan/prompt) that have no tool_call_id or request_id.
+    let trace_payload = crate::domain::trace::normalize_event_payload(json!({
+        "msg_id": msg_id,
+        "channel_id": channel_id,
+        "bot_id": bot.bot_id,
+        "task_id": frame.get("task_id").and_then(Value::as_str),
+        "run_id": frame.get("run_id").and_then(Value::as_str),
+        "stream": frame.get("stream").and_then(Value::as_str),
+        "producer_seq": frame.get("seq").and_then(Value::as_u64),
+        "event_id": frame
+            .get("id")
+            .or_else(|| frame.get("event_id"))
+            .and_then(Value::as_str),
+        "tool_call_id": frame.get("tool_call_id").and_then(Value::as_str),
+        "request_id": frame.get("request_id").and_then(Value::as_str),
+        "phase": phase,
+        "status": status,
+        "title": title,
+        "message": frame.get("message").and_then(Value::as_str),
+        "data": frame.get("data"),
+        "created_at": chrono::Utc::now().to_rfc3339(),
+    }));
+
     // Persist the trace durably (best-effort, fire-and-forget — never .await
     // before the live fan-out below, so a slow DB can't backpressure the
     // connector frame loop). The write-time allowlist thins high-frequency rows;
@@ -1134,6 +1159,10 @@ async fn handle_trace_frame(frame: &Value, state: &AppState, bot: &BotInfo) {
         };
         if crate::domain::trace::should_persist(kind, &phase_s) {
             let ev = crate::domain::trace::TraceEvent {
+                id: trace_payload
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
                 msg_id: mid.to_string(),
                 channel_id: channel_id.to_string(),
                 bot_id: Some(bot.bot_id.to_string()),
@@ -1178,28 +1207,7 @@ async fn handle_trace_frame(frame: &Value, state: &AppState, bot: &BotInfo) {
         }
     }
 
-    let wire = WireFrame::channel(
-        channel_id,
-        "bot_trace",
-        json!({
-            "msg_id": msg_id,
-            "channel_id": channel_id,
-            "event_id": frame
-                .get("id")
-                .or_else(|| frame.get("event_id"))
-                .or_else(|| frame.get("tool_call_id"))
-                .or_else(|| frame.get("request_id"))
-                .and_then(Value::as_str),
-            "tool_call_id": frame.get("tool_call_id").and_then(Value::as_str),
-            "request_id": frame.get("request_id").and_then(Value::as_str),
-            "phase": phase,
-            "status": status,
-            "title": title,
-            "message": frame.get("message").and_then(Value::as_str),
-            "data": frame.get("data"),
-            "created_at": chrono::Utc::now().to_rfc3339(),
-        }),
-    );
+    let wire = WireFrame::channel(channel_id, "bot_trace", trace_payload);
     // Live per-subscriber SEE (docs/arch/ACP_EVENT_TAXONOMY.md): the bot's internal
     // activity is gated by SEE(tool_call); approval traces by SEE(permission_request).
     // Members an owner denied SEE for don't receive the live frame.
