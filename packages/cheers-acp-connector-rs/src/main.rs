@@ -11,6 +11,8 @@ mod runtime_adapter;
 mod self_update;
 mod state;
 
+use std::io::IsTerminal;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // The dependency tree enables more than one rustls crypto backend, so rustls
@@ -26,6 +28,10 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| "cce_acp_connector=info,info".into()),
         )
         .with_target(false)
+        // The desktop app redirects the connector's stdout into a log file.
+        // Only emit terminal colour escapes for an actual interactive terminal;
+        // otherwise the raw log is polluted with visible ANSI control codes.
+        .with_ansi(std::io::stdout().is_terminal())
         .init();
 
     cli::run().await

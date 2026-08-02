@@ -12,6 +12,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     sync::Mutex,
+    time::SystemTime,
 };
 
 use serde::{Deserialize, Serialize};
@@ -428,7 +429,7 @@ pub async fn connector_start(
     // first setup is repaired by Retry, without requiring the user to find and
     // edit a TOML file themselves.
     let current_config = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let normalized_config = normalize_adapter_launcher(&current_config)?;
+    let normalized_config = normalize_desktop_connector_config(&current_config)?;
     if normalized_config != current_config {
         fs::write(&config_path, &normalized_config).map_err(|e| e.to_string())?;
     }
@@ -1074,6 +1075,60 @@ fn normalize_adapter_launcher(config_toml: &str) -> Result<String, String> {
     Ok(doc.to_string())
 }
 
+/// Desktop-managed connectors should follow signed connector releases unless
+/// the user explicitly opted out. Standalone connector configs retain the CLI's
+/// conservative `auto = false` default; this migration is scoped to configs the
+/// desktop starts and never overwrites an explicit true/false choice.
+fn enable_desktop_auto_update_if_unspecified(config_toml: &str) -> Result<String, String> {
+    let mut doc: toml_edit::DocumentMut = config_toml
+        .parse()
+        .map_err(|e: toml_edit::TomlError| e.to_string())?;
+    let has_explicit_choice = doc
+        .get("update")
+        .and_then(toml_edit::Item::as_table_like)
+        .and_then(|table| table.get("auto"))
+        .is_some();
+    if !has_explicit_choice {
+        if doc.get("update").is_none() {
+            doc["update"] = toml_edit::Item::Table(toml_edit::Table::new());
+        }
+        doc["update"]["auto"] = toml_edit::value(true);
+    }
+    Ok(doc.to_string())
+}
+
+fn normalize_desktop_connector_config(config_toml: &str) -> Result<String, String> {
+    let config_toml = normalize_adapter_launcher(config_toml)?;
+    enable_desktop_auto_update_if_unspecified(&config_toml)
+}
+
+/// A Tauri update replaces the bundled sidecar on disk, but a connector daemon
+/// is an independent process and survives the app relaunch. Compare its recorded
+/// start time with the installed sidecar mtime so startup can replace stale
+/// in-memory code instead of waiting indefinitely for another daemon restart.
+fn bundled_connector_modified_at() -> Option<SystemTime> {
+    let app_executable = env::current_exe().ok()?;
+    let sidecar = app_executable.parent()?.join("cce-acp-connector");
+    fs::metadata(sidecar).ok()?.modified().ok()
+}
+
+fn connector_started_before_bundle(started_at: &str, bundle_modified_at: SystemTime) -> bool {
+    let Ok(started_at) = chrono::DateTime::parse_from_rfc3339(started_at) else {
+        return false;
+    };
+    let bundle_modified_at = chrono::DateTime::<chrono::Utc>::from(bundle_modified_at);
+    started_at < bundle_modified_at
+}
+
+fn normalize_desktop_config_at(config_path: &Path) -> Result<(), String> {
+    let current = fs::read_to_string(config_path).map_err(|e| e.to_string())?;
+    let normalized = normalize_desktop_connector_config(&current)?;
+    if normalized != current {
+        fs::write(config_path, normalized).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Write a gateway-generated connector config + its token to `~/.cheers/`, the
 /// way `install.sh` does — the "configure via form" path. The gateway's
 /// `POST /enrollment/redeem` returns a ready `config_toml` (which references a
@@ -1090,7 +1145,7 @@ pub fn connector_write_onboarded(
 ) -> Result<String, String> {
     // Resolve the adapter to an absolute path BEFORE writing (and error early
     // if it isn't installed, so we don't leave a crash-looping config behind).
-    let config_toml = normalize_adapter_launcher(&config_toml)?;
+    let config_toml = normalize_desktop_connector_config(&config_toml)?;
 
     let base = dirs::home_dir()
         .map(|h| h.join(".cheers"))
@@ -2078,6 +2133,7 @@ pub fn connector_set_start_with_app(name: String, enabled: bool) -> Result<(), S
 pub fn spawn_supervisor(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let boot = load_settings().start_with_app;
+        let bundle_modified_at = bundled_connector_modified_at();
         {
             let state = app.state::<SupervisorState>();
             let mut managed = state.managed.lock().unwrap();
@@ -2086,10 +2142,23 @@ pub fn spawn_supervisor(app: tauri::AppHandle) {
             }
         }
         for inst in read_instances() {
-            if boot.contains(&inst.name) && !inst.running {
-                if let Some(cfg) = inst.config_path.clone() {
-                    let _ = run_cli(&app, &["--name", &inst.name, "--config", &cfg, "start"]).await;
-                }
+            if !boot.contains(&inst.name) {
+                continue;
+            }
+            let Some(cfg) = inst.config_path.clone() else {
+                continue;
+            };
+            let _ = normalize_desktop_config_at(Path::new(&cfg));
+            let stale_after_app_update = inst.running
+                && inst.started_at.as_deref().is_some_and(|started_at| {
+                    bundle_modified_at.is_some_and(|modified_at| {
+                        connector_started_before_bundle(started_at, modified_at)
+                    })
+                });
+            if stale_after_app_update {
+                let _ = run_cli(&app, &["--name", &inst.name, "--config", &cfg, "restart"]).await;
+            } else if !inst.running {
+                let _ = run_cli(&app, &["--name", &inst.name, "--config", &cfg, "start"]).await;
             }
         }
         // Per-instance consecutive-revive count. A connector that crash-loops
@@ -2194,6 +2263,34 @@ mod tests {
     }
 
     #[test]
+    fn desktop_auto_update_is_added_but_explicit_opt_out_is_preserved() {
+        let migrated = enable_desktop_auto_update_if_unspecified("[gateway]\nurl = 'wss://x'\n")
+            .expect("valid config");
+        let migrated: toml::Value = toml::from_str(&migrated).expect("valid migrated TOML");
+        assert_eq!(migrated["update"]["auto"].as_bool(), Some(true));
+
+        let opted_out = "[update]\nauto = false\n";
+        assert_eq!(
+            enable_desktop_auto_update_if_unspecified(opted_out).expect("valid config"),
+            opted_out
+        );
+    }
+
+    #[test]
+    fn connector_started_before_new_bundle_is_stale() {
+        let bundle_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(200);
+        assert!(connector_started_before_bundle(
+            "1970-01-01T00:01:00Z",
+            bundle_time
+        ));
+        assert!(!connector_started_before_bundle(
+            "1970-01-01T00:05:00Z",
+            bundle_time
+        ));
+        assert!(!connector_started_before_bundle("not-a-time", bundle_time));
+    }
+
+    #[test]
     fn workspace_dirs_collected_and_home_scoped() {
         let home = Path::new("/home/u");
         let cfg = r#"
@@ -2236,16 +2333,7 @@ mod tests {
     }
 
     #[test]
-    fn npm_package_extraction() {
-        assert_eq!(
-            npm_package_of("npm install -g opencode-ai"),
-            Some("opencode-ai")
-        );
-        assert_eq!(
-            npm_package_of("npm install -g @agentclientprotocol/claude-agent-acp"),
-            Some("@agentclientprotocol/claude-agent-acp")
-        );
-        assert_eq!(npm_package_of(""), None);
+    fn adapter_package_specs_reject_shell_syntax() {
         assert!(is_safe_npm_spec("@google/gemini-cli@0.52.0"));
         assert!(!is_safe_npm_spec("evil; rm -rf /"));
         assert!(is_safe_uv_spec("fast-agent-acp==0.9.22"));

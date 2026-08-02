@@ -580,11 +580,10 @@ pub(super) fn describe_session_update(kind: &str, update: &Value) -> Option<Sess
     );
     match kind {
         "tool_call" | "tool_call_update" => describe_tool_call(update, status),
-        "agent_thought_chunk" => Some(SessionUpdateTrace {
-            title: "Thinking…".to_string(),
-            status: "running".to_string(),
-            data: None,
-        }),
+        // Thought chunks are transient streaming state, not lifecycle steps.
+        // Rendering every chunk creates duplicate open-ended "Thinking…" rows
+        // and, unlike durable tool/approval rows, they have no REST trace_seq.
+        "agent_thought_chunk" => None,
         "plan" => Some(describe_plan(update)),
         _ => None,
     }
@@ -1729,6 +1728,15 @@ mod tests {
             trace.data.expect("correlation data")["tool_call_id"],
             "call_2"
         );
+    }
+
+    #[test]
+    fn thought_chunks_are_not_emitted_as_lifecycle_steps() {
+        assert!(describe_session_update(
+            "agent_thought_chunk",
+            &json!({"content": {"type": "text", "text": "working"}})
+        )
+        .is_none());
     }
 
     #[test]

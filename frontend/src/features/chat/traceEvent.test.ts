@@ -108,4 +108,25 @@ describe("TraceEvent v1", () => {
     expect(merged.is_terminal).toBe(true);
     expect(merged.status).toBe("completed");
   });
+
+  it("does not render transient thought chunks as lifecycle steps", () => {
+    const finished = normalizeTraceEvent({
+      id: "finished-1",
+      msg_id: "message-1",
+      trace_seq: 3,
+      phase: "prompt_finished",
+      status: "completed",
+      created_at: "2026-08-02T09:00:02Z",
+    }) as TraceEvent;
+    const thought = normalizeTraceEvent({
+      id: "thought-1",
+      msg_id: "message-1",
+      producer_seq: 2,
+      phase: "agent_thought_chunk",
+      status: "running",
+      created_at: "2026-08-02T09:00:01Z",
+    }) as TraceEvent;
+
+    expect(coalesceTraceEvents([finished], [thought])).toEqual([finished]);
+  });
 });
