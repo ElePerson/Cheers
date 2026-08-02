@@ -284,6 +284,13 @@ pub async fn resolve_permission(
         "denied"
     };
     let actor_id = uid.to_string();
+    let approval_seers = crate::gateway::ws::agent_bridge::allowed_seers(
+        &state,
+        pending.bot_id,
+        channel_id,
+        crate::domain::bot_event_policy::EV_PERMISSION_REQUEST,
+    )
+    .await;
     if let Err(err) = crate::domain::trace::record(
         &state.db,
         crate::domain::trace::TraceEvent {
@@ -308,7 +315,7 @@ pub async fn resolve_permission(
 
     state
         .fanout
-        .broadcast_channel(
+        .broadcast_channel_to_users(
             channel_id,
             crate::gateway::approval_sweeper::approval_trace_wire(
                 channel_id,
@@ -320,6 +327,7 @@ pub async fn resolve_permission(
                 Some(&option_id),
                 Some(&actor_id),
             ),
+            approval_seers.clone(),
         )
         .await;
 
@@ -366,7 +374,10 @@ pub async fn resolve_permission(
             "content_data": content_data,
         }),
     );
-    state.fanout.broadcast_channel(channel_id, wire).await;
+    state
+        .fanout
+        .broadcast_channel_to_users(channel_id, wire, approval_seers)
+        .await;
 
     Ok(Json(
         json!({ "ok": true, "delivered": delivered, "decision": kind }),

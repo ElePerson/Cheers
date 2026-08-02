@@ -16,15 +16,13 @@
 //! [`finalize_expired`] so they behave identically (atomic CAS finalize + audit
 //! + trace + broadcast), and can never write contradictory state for one card.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use sqlx::PgPool;
 
+use crate::app_state::AppState;
 use crate::domain::approval::{self, PendingPermission};
 use crate::domain::trace;
-use crate::gateway::realtime::fanout::Fanout;
 use crate::gateway::realtime::frame::WireFrame;
 use crate::infra::db::models::MESSAGE_SCHEMA_VERSION;
 
@@ -73,8 +71,7 @@ pub(crate) fn approval_trace_wire(
 /// Shared by the connector timeout/cancel path and the TTL sweeper so both
 /// finalizers stay byte-for-byte identical.
 pub(crate) async fn finalize_expired(
-    db: &PgPool,
-    fanout: &Arc<dyn Fanout>,
+    state: &AppState,
     pending: &PendingPermission,
     reason: &str,
 ) -> bool {
@@ -92,7 +89,8 @@ pub(crate) async fn finalize_expired(
         "resolved_at": chrono::Utc::now().to_rfc3339(),
     });
     // Atomic finalize: bail if a human resolve already won (independent task).
-    match approval::patch_content_data_if_unresolved(db, pending.msg_id, patch.clone()).await {
+    match approval::patch_content_data_if_unresolved(&state.db, pending.msg_id, patch.clone()).await
+    {
         Ok(false) => return false, // already resolved by a human — skip everything
         Ok(true) => {}
         Err(e) => {
@@ -102,7 +100,7 @@ pub(crate) async fn finalize_expired(
     }
 
     let _ = approval::record_audit(
-        db,
+        &state.db,
         approval::AuditEvent {
             event_type: "timeout",
             bot_id: Some(pending.bot_id),
@@ -123,7 +121,7 @@ pub(crate) async fn finalize_expired(
         .map(str::to_string)
         .unwrap_or_else(|| pending.msg_id.to_string());
     let _ = trace::record(
-        db,
+        &state.db,
         trace::TraceEvent {
             msg_id: anchor.clone(),
             channel_id: pending.channel_id.to_string(),
@@ -139,8 +137,16 @@ pub(crate) async fn finalize_expired(
     )
     .await;
 
-    fanout
-        .broadcast_channel(
+    let approval_seers = crate::gateway::ws::agent_bridge::allowed_seers(
+        state,
+        pending.bot_id,
+        pending.channel_id,
+        crate::domain::bot_event_policy::EV_PERMISSION_REQUEST,
+    )
+    .await;
+    state
+        .fanout
+        .broadcast_channel_to_users(
             pending.channel_id,
             approval_trace_wire(
                 pending.channel_id,
@@ -152,6 +158,7 @@ pub(crate) async fn finalize_expired(
                 None,
                 None,
             ),
+            approval_seers.clone(),
         )
         .await;
 
@@ -181,14 +188,17 @@ pub(crate) async fn finalize_expired(
             "content_data": content_data,
         }),
     );
-    fanout.broadcast_channel(pending.channel_id, wire).await;
+    state
+        .fanout
+        .broadcast_channel_to_users(pending.channel_id, wire, approval_seers)
+        .await;
     true
 }
 
 /// One sweep: finalize every pending card older than `ttl_secs` as `expired`.
 /// Returns how many cards this pass actually finalized (CAS winners).
-pub async fn sweep_once(db: &PgPool, fanout: &Arc<dyn Fanout>, ttl_secs: u64) -> usize {
-    let expired = match approval::find_expired_pending(db, ttl_secs).await {
+pub async fn sweep_once(state: &AppState, ttl_secs: u64) -> usize {
+    let expired = match approval::find_expired_pending(&state.db, ttl_secs).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!(error = %e, ctx = "approval sweeper: select expired", "sweeper db error");
@@ -198,7 +208,7 @@ pub async fn sweep_once(db: &PgPool, fanout: &Arc<dyn Fanout>, ttl_secs: u64) ->
     let batch = expired.len();
     let mut swept = 0usize;
     for pending in &expired {
-        if finalize_expired(db, fanout, pending, "server_ttl_expired").await {
+        if finalize_expired(state, pending, "server_ttl_expired").await {
             swept += 1;
         }
     }
@@ -223,9 +233,9 @@ pub async fn sweep_once(db: &PgPool, fanout: &Arc<dyn Fanout>, ttl_secs: u64) ->
 /// Start the background sweeper: one sweep at startup (clears cards orphaned
 /// while the process was down), then every `interval_secs`. `interval_secs == 0`
 /// runs only the startup sweep.
-pub fn spawn(db: PgPool, fanout: Arc<dyn Fanout>, interval_secs: u64, ttl_secs: u64) {
+pub fn spawn(state: AppState, interval_secs: u64, ttl_secs: u64) {
     tokio::spawn(async move {
-        sweep_once(&db, &fanout, ttl_secs).await;
+        sweep_once(&state, ttl_secs).await;
 
         if interval_secs == 0 {
             return;
@@ -235,7 +245,7 @@ pub fn spawn(db: PgPool, fanout: Arc<dyn Fanout>, interval_secs: u64, ttl_secs: 
         tick.tick().await; // first tick is immediate — skip (startup sweep done).
         loop {
             tick.tick().await;
-            sweep_once(&db, &fanout, ttl_secs).await;
+            sweep_once(&state, ttl_secs).await;
         }
     });
 }

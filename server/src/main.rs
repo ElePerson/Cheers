@@ -143,8 +143,7 @@ async fn main() -> anyhow::Result<()> {
     // resolved and whose connector died before its own timeout could cancel
     // them, so they don't hang pending forever (no other server-side expiry).
     gateway::approval_sweeper::spawn(
-        state.db.clone(),
-        state.fanout.clone(),
+        state.clone(),
         config.approval_sweep_interval_secs,
         config.approval_card_ttl_secs,
     );
