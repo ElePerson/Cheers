@@ -55,7 +55,7 @@ struct NewConversationSheet: View {
         Form {
             Section {
                 TextField("Channel name", text: $name)
-                    .font(.system(size: 16))
+                    .font(.body)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
@@ -81,7 +81,7 @@ struct NewConversationSheet: View {
                 Section("Workspace") { Text(workspaceName).foregroundStyle(Theme.textSecondary) }
             }
             if let errorText {
-                Text(errorText).font(.system(size: 13)).foregroundStyle(Theme.danger)
+                Text(errorText).font(.subheadline).foregroundStyle(Theme.danger)
             }
         }
     }
@@ -141,7 +141,7 @@ struct NewConversationSheet: View {
                 Text("To DM a person, add them in Friends first.")
             }
             if let errorText {
-                Text(errorText).font(.system(size: 13)).foregroundStyle(Theme.danger)
+                Text(errorText).font(.subheadline).foregroundStyle(Theme.danger)
             }
         }
         .task {
@@ -175,10 +175,10 @@ struct ComingSoon: View {
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 36))
+                .font(.largeTitle)
                 .foregroundStyle(Theme.textFaint)
             Text(text)
-                .font(.system(size: 14))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

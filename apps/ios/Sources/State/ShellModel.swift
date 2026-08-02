@@ -1,6 +1,50 @@
 import Foundation
 import Observation
 
+/// Small user/server-scoped cache for navigation metadata. Message bodies stay
+/// in SwiftData; this cache only prevents the drawer from looking empty while
+/// the authoritative workspace/channel reads are in flight.
+enum NavigationCache {
+    enum Kind: String { case workspaces, conversations }
+
+    static func load<T: Decodable>(
+        _ type: T.Type,
+        kind: Kind,
+        userId: String?,
+        server: String
+    ) -> T? {
+        guard let key = key(kind: kind, userId: userId, server: server),
+              let data = UserDefaults.standard.data(forKey: key)
+        else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    static func save<T: Encodable>(
+        _ value: T,
+        kind: Kind,
+        userId: String?,
+        server: String
+    ) {
+        guard let key = key(kind: kind, userId: userId, server: server),
+              let data = try? JSONEncoder().encode(value)
+        else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    static func removeAll(userId: String?, server: String) {
+        for kind in [Kind.workspaces, .conversations] {
+            guard let key = key(kind: kind, userId: userId, server: server) else { continue }
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    private static func key(kind: Kind, userId: String?, server: String) -> String? {
+        guard let userId, !userId.isEmpty else { return nil }
+        let serverScope = Data(server.utf8).base64EncodedString()
+        return "navigation_cache.v1.\(kind.rawValue).\(userId).\(serverScope)"
+    }
+}
+
 /// Push destinations for the app shell's single NavigationStack. The chat itself
 /// is the ROOT surface (not pushed) — the drawer switches `currentChannel`; these
 /// are the secondary screens the drawer/chat push on top of it.
@@ -11,6 +55,18 @@ enum Route: Hashable {
     case settings
 }
 
+enum AppSection: Hashable {
+    case chats
+    case activity
+    case fleet
+    case friends
+}
+
+enum ChatsRoute: Hashable {
+    case channel(String)
+    case settings
+}
+
 /// Drawer-first navigation state: the open/closed drawer, the selected workspace
 /// filter, the navigation stack, and the workspace list shown in the drawer strip.
 /// The main conversation list stays flat across all workspaces; `selectedWorkspaceId`
@@ -18,17 +74,22 @@ enum Route: Hashable {
 @MainActor
 @Observable
 final class ShellModel {
-    /// Drawer visibility. Toggled by the menu button and edge-swipe gesture.
-    var drawerOpen = false
+    var selectedSection: AppSection = .chats
+    var chatsPath: [ChatsRoute] = []
 
     /// nil = "All" (drawer shows every workspace's channels). Otherwise scopes to one.
-    var selectedWorkspaceId: String?
+    var selectedWorkspaceId: String? {
+        didSet {
+            if let selectedWorkspaceId {
+                UserDefaults.standard.set(selectedWorkspaceId, forKey: Self.selectedWorkspaceKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.selectedWorkspaceKey)
+            }
+        }
+    }
 
     /// The channel shown on the root chat surface (the app's home is a chat, not a list).
     var currentChannel: ChannelDto?
-
-    /// Single NavigationStack path for the whole shell (secondary screens only).
-    var path: [Route] = []
 
     /// Pending-approval count — Activity badge (+ optional menu badge).
     /// Owned by ActivityModel, which writes it as permission requests arrive/resolve.
@@ -39,13 +100,37 @@ final class ShellModel {
     /// Team workspaces (from GET /workspaces) plus the personal workspace, if any.
     private(set) var workspaces: [WorkspaceDto] = []
     private(set) var personalWorkspace: WorkspaceDto?
+    private(set) var isLoadingWorkspaces = false
 
     @ObservationIgnored private weak var app: AppModel?
     @ObservationIgnored private var loadedOnce = false
     @ObservationIgnored private let lastChannelKey = "last_channel_id"
+    @ObservationIgnored private static let selectedWorkspaceKey = "selected_workspace_id"
+    @ObservationIgnored private var restoredCacheScope: String?
+
+    private struct WorkspaceCacheSnapshot: Codable {
+        let workspaces: [WorkspaceDto]
+        let personalWorkspace: WorkspaceDto?
+    }
+
+    init() {
+        selectedWorkspaceId = UserDefaults.standard.string(forKey: Self.selectedWorkspaceKey)
+    }
 
     func attach(_ app: AppModel) {
         self.app = app
+        let scope = "\(app.session?.userId ?? "")|\(app.serverURLString)"
+        guard restoredCacheScope != scope else { return }
+        restoredCacheScope = scope
+        if let cached = NavigationCache.load(
+            WorkspaceCacheSnapshot.self,
+            kind: .workspaces,
+            userId: app.session?.userId,
+            server: app.serverURLString
+        ) {
+            workspaces = cached.workspaces
+            personalWorkspace = cached.personalWorkspace
+        }
     }
 
     /// Pick the root chat on launch: the last-opened channel if still present,
@@ -70,6 +155,9 @@ final class ShellModel {
 
     func loadWorkspaces() async {
         guard let app, let api = app.api else { return }
+        guard !isLoadingWorkspaces else { return }
+        isLoadingWorkspaces = true
+        defer { isLoadingWorkspaces = false }
         do {
             async let teamsTask = api.listWorkspaces()
             async let personalTask = api.personalWorkspace()
@@ -77,6 +165,20 @@ final class ShellModel {
             // Personal workspace is non-fatal (its own endpoint may 404 on some deployments).
             personalWorkspace = try? await personalTask
             loadedOnce = true
+            NavigationCache.save(
+                WorkspaceCacheSnapshot(
+                    workspaces: workspaces,
+                    personalWorkspace: personalWorkspace
+                ),
+                kind: .workspaces,
+                userId: app.session?.userId,
+                server: app.serverURLString
+            )
+            if let selectedWorkspaceId {
+                let stillAvailable = workspaces.contains { $0.workspaceId == selectedWorkspaceId }
+                    || personalWorkspace?.workspaceId == selectedWorkspaceId
+                if !stillAvailable { self.selectedWorkspaceId = nil }
+            }
         } catch let error as APIError {
             if case .unauthorized = error { app.clearSession() }
         } catch {
@@ -86,20 +188,11 @@ final class ShellModel {
 
     // MARK: Navigation helpers
 
-    func openDrawer() {
-        drawerOpen = true
-    }
-
-    func closeDrawer() {
-        drawerOpen = false
-    }
-
     func openChat(_ channel: ChannelDto) {
         currentChannel = channel
         UserDefaults.standard.set(channel.channelId, forKey: lastChannelKey)
-        path = []              // return to the root chat surface
-        drawerOpen = false
-        returnToDrawer = false // committing to a chat ends the drawer session
+        selectedSection = .chats
+        chatsPath = [.channel(channel.channelId)]
     }
 
     /// Adopt an edited channel (rename, purpose, visibility) without leaving it.
@@ -114,13 +207,10 @@ final class ShellModel {
         guard currentChannel?.channelId == channelId else { return }
         currentChannel = nil
         UserDefaults.standard.removeObject(forKey: lastChannelKey)
+        if case .channel(let id) = chatsPath.last, id == channelId {
+            chatsPath.removeLast()
+        }
     }
-
-    /// Whether the current pushed screen was entered FROM the drawer. Back then
-    /// lands the user back IN the open drawer (hub continuity — e.g. Settings →
-    /// back → drawer → Fleet) instead of on the bare chat. Screens entered from
-    /// the chat (⋯ menu) pop back to the chat with no drawer.
-    @ObservationIgnored private var returnToDrawer = false
 
     /// Navigate to a top-level destination. Destinations sit exactly ONE level
     /// deep off the home chat — back (button or edge swipe) always returns
@@ -128,17 +218,17 @@ final class ShellModel {
     /// history: conversation switching is lateral (no back trail), sheets are
     /// modal (swipe down, land where you were).
     func push(_ route: Route) {
-        returnToDrawer = drawerOpen
-        drawerOpen = false
-        path = [route]
-    }
-
-    /// Invoked by the shell when the stack pops back to the root chat: reopens
-    /// the drawer if that's where this navigation started.
-    func handleReturnToRoot() {
-        guard returnToDrawer else { return }
-        returnToDrawer = false
-        drawerOpen = true
+        switch route {
+        case .activity:
+            selectedSection = .activity
+        case .fleet:
+            selectedSection = .fleet
+        case .friends:
+            selectedSection = .friends
+        case .settings:
+            selectedSection = .chats
+            chatsPath = [.settings]
+        }
     }
 
     func selectWorkspace(_ id: String?) {

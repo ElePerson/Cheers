@@ -1184,10 +1184,20 @@ async fn handle_trace_frame(frame: &Value, state: &AppState, bot: &BotInfo) {
         json!({
             "msg_id": msg_id,
             "channel_id": channel_id,
+            "event_id": frame
+                .get("id")
+                .or_else(|| frame.get("event_id"))
+                .or_else(|| frame.get("tool_call_id"))
+                .or_else(|| frame.get("request_id"))
+                .and_then(Value::as_str),
+            "tool_call_id": frame.get("tool_call_id").and_then(Value::as_str),
+            "request_id": frame.get("request_id").and_then(Value::as_str),
             "phase": phase,
             "status": status,
             "title": title,
             "message": frame.get("message").and_then(Value::as_str),
+            "data": frame.get("data"),
+            "created_at": chrono::Utc::now().to_rfc3339(),
         }),
     );
     // Live per-subscriber SEE (docs/arch/ACP_EVENT_TAXONOMY.md): the bot's internal

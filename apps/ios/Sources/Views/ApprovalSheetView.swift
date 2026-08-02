@@ -1,9 +1,63 @@
 import SwiftUI
 
-/// The expanded ACP approval — command block, optional diff, allow-option radios,
-/// and a sticky Deny/Approve footer. Resolving records the decision server-side;
-/// the resolved card re-broadcasts over WS. `delivered=false` surfaces an amber
-/// warning (the agent's connector/session was offline).
+/// Shared native presentation shell for actionable content opened from a channel.
+/// Approval, authentication and future tool details use the same navigation,
+/// dismissal, scrolling and action placement instead of drawing separate cards.
+struct ChannelActionSheet<Content: View, Actions: View>: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let title: LocalizedStringKey
+    let systemImage: String
+    let showsActionBar: Bool
+    @ViewBuilder let content: Content
+    @ViewBuilder let actions: Actions
+
+    init(
+        _ title: LocalizedStringKey,
+        systemImage: String,
+        showsActionBar: Bool = true,
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder actions: () -> Actions
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.showsActionBar = showsActionBar
+        self.content = content()
+        self.actions = actions()
+    }
+
+    var body: some View {
+        NavigationStack {
+            content
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Image(systemName: systemImage)
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close", systemImage: "xmark", role: .cancel) {
+                        dismiss()
+                    }
+                    .labelStyle(.iconOnly)
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if showsActionBar {
+                    actions
+                        .padding(.horizontal)
+                        .padding(.vertical, 12)
+                        .background(.bar)
+                }
+            }
+        }
+    }
+}
+
+/// Native expanded ACP approval. The shared sheet owns the presentation while
+/// this view supplies only approval-specific sections and actions.
 struct ApprovalSheetView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -19,180 +73,119 @@ struct ApprovalSheetView: View {
     @State private var showApprovalConfirm = false
 
     var body: some View {
-        VStack(spacing: 14) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    header
-                    if let command = request.command {
-                        commandBlock(command)
-                    }
-                    if !request.locations.isEmpty {
-                        locationsBlock
-                    }
-                    if let diff = request.diff {
-                        diffBlock(diff)
-                    }
-                    safetyNotice
-                    options
-                    if let errorText {
-                        Text(errorText)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.danger)
-                    }
-                    if undelivered {
-                        Label("Recorded, but not delivered — the agent's connector or session may be offline.",
-                              systemImage: "exclamationmark.triangle")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.warning)
+        ChannelActionSheet("Approval", systemImage: "checkmark.shield") {
+            Form {
+                Section {
+                    LabeledContent("Agent", value: botName)
+                    LabeledContent("Request", value: request.title)
+                }
+
+                if let command = request.command {
+                    Section("Command") {
+                        Text(command)
+                            .font(.system(.callout, design: .monospaced))
+                            .textSelection(.enabled)
                     }
                 }
-                .padding(16)
+
+                if let diff = request.diff {
+                    Section("Changes") {
+                        ScrollView(.horizontal) {
+                            Text(diff)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 220)
+                    }
+                }
+
+                if !request.locations.isEmpty {
+                    Section("Files affected") {
+                        ForEach(request.locations, id: \.self) { path in
+                            Label(path, systemImage: "doc")
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+
+                Section("Permission") {
+                    Picker("Permission", selection: $selectedOptionId) {
+                        ForEach(request.radioOptions) { option in
+                            Text(option.label).tag(Optional(option.optionId))
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.inline)
+                }
+
+                Section {
+                    Label(
+                        "Review carefully. Approval may allow the agent to read, change or delete files, run commands, or contact external services.",
+                        systemImage: "exclamationmark.shield"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(Theme.warning)
+
+                    if let errorText {
+                        Label(errorText, systemImage: "exclamationmark.circle")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.danger)
+                    }
+
+                    if undelivered {
+                        Label(
+                            "Recorded, but not delivered. The agent may be offline.",
+                            systemImage: "wifi.exclamationmark"
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(Theme.warning)
+                    }
+                }
             }
-            footer
+        } actions: {
+            HStack(spacing: 12) {
+                Button("Deny", role: .destructive) {
+                    Task { await resolve(with: denyOptionId) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
+                .disabled(busy)
+
+                Button {
+                    showApprovalConfirm = true
+                } label: {
+                    if busy {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text("Approve")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(busy || selectedOptionId == nil)
+            }
         }
-        .background(Theme.bgSurface)
         .onAppear {
             if selectedOptionId == nil {
                 selectedOptionId = request.radioOptions.first?.optionId
             }
         }
         .confirmationDialog(
-            "Approve this remote-agent request?",
+            "Approve this request?",
             isPresented: $showApprovalConfirm,
             titleVisibility: .visible
         ) {
-            Button("Approve request", role: .destructive) {
+            Button("Approve request") {
                 Task { await resolve(with: selectedOptionId) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Approval may let \(botName) act on the connected computer or service. Confirm that you reviewed the command, files, and diff above.")
+            Text("Confirm that you reviewed the command, files, and changes above.")
         }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
-                Image(systemName: "shield.lefthalf.filled")
-                    .foregroundStyle(Theme.warning)
-                Text("\(botName) requests permission")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-            }
-            Text(request.title)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-        }
-    }
-
-    private func commandBlock(_ command: String) -> some View {
-        Text(command)
-            .font(.system(size: 12.5, design: .monospaced))
-            .foregroundStyle(Theme.textBody)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
-            .padding(12)
-            .background(Theme.bgApp)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private func diffBlock(_ diff: String) -> some View {
-        ScrollView {
-            Text(diff)
-                .font(.system(size: 11.5, design: .monospaced))
-                .foregroundStyle(Theme.textBody)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxHeight: 180)
-        .padding(12)
-        .background(Theme.bgApp)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private var locationsBlock: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Files affected")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.textSecondary)
-            ForEach(request.locations, id: \.self) { path in
-                Label(path, systemImage: "doc")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(Theme.textBody)
-                    .textSelection(.enabled)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Theme.bgApp)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private var options: some View {
-        VStack(spacing: 8) {
-            ForEach(request.radioOptions) { option in
-                Button {
-                    selectedOptionId = option.optionId
-                } label: {
-                    HStack(spacing: 11) {
-                        Image(systemName: selectedOptionId == option.optionId ? "largecircle.fill.circle" : "circle")
-                            .font(.system(size: 20))
-                            .foregroundStyle(selectedOptionId == option.optionId ? Theme.accent : Theme.textFaint)
-                        Text(option.label)
-                            .font(.system(size: 15))
-                            .foregroundStyle(Theme.textBody)
-                        Spacer()
-                    }
-                    .padding(.vertical, 11)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private var safetyNotice: some View {
-        Label(
-            "Review carefully. An approved request may read, change, or delete files, run commands, or contact external services on the connected agent host.",
-            systemImage: "exclamationmark.shield"
-        )
-        .font(.system(size: 12))
-        .foregroundStyle(Theme.warning)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(Theme.warning.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            Button { Task { await resolve(with: denyOptionId) } } label: {
-                Text("Deny")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Theme.bgRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(busy)
-
-            Button { showApprovalConfirm = true } label: {
-                ZStack {
-                    if busy { ProgressView().tint(Theme.bgApp) }
-                    Text("Approve").opacity(busy ? 0 : 1)
-                }
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(Theme.bgApp)
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .background(Theme.textPrimary)
-                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(busy || selectedOptionId == nil)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 28)
     }
 
     private var denyOptionId: String? {
@@ -213,11 +206,13 @@ struct ApprovalSheetView: View {
             if response.delivered {
                 dismiss()
             } else {
-                // Keep the sheet open so the user sees the decision didn't reach the agent.
                 undelivered = true
             }
         } catch let error as APIError {
-            if case .unauthorized = error { app.clearSession(); return }
+            if case .unauthorized = error {
+                app.clearSession()
+                return
+            }
             errorText = error.errorDescription
         } catch {
             errorText = error.localizedDescription

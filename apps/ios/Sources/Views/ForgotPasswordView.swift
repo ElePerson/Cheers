@@ -18,7 +18,7 @@ struct ForgotPasswordView: View {
                 if sent {
                     Section {
                         Text("If \(email) has an account, a reset code has been sent. Enter it on the next screen.")
-                            .font(.system(size: 14))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.textSecondary)
                     }
                     Section {

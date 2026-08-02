@@ -10,6 +10,7 @@ import SwiftUI
 /// `Text` only, never markdown.
 struct ViewBoardSheet: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
     let channelId: String
 
     private enum Board: String, CaseIterable {
@@ -23,24 +24,7 @@ struct ViewBoardSheet: View {
     @State private var pendingSignal: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "rectangle.3.group").foregroundStyle(Theme.accent)
-                Text("ViewBoard")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 10)
-
-            Picker("", selection: $board) {
-                ForEach(Board.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
-
+        NavigationStack {
             Group {
                 switch board {
                 case .plan:     PlanBoardView(channelId: channelId, memberNames: memberNames, refreshTick: refreshTick)
@@ -50,9 +34,25 @@ struct ViewBoardSheet: View {
                 case .activity: ActivityBoardView(channelId: channelId, memberNames: memberNames)
                 }
             }
+            .navigationTitle(board.rawValue)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Picker("Board", selection: $board) {
+                            ForEach(Board.allCases, id: \.self) { value in
+                                Label(value.rawValue, systemImage: icon(for: value)).tag(value)
+                            }
+                        }
+                    } label: {
+                        Label("Choose board", systemImage: icon(for: board))
+                    }
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Theme.bgSurface)
         .task {
             if let api = app.api, memberNames.isEmpty {
                 let members = (try? await api.listMembers(channelId: channelId)) ?? []
@@ -68,6 +68,16 @@ struct ViewBoardSheet: View {
         .onDisappear {
             if let listenerId { app.removeSocketListener(listenerId) }
             pendingSignal?.cancel()
+        }
+    }
+
+    private func icon(for board: Board) -> String {
+        switch board {
+        case .plan: "checklist"
+        case .cost: "dollarsign.circle"
+        case .sessions: "rectangle.stack.person.crop"
+        case .audit: "checkmark.shield"
+        case .activity: "waveform.path.ecg"
         }
     }
 
@@ -94,11 +104,11 @@ private struct BoardState<T> {
 @ViewBuilder
 private func boardStatus(isLoading: Bool, errorText: String?, isEmpty: Bool, emptyIcon: String, emptyText: String) -> some View {
     if isLoading {
-        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 28)
+        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
     } else if let errorText {
-        ComingSoon(icon: "exclamationmark.triangle", text: errorText)
+        ContentUnavailableView("Couldn’t load board", systemImage: "exclamationmark.triangle", description: Text(errorText))
     } else if isEmpty {
-        ComingSoon(icon: emptyIcon, text: emptyText)
+        ContentUnavailableView(emptyText, systemImage: emptyIcon)
     }
 }
 
@@ -130,12 +140,10 @@ private struct PlanBoardView: View {
     var body: some View {
         Group {
             if let plans = state.value, !plans.isEmpty {
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(plans) { planCard($0) }
-                    }
-                    .padding(16)
+                List(plans) { plan in
+                    planCard(plan)
                 }
+                .listStyle(.insetGrouped)
             } else {
                 boardStatus(isLoading: state.isLoading, errorText: state.errorText,
                             isEmpty: true, emptyIcon: "checklist", emptyText: "No plan yet")
@@ -149,32 +157,23 @@ private struct PlanBoardView: View {
             HStack(spacing: 8) {
                 AvatarView(seedId: plan.botId, name: memberNames[plan.botId] ?? "bot", size: 24, monochrome: true)
                 Text(memberNames[plan.botId] ?? "bot")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
                 Text(shortSession(plan.sessionId))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Theme.textMuted)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Text("\(plan.completed)/\(plan.total)")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
             }
             if plan.total > 0 {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Theme.bgRaised)
-                        Capsule().fill(Theme.online)
-                            .frame(width: geo.size.width * CGFloat(plan.completed) / CGFloat(max(plan.total, 1)))
-                    }
-                }
-                .frame(height: 4)
+                ProgressView(value: Double(plan.completed), total: Double(plan.total))
             }
-            entrySection("In progress", plan.entries.filter { $0.status == "in_progress" }, icon: "circle.dotted", color: Theme.warning)
-            entrySection("Pending", plan.entries.filter { $0.status != "in_progress" && $0.status != "completed" }, icon: "circle", color: Theme.textMuted)
-            entrySection("Completed", plan.entries.filter { $0.status == "completed" }, icon: "checkmark.circle.fill", color: Theme.online, struck: true)
+            entrySection("In progress", plan.entries.filter { $0.status == "in_progress" }, icon: "circle.dotted", color: .orange)
+            entrySection("Pending", plan.entries.filter { $0.status != "in_progress" && $0.status != "completed" }, icon: "circle", color: .secondary)
+            entrySection("Completed", plan.entries.filter { $0.status == "completed" }, icon: "checkmark.circle.fill", color: .green, struck: true)
         }
-        .padding(12)
-        .background(Theme.bgRaised.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     @ViewBuilder
@@ -182,17 +181,17 @@ private struct PlanBoardView: View {
         if !entries.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(title) · \(entries.count)")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.textMuted)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 ForEach(entries) { entry in
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: icon)
-                            .font(.system(size: 11))
+                            .font(.caption)
                             .foregroundStyle(color)
                             .padding(.top, 2)
                         Text(entry.content)
-                            .font(.system(size: 13))
-                            .foregroundStyle(struck ? Theme.textMuted : Theme.textPrimary)
+                            .font(.subheadline)
+                            .foregroundStyle(struck ? Color.secondary : Color.primary)
                             .strikethrough(struck)
                     }
                 }
@@ -225,12 +224,10 @@ private struct CostBoardView: View {
     var body: some View {
         Group {
             if let rows = state.value, !rows.isEmpty {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(rows) { usageRow($0) }
-                    }
-                    .padding(.vertical, 6)
+                List(rows) { row in
+                    usageRow(row)
                 }
+                .listStyle(.insetGrouped)
             } else {
                 boardStatus(isLoading: state.isLoading, errorText: state.errorText,
                             isEmpty: true, emptyIcon: "dollarsign.circle", emptyText: "No usage reported yet")
@@ -244,15 +241,15 @@ private struct CostBoardView: View {
             HStack(spacing: 8) {
                 AvatarView(seedId: row.botId, name: memberNames[row.botId] ?? "bot", size: 24, monochrome: true)
                 Text(memberNames[row.botId] ?? "bot")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
                 Text(shortSession(row.sessionId))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Theme.textMuted)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Text(fmtUSD(row.costUsd))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
             }
             HStack(spacing: 14) {
                 metric("In", fmtInt(row.inputTokens))
@@ -261,15 +258,12 @@ private struct CostBoardView: View {
                 metric("Context", fmtInt(row.contextWindow))
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .overlay(alignment: .bottom) { Divider().overlay(Theme.border).padding(.leading, 16) }
     }
 
     private func metric(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.system(size: 10)).foregroundStyle(Theme.textMuted)
-            Text(value).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.textSecondary)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.caption.monospaced()).foregroundStyle(.secondary)
         }
     }
 
@@ -297,16 +291,12 @@ private struct SessionsBoardView: View {
     var body: some View {
         Group {
             if let sessions = state.value, !sessions.isEmpty {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        Text("\(sessions.count) sessions")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textSecondary)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
+                List {
+                    Section("\(sessions.count) sessions") {
                         ForEach(sessions) { sessionRow($0) }
                     }
                 }
+                .listStyle(.insetGrouped)
             } else {
                 boardStatus(isLoading: state.isLoading, errorText: state.errorText,
                             isEmpty: true, emptyIcon: "terminal", emptyText: "No active sessions")
@@ -318,37 +308,34 @@ private struct SessionsBoardView: View {
     private func sessionRow(_ session: SessionBoardRow) -> some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(session.status == "active" ? Theme.online : Theme.textFaint)
+                .fill(session.status == "active" ? Color.green : Color.secondary)
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(session.botName ?? memberNames[session.botId] ?? "bot")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
                     if session.isPrimary {
                         Text("PRIMARY")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(Theme.accent)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.tint)
                             .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
                     }
                     Text(shortSession(session.sessionId))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.textMuted)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
                 }
                 if let cwd = session.workspace?.cwd, !cwd.isEmpty {
                     Text(cwd)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
             }
             Spacer()
         }
-        .padding(.horizontal, 16)
         .frame(minHeight: 48)
-        .overlay(alignment: .bottom) { Divider().overlay(Theme.border).padding(.leading, 34) }
     }
 
     private func load() async {
@@ -376,12 +363,10 @@ private struct ActivityBoardView: View {
     var body: some View {
         Group {
             if let events = state.value, !events.isEmpty {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(events) { activityRow($0) }
-                    }
-                    .padding(.vertical, 4)
+                List(events) { event in
+                    activityRow(event)
                 }
+                .listStyle(.insetGrouped)
             } else {
                 boardStatus(isLoading: state.isLoading, errorText: state.errorText,
                             isEmpty: true, emptyIcon: "waveform.path.ecg", emptyText: "No activity yet")
@@ -399,35 +384,33 @@ private struct ActivityBoardView: View {
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: event.eventType == "message" ? "bubble.left" : "gearshape.2")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textMuted)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                     .frame(width: 22)
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(headline(event))
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
                         .lineLimit(expanded ? nil : 2)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 6) {
                         Text(actorName(event))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Theme.textSecondary)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
                         if let ts = event.createdAt {
                             Text(TimeFormat.listStamp(TimeFormat.parse(ts)))
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.textMuted)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
                 Spacer(minLength: 8)
             }
-            .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .bottom) { Divider().overlay(Theme.border).padding(.leading, 48) }
     }
 
     private func headline(_ event: ActivityBoardEvent) -> String {
@@ -476,18 +459,14 @@ private struct AuditBoardView: View {
             if isLoading {
                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, 28)
             } else if let errorText {
-                ComingSoon(icon: "exclamationmark.triangle", text: errorText)
+                ContentUnavailableView("Couldn’t load approvals", systemImage: "exclamationmark.triangle", description: Text(errorText))
             } else if events.isEmpty {
-                ComingSoon(icon: "checkmark.seal", text: "No approvals recorded yet")
+                ContentUnavailableView("No approvals recorded", systemImage: "checkmark.seal")
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(events) { event in
-                            auditRow(event)
-                            Divider().overlay(Theme.border).padding(.leading, 44)
-                        }
-                    }
+                List(events) { event in
+                    auditRow(event)
                 }
+                .listStyle(.insetGrouped)
             }
         }
         .task { await load() }
@@ -514,8 +493,12 @@ private struct AuditBoardView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     // WHAT: the concrete command or path, never the generic title.
                     Text(event.subject ?? event.outcomeLabel)
-                        .font(.system(size: 14, weight: .medium, design: event.subject == nil ? .default : .monospaced))
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(
+                            event.subject == nil
+                                ? .subheadline.weight(.medium)
+                                : .subheadline.weight(.medium).monospaced()
+                        )
+                        .foregroundStyle(.primary)
                         .lineLimit(2)
                         .truncationMode(.middle)
                         .multilineTextAlignment(.leading)
@@ -523,28 +506,26 @@ private struct AuditBoardView: View {
                         // WHO asked.
                         if let bot = event.botId {
                             Text(memberNames[bot] ?? "bot")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Theme.textSecondary)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(Theme.bgRaised, in: Capsule())
                         }
                         // RESULT.
                         Text(event.outcomeLabel)
-                            .font(.system(size: 12))
+                            .font(.caption)
                             .foregroundStyle(auditTone(event.outcome))
                     }
                 }
                 Spacer(minLength: 8)
                 if let ts = event.createdAt {
                     Text(TimeFormat.listStamp(TimeFormat.parse(ts)))
-                        .font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.textFaint)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .frame(minHeight: 56)
             .contentShape(Rectangle())
@@ -583,37 +564,20 @@ private struct AuditDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Text("Approval detail")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Text(event.outcomeLabel)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(auditTone(event.outcome))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(auditTone(event.outcome).opacity(0.12), in: Capsule())
-            }
-            .padding(16)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if let subject = event.subject {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Request")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Theme.textMuted)
-                            Text(subject)
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundStyle(Theme.textPrimary)
-                                .textSelection(.enabled)
-                                .padding(10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Theme.bgRaised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }
-                        .padding(16)
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("Result", value: event.outcomeLabel)
+                        .foregroundStyle(auditTone(event.outcome))
+                }
+                if let subject = event.subject {
+                    Section("Request") {
+                        Text(subject)
+                            .font(.body.monospaced())
+                            .textSelection(.enabled)
                     }
+                }
+                Section("Details") {
                     row("Requested by", memberNames[event.botId ?? ""] ?? event.botId)
                     row("Decided by", memberNames[event.actorId ?? ""] ?? event.actorId)
                     row("Decision", event.decision)
@@ -625,28 +589,25 @@ private struct AuditDetailSheet: View {
                     row("Request id", event.requestId)
                 }
             }
+            .navigationTitle("Approval detail")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Theme.bgSurface)
     }
 
     @ViewBuilder
     private func row(_ label: String, _ value: String?) -> some View {
         if let value, !value.isEmpty {
-            VStack(spacing: 0) {
-                HStack(alignment: .top, spacing: 12) {
-                    Text(label)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 108, alignment: .leading)
-                    Text(value)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textPrimary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+            LabeledContent {
+                Text(value)
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.trailing)
+            } label: {
+                Text(label)
             }
         }
     }

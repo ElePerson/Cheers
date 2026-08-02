@@ -39,6 +39,36 @@ private struct VoiceTranscriptPayload: Decodable {
     let data: VoiceTranscriptSegment
 }
 
+struct BotTracePayload: Decodable, Hashable {
+    let msgId: String
+    let eventId: String?
+    let toolCallId: String?
+    let requestId: String?
+    let phase: String
+    let status: String?
+    let title: String?
+    let message: String?
+    let data: JSONValue?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case msgId = "msg_id"
+        case eventId = "event_id"
+        case toolCallId = "tool_call_id"
+        case requestId = "request_id"
+        case phase, status, title, message, data
+        case createdAt = "created_at"
+    }
+}
+
+private struct MemberUpdatedPayload: Decodable {
+    let memberId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case memberId = "member_id"
+    }
+}
+
 /// Events surfaced to the app layer, always on the main actor.
 enum SocketEvent {
     case connected
@@ -48,6 +78,8 @@ enum SocketEvent {
     case messageStream(channelId: String, msgId: String, delta: String)
     case messageDone(channelId: String, MessageDto)
     case messageDeleted(channelId: String, msgId: String)
+    case botTrace(channelId: String, BotTracePayload)
+    case memberUpdated(channelId: String, memberId: String?)
     case presence(channelId: String, PresencePayload)
     case voiceTranscript(channelId: String, VoiceTranscriptSegment)
     /// A data-free "this board changed" tick; consumers re-pull through their own
@@ -405,6 +437,16 @@ final class ChatSocket: NSObject {
                let payload = try? JSONDecoder().decode(DataEnvelope<DeletedPayload>.self, from: data) {
                 onEvent?(.messageDeleted(channelId: channelId, msgId: payload.data.msgId))
             }
+        case "bot_trace":
+            if let channelId = head.channelId,
+               let payload = try? JSONDecoder().decode(DataEnvelope<BotTracePayload>.self, from: data) {
+                onEvent?(.botTrace(channelId: channelId, payload.data))
+            }
+        case "member_updated":
+            if let channelId = head.channelId,
+               let payload = try? JSONDecoder().decode(DataEnvelope<MemberUpdatedPayload>.self, from: data) {
+                onEvent?(.memberUpdated(channelId: channelId, memberId: payload.data.memberId))
+            }
         case "presence":
             if let channelId = head.channelId,
                let payload = try? JSONDecoder().decode(DataEnvelope<PresencePayload>.self, from: data) {
@@ -432,7 +474,7 @@ final class ChatSocket: NSObject {
             }
 
         default:
-            // bot_trace / workspace_signal / file_transcribed — not needed yet.
+            // workspace_signal / file_transcribed — not consumed by the native chat yet.
             break
         }
     }

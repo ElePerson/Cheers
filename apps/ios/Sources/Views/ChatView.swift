@@ -71,6 +71,133 @@ enum ChannelPanel: String, Identifiable {
     }
 }
 
+private struct ChannelMessageSearchSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let channel: ChannelDto
+    let members: [ChannelMemberDto]
+    let api: APIClient?
+    let onSelect: (MessageDto) -> Void
+
+    @State private var query = ""
+    @State private var results: [MessageDto] = []
+    @State private var isSearching = false
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ContentUnavailableView(
+                        "Search messages",
+                        systemImage: "magnifyingglass",
+                        description: Text("Search the full history of #\(channel.displayName).")
+                    )
+                } else if isSearching && results.isEmpty {
+                    ProgressView("Searching…")
+                } else if let errorText, results.isEmpty {
+                    ContentUnavailableView(
+                        "Search unavailable",
+                        systemImage: "exclamationmark.magnifyingglass",
+                        description: Text(errorText)
+                    )
+                } else if results.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                } else {
+                    List(results) { message in
+                        Button {
+                            onSelect(message)
+                            dismiss()
+                        } label: {
+                            searchResultRow(message)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Search")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, prompt: "Search in #\(channel.displayName)")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .task(id: query) {
+            await search()
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func searchResultRow(_ message: MessageDto) -> some View {
+        let member = members.first { $0.memberId == message.senderId }
+        return HStack(alignment: .top, spacing: 12) {
+            AvatarView(
+                seedId: message.senderId ?? message.msgId,
+                name: message.senderName,
+                size: 36,
+                monochrome: true,
+                imageURL: member?.avatarUrl.flatMap(URL.init(string:))
+            )
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(message.senderName ?? member?.name ?? "Unknown")
+                        .font(.headline)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    if let date = message.createdDate {
+                        Text(date, format: .dateTime.month(.abbreviated).day().hour().minute())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(message.content)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .lineLimit(3)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func search() async {
+        let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            results = []
+            errorText = nil
+            isSearching = false
+            return
+        }
+
+        do {
+            try await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            isSearching = true
+            errorText = nil
+            guard let api else {
+                results = []
+                errorText = "Connect to Cheers before searching."
+                isSearching = false
+                return
+            }
+            let response = try await api.searchMessages(channelId: channel.channelId, query: value)
+            guard !Task.isCancelled else { return }
+            results = Array(response.messages.reversed())
+            isSearching = false
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            results = []
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            isSearching = false
+        }
+    }
+}
+
 /// Immutable presentation records consumed by the UIKit timeline. Identity is
 /// stable by message id; equality includes the rendered content so the
 /// diffable data source reconfigures only rows that actually changed.
@@ -80,8 +207,8 @@ private enum ChatTimelineItem: Identifiable, Hashable {
     case system(MessageDto)
     case bubble(
         MessageDto,
+        traceEvents: [TraceEntryDto],
         isOwn: Bool,
-        showName: Bool,
         showAvatar: Bool,
         isLast: Bool,
         formattedTime: String,
@@ -100,8 +227,6 @@ private enum ChatTimelineItem: Identifiable, Hashable {
 
 struct ChatView: View {
     @Environment(AppModel.self) private var app
-    @Environment(ShellModel.self) private var shell
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model: ChatModel
     @State private var panel: ChannelPanel?
     @State private var forwardMessage: MessageDto?
@@ -111,6 +236,7 @@ struct ChatView: View {
     @State private var showFileImporter = false
     @State private var showChannelFiles = false
     @State private var showResourceContext = false
+    @State private var showMessageSearch = false
     @State private var isUploading = false
     @State private var uploadTask: Task<Void, Never>?
     @State private var uploadingFilename: String?
@@ -124,6 +250,8 @@ struct ChatView: View {
     /// Whether the message list is parked at the bottom (drives auto-follow).
     @State private var atBottom = true
     @State private var manualBottomTick = 0
+    @State private var jumpTargetId: String?
+    @State private var jumpTargetTick = 0
     private let listModel: ConversationListModel?
 
     /// `model` comes from AppModel.chatModels so history survives channel
@@ -145,49 +273,24 @@ struct ChatView: View {
             }
             messageScroll
             TaskClaimsPanelView(model: model)
-            if let reply = model.replyTo {
-                replyBar(reply)
-            }
-            if let error = model.errorMessage {
-                errorBanner(error)
-            }
-            pendingAttachmentBar
-            ComposerView(
-                initialText: model.composerText,
-                clearTick: model.composerClearTick,
-                placeholder: composerPlaceholder,
-                isSending: model.isSending,
-                streamingCount: model.streamingMessageIds.count,
-                onSend: { draft in await model.send(draft: draft) },
-                onStopStreaming: { await model.stopAllTurns() },
-                channelId: model.channel.channelId,
-                api: app.api,
-                onChooseSession: { showSessionSheet = true },
-                onModelSettings: { showModelSheet = true },
-                onUploadFile: { showFileImporter = true },
-                onBrowseFiles: { showChannelFiles = true },
-                onAddContext: { showResourceContext = true },
-                mentionPool: model.mentionPool,
-                onMentionPicked: { candidate in
-                    if !model.pickedMentions.contains(candidate) {
-                        model.pickedMentions.append(candidate)
-                    }
-                }
-            )
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            composerDock
         }
         .background(Theme.bgApp)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                CircleIconButton(systemName: "line.3.horizontal", badge: shell.pendingApprovals + shell.pendingInvites) {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { shell.openDrawer() }
-                }
-            }
             ToolbarItem(placement: .principal) {
                 header
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    showMessageSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .accessibilityLabel("Search messages")
                 moreMenu
             }
         }
@@ -202,6 +305,7 @@ struct ChatView: View {
             await model.loadInitial()
         }
         .onChange(of: model.messages) { rebuildMessageItems() }
+        .onChange(of: model.traceRevision) { rebuildMessageItems() }
         .onChange(of: app.session?.userId) { rebuildMessageItems() }
         .onAppear { rebuildMessageItems() }
         .onDisappear {
@@ -227,7 +331,7 @@ struct ChatView: View {
                 case .settings:  ChannelSettingsSheet(channel: model.channel)
                 }
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
         .sheet(item: $forwardMessage) { message in
@@ -262,6 +366,14 @@ struct ChatView: View {
                 channelId: model.channel.channelId,
                 reply: model.replyTo,
                 onAdd: { model.addContext($0) }
+            )
+        }
+        .sheet(isPresented: $showMessageSearch) {
+            ChannelMessageSearchSheet(
+                channel: model.channel,
+                members: model.channelMembers,
+                api: app.api,
+                onSelect: jumpToSearchResult
             )
         }
         .fileImporter(
@@ -308,6 +420,38 @@ struct ChatView: View {
             Button("Cancel", role: .cancel) { blockTarget = nil }
         } message: {
             Text("Blocking removes any friendship and prevents direct messages in either direction.")
+        }
+    }
+
+    private var composerDock: some View {
+        VStack(spacing: 0) {
+            if let reply = model.replyTo {
+                replyBar(reply)
+            }
+            if let error = model.errorMessage {
+                errorBanner(error)
+            }
+            pendingAttachmentBar
+            ComposerView(
+                initialText: model.composerText,
+                clearTick: model.composerClearTick,
+                placeholder: composerPlaceholder,
+                isSending: model.isSending,
+                onSend: { draft in await model.send(draft: draft) },
+                channelId: model.channel.channelId,
+                api: app.api,
+                onChooseSession: { showSessionSheet = true },
+                onModelSettings: { showModelSheet = true },
+                onUploadFile: { showFileImporter = true },
+                onBrowseFiles: { showChannelFiles = true },
+                onAddContext: { showResourceContext = true },
+                mentionPool: model.mentionPool,
+                onMentionPicked: { candidate in
+                    if !model.pickedMentions.contains(candidate) {
+                        model.pickedMentions.append(candidate)
+                    }
+                }
+            )
         }
     }
 
@@ -407,14 +551,14 @@ struct ChatView: View {
     private func replyBar(_ reply: MessageDto) -> some View {
         HStack(spacing: 9) {
             Image(systemName: "arrowshape.turn.up.left")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.link)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Replying to \(reply.senderName ?? (reply.isBot ? "Bot" : "message"))")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text(reply.content.replacingOccurrences(of: "\n", with: " "))
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
             }
@@ -423,7 +567,7 @@ struct ChatView: View {
                 model.replyTo = nil
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textSecondary)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
@@ -445,17 +589,17 @@ struct ChatView: View {
             HStack(spacing: 5) {
                 if !model.channel.isDM {
                     Image(systemName: "number")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textSecondary)
                 }
                 Text(model.channel.displayName)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
             }
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
             }
@@ -490,8 +634,9 @@ struct ChatView: View {
                 }
             }
         } label: {
-            NativeCircleButtonLabel(systemName: "ellipsis")
+            Image(systemName: "ellipsis")
         }
+        .accessibilityLabel("Channel options")
     }
 
     // MARK: Message list
@@ -505,6 +650,9 @@ struct ChatView: View {
             isLoadingOlder: model.isLoadingOlder,
             followBottomTick: model.followBottomTick,
             forceBottomTick: model.forceBottomTick + manualBottomTick,
+            scrollTargetId: jumpTargetId,
+            scrollTargetTick: jumpTargetTick,
+            highlightedMessageId: jumpTargetId,
             atBottom: $atBottom,
             onLoadOlder: { Task { await model.loadOlder() } },
             onReply: { model.replyTo = $0 },
@@ -526,6 +674,18 @@ struct ChatView: View {
         }
     }
 
+    private func jumpToSearchResult(_ message: MessageDto) {
+        Task {
+            await model.loadAround(message)
+            jumpTargetId = message.msgId
+            jumpTargetTick += 1
+            try? await Task.sleep(for: .seconds(1.6))
+            guard jumpTargetId == message.msgId else { return }
+            jumpTargetId = nil
+            jumpTargetTick += 1
+        }
+    }
+
     /// Escape hatch once auto-follow is suppressed: one tap back to live.
     private var jumpToLatestButton: some View {
         Button {
@@ -536,7 +696,7 @@ struct ChatView: View {
             }
         } label: {
             Image(systemName: "arrow.down")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: 44, height: 44)          // HIG minimum tap target
                 .background(.regularMaterial, in: Circle())
@@ -552,7 +712,7 @@ struct ChatView: View {
     private func errorBanner(_ text: String) -> some View {
         HStack {
             Text(text)
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(Theme.danger)
                 .lineLimit(2)
             Spacer()
@@ -560,7 +720,7 @@ struct ChatView: View {
                 model.errorMessage = nil
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textMuted)
                     .frame(width: Theme.hitMin, height: Theme.hitMin)
                     .contentShape(Rectangle())
@@ -589,14 +749,20 @@ struct ChatView: View {
         messages visible: [MessageDto],
         currentUserId: String?
     ) -> [ChatTimelineItem] {
-        // Approval cards stay in the stream in both states: pending renders an
-        // actionable card, resolved shrinks to a quiet trace line (ApprovalCardView).
+        // Only actionable approvals belong in the main conversation. Completed,
+        // denied and expired results remain available in the agent trace/audit.
         var result: [ChatTimelineItem] = []
         result.reserveCapacity(visible.count + 8)
         var previousDay: Date?
         let messagesById = Dictionary(uniqueKeysWithValues: visible.map { ($0.msgId, $0) })
+        let displayMessages = visible.filter { message in
+            guard message.msgType == "permission" else { return true }
+            let resolved = PermissionRequest(contentData: message.contentData)?.resolved == true
+                || message.contentData?["resolved"]?.boolValue == true
+            return !resolved
+        }
 
-        for (index, message) in visible.enumerated() {
+        for (index, message) in displayMessages.enumerated() {
             let day = message.createdDate
             if let day, !TimeFormat.sameDay(day, previousDay) {
                 result.append(.day(label: TimeFormat.dayLabel(day), key: message.msgId))
@@ -622,15 +788,15 @@ struct ChatView: View {
                     && TimeFormat.sameDay(other.createdDate, message.createdDate)
             }
 
-            let prev = index > 0 ? visible[index - 1] : nil
-            let next = index + 1 < visible.count ? visible[index + 1] : nil
+            let prev = index > 0 ? displayMessages[index - 1] : nil
+            let next = index + 1 < displayMessages.count ? displayMessages[index + 1] : nil
             let isFirstInGroup = !groupable(prev)
             let isLastInGroup = !groupable(next)
 
             result.append(.bubble(
                 message,
+                traceEvents: model.traceEvents(for: message.msgId),
                 isOwn: isOwn,
-                showName: !isOwn && !model.channel.isDM && isFirstInGroup,
                 showAvatar: !isOwn && isFirstInGroup,   // web parity: avatar on the FIRST of a run, top-aligned
                 isLast: isLastInGroup,
                 formattedTime: TimeFormat.time(message.createdDate),
@@ -677,6 +843,9 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
     let isLoadingOlder: Bool
     let followBottomTick: Int
     let forceBottomTick: Int
+    let scrollTargetId: String?
+    let scrollTargetTick: Int
+    let highlightedMessageId: String?
     @Binding var atBottom: Bool
     let onLoadOlder: () -> Void
     let onReply: (MessageDto) -> Void
@@ -718,18 +887,27 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
         private var itemHashes: [String: Int] = [:]
         private var lastFollowTick: Int
         private var lastForceTick: Int
+        private var lastScrollTargetTick: Int
+        private var lastHighlightedMessageId: String?
         private var hasAppliedInitialSnapshot = false
 
         init(parent: ChatCollectionTimeline) {
             self.parent = parent
             lastFollowTick = parent.followBottomTick
             lastForceTick = parent.forceBottomTick
+            lastScrollTargetTick = parent.scrollTargetTick
+            lastHighlightedMessageId = parent.highlightedMessageId
         }
 
         private lazy var registration = UICollectionView.CellRegistration<UICollectionViewCell, String> {
             [weak self] cell, _, itemId in
             guard let self, let item = self.itemsById[itemId] else { return }
-            cell.backgroundConfiguration = UIBackgroundConfiguration.clear()
+            var background = UIBackgroundConfiguration.clear()
+            if self.parent.highlightedMessageId == itemId {
+                background.backgroundColor = UIColor.tintColor.withAlphaComponent(0.12)
+                background.cornerRadius = 14
+            }
+            cell.backgroundConfiguration = background
             cell.contentConfiguration = UIHostingConfiguration {
                 ChatTimelineRow(
                     item: item,
@@ -771,8 +949,12 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
             let oldOffsetY = collectionView.contentOffset.y
             let forceBottom = parent.forceBottomTick != lastForceTick
             let followBottom = parent.followBottomTick != lastFollowTick && wasAtBottom
+            let scrollTargetChanged = parent.scrollTargetTick != lastScrollTargetTick
+            let previousHighlightId = lastHighlightedMessageId
             lastForceTick = parent.forceBottomTick
             lastFollowTick = parent.followBottomTick
+            lastScrollTargetTick = parent.scrollTargetTick
+            lastHighlightedMessageId = parent.highlightedMessageId
             self.parent = parent
 
             var newItemsById: [String: ChatTimelineItem] = [:]
@@ -794,14 +976,20 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
 
             // Binding updates such as crossing the bottom threshold re-enter
             // updateUIView. They must not re-apply an identical snapshot.
-            guard contentChanged || forceBottom || followBottom || !hasAppliedInitialSnapshot else { return }
+            guard contentChanged || forceBottom || followBottom || scrollTargetChanged || !hasAppliedInitialSnapshot else { return }
             let interval = timelinePerformanceSignposter.beginInterval("ApplyTimelineSnapshot")
 
             var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
             snapshot.appendSections([0])
             snapshot.appendItems(newIdentifiers, toSection: 0)
             let existingIds = Set(oldIdentifiers)
-            let reconfigurable = changedIds.filter { existingIds.contains($0) && newItemsById[$0] != nil }
+            var reconfigurable = changedIds.filter { existingIds.contains($0) && newItemsById[$0] != nil }
+            if scrollTargetChanged {
+                for id in [previousHighlightId, parent.highlightedMessageId].compactMap({ $0 })
+                    where existingIds.contains(id) && newItemsById[id] != nil && !reconfigurable.contains(id) {
+                    reconfigurable.append(id)
+                }
+            }
             if !reconfigurable.isEmpty {
                 snapshot.reconfigureItems(reconfigurable)
             }
@@ -823,6 +1011,11 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
                     )
                 } else if forceBottom || followBottom || !self.hasAppliedInitialSnapshot {
                     self.scrollToBottom(collectionView, animated: false)
+                }
+                if scrollTargetChanged,
+                   let targetId = parent.scrollTargetId,
+                   let indexPath = self.dataSource?.indexPath(for: targetId) {
+                    collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
                 }
                 self.hasAppliedInitialSnapshot = true
                 self.publishBottomState(collectionView)
@@ -891,12 +1084,11 @@ private struct ChatTimelineRow: View {
             } else {
                 SystemMessageView(message: message)
             }
-        case .bubble(let message, let isOwn, let showName, let showAvatar, let isLast, let time, let repliedTo):
+        case .bubble(let message, let traceEvents, let isOwn, let showAvatar, let isLast, let time, let repliedTo):
             VStack(alignment: isOwn ? .trailing : .leading, spacing: 0) {
                 MessageBubbleView(
                     message: message,
                     isOwn: isOwn,
-                    showSenderName: showName,
                     showAvatar: showAvatar,
                     isLastInGroup: isLast,
                     formattedTime: time,
@@ -905,28 +1097,19 @@ private struct ChatTimelineRow: View {
                     onForward: { onForward(message) },
                     onTapFile: onFile,
                     onReport: { onReport(message) },
-                    onBlock: { onBlock(message) }
+                    onBlock: { onBlock(message) },
+                    onStop: message.isPartial == true ? { onStop(message) } : nil
                 )
-                if message.isBot, message.isPartial == true {
-                    Button { onStop(message) } label: {
-                        Label("Stop", systemImage: "stop.fill")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
-                    .controlSize(.small)
-                    .tint(Theme.danger)
-                    .padding(.leading, 58)
-                    .padding(.top, 3)
-                    .accessibilityHint("Stops this response and any bot-to-bot chain it started")
-                }
-                // Lazy durable timeline — toggle only; fetch on first expand.
-                if message.isBot, message.isPartial != true {
-                    BotTracePanelView(channelId: channelId, msgId: message.msgId)
-                        .padding(.leading, showAvatar || isOwn ? 48 : 48)
-                        .padding(.trailing, 12)
-                        .padding(.top, 2)
-                        .padding(.bottom, 4)
+                if message.isBot {
+                    BotTracePanelView(
+                        channelId: channelId,
+                        msgId: message.msgId,
+                        liveEvents: traceEvents,
+                        isRunning: message.isPartial == true
+                    )
+                    .padding(.horizontal, Theme.space5)
+                    .padding(.top, Theme.space1)
+                    .padding(.bottom, message.isPartial == true ? 0 : 4)
                 }
                 if message.msgType == "task_claim_confirmation" {
                     TaskClaimConfirmationFooter(message: message, channelId: channelId)
@@ -991,18 +1174,18 @@ private struct ForwardSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Forward to")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.body.weight(.semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .padding(16)
             Text(message.content.replacingOccurrences(of: "\n", with: " "))
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
             if let errorText {
                 Text(errorText)
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(Theme.danger)
                     .padding(.horizontal, 16)
             }
@@ -1013,7 +1196,7 @@ private struct ForwardSheet: View {
                             HStack(spacing: 11) {
                                 ChannelAvatarView(channel: row.channel, size: 34)
                                 Text(row.channel.displayName)
-                                    .font(.system(size: 15))
+                                    .font(.subheadline)
                                     .foregroundStyle(Theme.textBody)
                                     .lineLimit(1)
                                 Spacer()
@@ -1221,16 +1404,16 @@ private struct FilePreviewSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                    Text(title).font(.body.weight(.semibold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
                     if let bytes = file.sizeBytes {
                         Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
-                            .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
                 Spacer()
                 if let shareURL {
                     ShareLink(item: shareURL) {
-                        Image(systemName: "square.and.arrow.up").font(.system(size: 17))
+                        Image(systemName: "square.and.arrow.up").font(.body)
                     }
                 }
             }
@@ -1257,12 +1440,12 @@ private struct FilePreviewSheet: View {
             .background(Theme.bgApp)
         } else {
             VStack(spacing: 14) {
-                Image(systemName: "doc.fill").font(.system(size: 44)).foregroundStyle(Theme.textFaint)
-                Text("Preview not available for this type").font(.system(size: 14)).foregroundStyle(Theme.textSecondary)
+                Image(systemName: "doc.fill").font(.largeTitle).foregroundStyle(Theme.textFaint)
+                Text("Preview not available for this type").font(.subheadline).foregroundStyle(Theme.textSecondary)
                 if let shareURL {
                     ShareLink(item: shareURL) {
                         Label("Save / Share", systemImage: "square.and.arrow.up")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 18).frame(minHeight: 44)
                             .background(Theme.accent)
@@ -1320,7 +1503,7 @@ private struct SessionSheet: View {
                     Section(bot.name) {
                         let sessions = sessionsByBot[bot.memberId] ?? []
                         if sessions.isEmpty {
-                            Text("No sessions").font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                            Text("No sessions").font(.subheadline).foregroundStyle(Theme.textSecondary)
                         }
                         ForEach(sessions) { s in
                             HStack {
@@ -1329,8 +1512,8 @@ private struct SessionSheet: View {
                                 } label: {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(s.tag + (s.isPrimary == true ? " · primary" : ""))
-                                            .font(.system(size: 15)).foregroundStyle(Theme.textBody)
-                                        Text(sessionSubtitle(s)).font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                                            .font(.subheadline).foregroundStyle(Theme.textBody)
+                                        Text(sessionSubtitle(s)).font(.caption).foregroundStyle(Theme.textSecondary)
                                     }
                                 }
                                 Spacer()
@@ -1384,9 +1567,9 @@ private struct SessionSheet: View {
         Button(action: action) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 15)).foregroundStyle(Theme.textBody)
+                    Text(title).font(.subheadline).foregroundStyle(Theme.textBody)
                     if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle).font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                        Text(subtitle).font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
                 Spacer()
@@ -1476,7 +1659,7 @@ private struct ModelSettingsSheet: View {
                     }
                 }
                 if let errorText {
-                    Text(errorText).font(.system(size: 13)).foregroundStyle(Theme.danger)
+                    Text(errorText).font(.subheadline).foregroundStyle(Theme.danger)
                 }
             }
             .navigationTitle("Model & settings")
@@ -1512,7 +1695,7 @@ private struct ModelSettingsSheet: View {
         }
         if !hasSession {
             Text("No active session — start one to change settings.")
-                .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                .font(.caption).foregroundStyle(Theme.textSecondary)
         }
     }
 

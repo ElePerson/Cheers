@@ -80,12 +80,12 @@ struct LoginView: View {
                 .accessibilityHidden(true)
 
             Text("Cheers")
-                .font(.system(size: 24, weight: .bold))
+                .font(.title2.weight(.bold))
                 .tracking(-0.4)
                 .foregroundStyle(Theme.textPrimary)
 
             Text(factorChallenge == nil ? "Sign in to your workspace" : "Two-factor verification")
-                .font(.system(size: 13))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textMuted)
         }
     }
@@ -108,7 +108,7 @@ struct LoginView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Password")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.textSecondary)
                 SecureField("••••••••", text: $password)
                     .textContentType(.password)
@@ -127,7 +127,7 @@ struct LoginView: View {
 
             if let errorText {
                 Text(errorText)
-                    .font(.system(size: 13))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -140,7 +140,7 @@ struct LoginView: View {
                             .tint(.white)
                     }
                     Text(isBusy ? "Signing in…" : "Sign in")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.subheadline.weight(.medium))
                 }
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: Theme.hitMin)
@@ -156,7 +156,7 @@ struct LoginView: View {
                 showingForgotPassword = true
             } label: {
                 Text("Forgot password?")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.subheadline.weight(.medium))
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .frame(minHeight: Theme.hitMin)
                     .contentShape(Rectangle())
@@ -167,7 +167,7 @@ struct LoginView: View {
 
             // Spacing-first grouping between password auth and OAuth — no decorative hairlines.
             Text("or")
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(Theme.textMuted)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Theme.space2)
@@ -197,9 +197,9 @@ struct LoginView: View {
                 Button(action: submitGoogle) {
                     HStack(spacing: 8) {
                         Image(systemName: "g.circle.fill")
-                            .font(.system(size: 18))
+                            .font(.title3)
                         Text("Continue with Google")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.subheadline.weight(.medium))
                     }
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: 48)
@@ -236,7 +236,7 @@ struct LoginView: View {
                 showingRegistration = true
             } label: {
                 Text("New to Cheers? Create an account")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.subheadline.weight(.medium))
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.plain)
@@ -291,13 +291,13 @@ struct LoginView: View {
     private var factorCard: some View {
         VStack(spacing: 14) {
             Text(factorHelpText)
-                .font(.system(size: 13))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Verification code")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.textSecondary)
                 TextField(factorPlaceholder, text: $factorCode)
                     .textContentType(.oneTimeCode)
@@ -319,7 +319,7 @@ struct LoginView: View {
 
             if let errorText {
                 Text(errorText)
-                    .font(.system(size: 13))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -332,7 +332,7 @@ struct LoginView: View {
                             .tint(.white)
                     }
                     Text(isBusy ? "Verifying…" : "Verify")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.subheadline.weight(.medium))
                 }
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: Theme.hitMin)
@@ -350,7 +350,7 @@ struct LoginView: View {
                             : (emailHint.map { "Send code to \($0)" } ?? "Send email code"),
                         systemImage: "envelope"
                     )
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.subheadline.weight(.medium))
                     .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.plain)
@@ -361,7 +361,7 @@ struct LoginView: View {
             if factorChallenge?.allowedFactors.contains("passkey") == true {
                 Button(action: submitPasskey) {
                     Label(isBusy ? "Waiting for Passkey…" : "Use Passkey", systemImage: "person.badge.key.fill")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.subheadline.weight(.medium))
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.plain)
@@ -376,7 +376,7 @@ struct LoginView: View {
                 emailSent = false
                 errorText = nil
             }
-            .font(.system(size: 14, weight: .medium))
+            .font(.subheadline.weight(.medium))
             .foregroundStyle(Theme.accentHover)
             .frame(maxWidth: .infinity, minHeight: 44)
             .buttonStyle(.plain)
@@ -423,7 +423,7 @@ struct LoginView: View {
     private func field(_ label: String, text: Binding<String>, placeholder: String, field: Field) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
-                .font(.system(size: 12, weight: .medium))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.textSecondary)
             TextField(placeholder, text: text)
                 .textInputAutocapitalization(.never)
@@ -457,7 +457,7 @@ struct LoginView: View {
             Link("Privacy Policy", destination: AppModel.privacyPolicyURL)
             Link("Support", destination: AppModel.supportURL)
         }
-        .font(.system(size: 13))
+        .font(.subheadline)
         .foregroundStyle(Theme.textMuted)
         .multilineTextAlignment(.center)
     }

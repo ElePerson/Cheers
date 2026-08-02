@@ -11,7 +11,6 @@ struct CheersApp: App {
             RootView()
                 .environment(appModel)
                 .environment(shellModel)
-                .tint(Theme.accent)
         }
     }
 }
@@ -41,7 +40,7 @@ struct RootView: View {
             if phase == .active {
                 Task {
                     await app.refreshSessionIfNeeded()
-                    app.reconnectSocketIfNeeded()
+                    app.resumeRealtimeAfterForeground()
                 }
             }
         }

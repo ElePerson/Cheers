@@ -58,7 +58,7 @@ struct BotOnboardingView: View {
                     stepper
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 13))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.danger)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -118,13 +118,13 @@ struct BotOnboardingView: View {
             ForEach(Array(labels.enumerated()), id: \.offset) { i, label in
                 HStack(spacing: 5) {
                     Text("\(i + 1)")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(i <= index ? .white : Theme.textSecondary)
                         .frame(width: 19, height: 19)
                         .background(i <= index ? Theme.accent : Theme.bgRaised)
                         .clipShape(Circle())
                     Text(label)
-                        .font(.system(size: 12))
+                        .font(.caption)
                         .foregroundStyle(i <= index ? Theme.textPrimary : Theme.textSecondary)
                 }
                 if i < labels.count - 1 {
@@ -167,7 +167,7 @@ struct BotOnboardingView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("AGENT")
-                    .font(.system(size: 11, weight: .bold)).tracking(0.6)
+                    .font(.caption.weight(.bold)).tracking(0.6)
                     .foregroundStyle(Theme.textSecondary)
                 card {
                     VStack(alignment: .leading, spacing: 8) {
@@ -180,7 +180,7 @@ struct BotOnboardingView: View {
                         Text(pickExisting
                              ? "Chosen when this bot was created. It decides which program the machine needs to run."
                              : "That machine will need \(agentType.adapterHint) installed.")
-                            .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
             }
@@ -219,7 +219,7 @@ struct BotOnboardingView: View {
     private var modeStep: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Connecting @\(bot?.username ?? username.trimmingCharacters(in: .whitespaces)). Pick how the connector gets onto the agent's machine.")
-                .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                .font(.subheadline).foregroundStyle(Theme.textSecondary)
 
             modeCard(
                 .script,
@@ -251,7 +251,7 @@ struct BotOnboardingView: View {
         } label: {
             HStack(alignment: .top, spacing: 11) {
                 Image(systemName: icon)
-                    .font(.system(size: 16))
+                    .font(.body)
                     .foregroundStyle(Theme.accent)
                     .frame(width: 34, height: 34)
                     .background(Theme.botBadgeBg)
@@ -259,11 +259,11 @@ struct BotOnboardingView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(title)
-                            .font(.system(size: 14.5, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.textPrimary)
                         if let badge {
                             Text(badge)
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.caption2.weight(.bold))
                                 .foregroundStyle(Theme.botBadgeText)
                                 .padding(.horizontal, 5).padding(.vertical, 1.5)
                                 .background(Theme.botBadgeBg)
@@ -271,7 +271,7 @@ struct BotOnboardingView: View {
                         }
                     }
                     Text(desc)
-                        .font(.system(size: 12.5))
+                        .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)
@@ -341,7 +341,7 @@ struct BotOnboardingView: View {
     private func scriptPanel(_ bot: BotDto) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Open Cheers on the machine that will run the agent, go to Settings → Connector → I have a code, and scan or type this.")
-                .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                .font(.subheadline).foregroundStyle(Theme.textSecondary)
 
             if let code {
                 card {
@@ -357,24 +357,24 @@ struct BotOnboardingView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
                         }
                         Text(code.code)
-                            .font(.system(size: 12.5, design: .monospaced))
+                            .font(.caption.monospaced())
                             .foregroundStyle(Theme.textBody)
                             .multilineTextAlignment(.center)
                             .textSelection(.enabled)
                         if let ttl = code.ttlSecs {
                             Text("Single-use, expires in about \(max(1, ttl / 60)) min.")
-                                .font(.system(size: 12)).foregroundStyle(Theme.textMuted)
+                                .font(.caption).foregroundStyle(Theme.textMuted)
                         }
                         HStack(spacing: 10) {
                             ShareLink(item: code.code) {
                                 Label("Share", systemImage: "square.and.arrow.up")
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.subheadline.weight(.medium))
                             }
                             Button {
                                 UIPasteboard.general.string = code.code
                             } label: {
                                 Label("Copy", systemImage: "doc.on.doc")
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.subheadline.weight(.medium))
                             }
                         }
                     }
@@ -404,13 +404,13 @@ struct BotOnboardingView: View {
     private func agentPanel(_ bot: BotDto) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Paste this to an agent already running on the target machine. It installs the connector as a background service — otherwise @\(bot.username ?? bot.name) goes offline the moment that agent's turn ends.")
-                .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                .font(.subheadline).foregroundStyle(Theme.textSecondary)
 
             if let guidanceError {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(guidanceError).font(.system(size: 12.5)).foregroundStyle(Theme.danger)
+                    Text(guidanceError).font(.caption).foregroundStyle(Theme.danger)
                     Button("Try again") { Task { await loadGuidance() } }
-                        .font(.system(size: 13))
+                        .font(.subheadline)
                 }
             }
 
@@ -421,19 +421,19 @@ struct BotOnboardingView: View {
                 card {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(prompt)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.caption.monospaced())
                             .foregroundStyle(Theme.textBody)
                             .textSelection(.enabled)
                         HStack(spacing: 10) {
                             ShareLink(item: prompt) {
                                 Label("Share", systemImage: "square.and.arrow.up")
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.subheadline.weight(.medium))
                             }
                             Button {
                                 UIPasteboard.general.string = prompt
                             } label: {
                                 Label("Copy", systemImage: "doc.on.doc")
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.subheadline.weight(.medium))
                             }
                         }
                     }
@@ -457,23 +457,23 @@ struct BotOnboardingView: View {
     private func manualPanel(_ bot: BotDto) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Two pieces: a settings file (safe to keep) and a token — that one is a password, so save it where only you can read it.")
-                .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                .font(.subheadline).foregroundStyle(Theme.textSecondary)
 
             if let config {
                 card {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Save as ~/.cheers/cheers-daemon.\(config.accountId).toml")
-                            .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
                         HStack(spacing: 10) {
                             ShareLink(item: config.configToml) {
                                 Label("Share config", systemImage: "square.and.arrow.up")
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.subheadline.weight(.medium))
                             }
                             Button {
                                 UIPasteboard.general.string = config.configToml
                             } label: {
                                 Label("Copy", systemImage: "doc.on.doc")
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.subheadline.weight(.medium))
                             }
                         }
                     }
@@ -485,18 +485,18 @@ struct BotOnboardingView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Shown once. Issuing again replaces it and kicks any connector already using the old one.",
                               systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 12)).foregroundStyle(Theme.warning)
+                            .font(.caption).foregroundStyle(Theme.warning)
                         Text(token.token)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.caption.monospaced())
                             .foregroundStyle(Theme.textBody)
                             .textSelection(.enabled)
                         Text("Write to ~/.cheers/\(config.tokenFile ?? "secrets/\(config.accountId).token")")
-                            .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
                         Button {
                             UIPasteboard.general.string = token.token
                         } label: {
                             Label("Copy token", systemImage: "doc.on.doc")
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.subheadline.weight(.medium))
                         }
                     }
                 }
@@ -580,18 +580,18 @@ struct BotOnboardingView: View {
 
     private func field(_ label: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+            Text(label).font(.caption).foregroundStyle(Theme.textSecondary)
             TextField(placeholder, text: text)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .font(.system(size: 15))
+                .font(.subheadline)
         }
     }
 
     private func backButton(_ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label("Back", systemImage: "chevron.left")
-                .font(.system(size: 13))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textSecondary)
         }
         .buttonStyle(.plain)
@@ -602,7 +602,7 @@ struct BotOnboardingView: View {
             "This server has no public address configured yet, so a connector on another machine may not be able to reach it. Ask whoever runs the server to set one.",
             systemImage: "exclamationmark.triangle.fill"
         )
-        .font(.system(size: 12))
+        .font(.caption)
         .foregroundStyle(Theme.warning)
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -644,7 +644,7 @@ private struct ConnectionWatch: View {
             }
             Spacer(minLength: 0)
         }
-        .font(.system(size: 12.5))
+        .font(.caption)
         .foregroundStyle(online == true ? Theme.online : Theme.textSecondary)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

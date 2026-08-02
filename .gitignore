@@ -51,6 +51,8 @@ frontend/.env.local
 *.swp
 *.swo
 .DS_Store
+xcuserdata/
+*.xcuserstate
 .claude/scheduled_tasks.lock
 
 # 测试与覆盖率

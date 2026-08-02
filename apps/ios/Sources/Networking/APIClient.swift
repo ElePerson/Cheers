@@ -121,6 +121,10 @@ struct APIClient: Sendable {
         let response: URLResponse
         do {
             (data, response) = try await Self.session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
         } catch {
             Self.logger.error(
                 "HTTP \(request.httpMethod ?? "-", privacy: .public) \(request.url?.path ?? "-", privacy: .public) transport failure: \(error.localizedDescription, privacy: .public)"
@@ -777,6 +781,7 @@ struct APIClient: Sendable {
     func listMessages(
         channelId: String,
         before: String? = nil,
+        after: String? = nil,
         sinceSeq: Int64? = nil,
         limit: Int = 50
     ) async throws -> ListMessagesResponse {
@@ -784,8 +789,27 @@ struct APIClient: Sendable {
         if let before {
             query.append(URLQueryItem(name: "before", value: before))
         }
+        if let after {
+            query.append(URLQueryItem(name: "after", value: after))
+        }
         if let sinceSeq {
             query.append(URLQueryItem(name: "since_seq", value: String(sinceSeq)))
+        }
+        return try await getJSON("/channels/\(channelId)/messages", query: query, as: ListMessagesResponse.self)
+    }
+
+    func searchMessages(
+        channelId: String,
+        query searchQuery: String,
+        before: String? = nil,
+        limit: Int = 50
+    ) async throws -> ListMessagesResponse {
+        var query = [
+            URLQueryItem(name: "query", value: searchQuery),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        if let before {
+            query.append(URLQueryItem(name: "before", value: before))
         }
         return try await getJSON("/channels/\(channelId)/messages", query: query, as: ListMessagesResponse.self)
     }
@@ -975,6 +999,50 @@ struct APIClient: Sendable {
         if let root { query.append(URLQueryItem(name: "root", value: root)) }
         return try await getJSON(
             "/channels/\(channelId)/workspace/git/diff", query: query, as: RemoteGitDiff.self
+        )
+    }
+
+    func remoteGitLog(
+        channelId: String, botId: String, root: String? = nil,
+        limit: Int = 50, skip: Int = 0
+    ) async throws -> RemoteGitLog {
+        var query = [
+            URLQueryItem(name: "bot_id", value: botId),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "skip", value: String(skip)),
+        ]
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        return try await getJSON(
+            "/channels/\(channelId)/workspace/git/log", query: query, as: RemoteGitLog.self
+        )
+    }
+
+    func remoteGitCommitFiles(
+        channelId: String, botId: String, commit: String, root: String? = nil
+    ) async throws -> RemoteGitCommitFiles {
+        var query = [
+            URLQueryItem(name: "bot_id", value: botId),
+            URLQueryItem(name: "commit", value: commit),
+        ]
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        return try await getJSON(
+            "/channels/\(channelId)/workspace/git/commit-files", query: query,
+            as: RemoteGitCommitFiles.self
+        )
+    }
+
+    func remoteGitShow(
+        channelId: String, botId: String, commit: String, path: String? = nil,
+        root: String? = nil
+    ) async throws -> RemoteGitShow {
+        var query = [
+            URLQueryItem(name: "bot_id", value: botId),
+            URLQueryItem(name: "commit", value: commit),
+        ]
+        if let path { query.append(URLQueryItem(name: "path", value: path)) }
+        if let root { query.append(URLQueryItem(name: "root", value: root)) }
+        return try await getJSON(
+            "/channels/\(channelId)/workspace/git/show", query: query, as: RemoteGitShow.self
         )
     }
 
