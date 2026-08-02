@@ -2521,9 +2521,16 @@ impl RuntimeContext {
         // Keep the tool-call detail before it scrolls past: the permission request
         // that follows carries only a delta and would otherwise render an approval
         // card with no title, no diff and no path. See `tool_call_snapshots`.
-        if matches!(kind, "tool_call" | "tool_call_update") {
-            run.lock().await.remember_tool_call(&update);
-        }
+        let trace_update = if matches!(kind, "tool_call" | "tool_call_update") {
+            let mut guard = run.lock().await;
+            guard.remember_tool_call(&update);
+            tool_call_id_from_update(&update)
+                .and_then(|id| guard.tool_call_snapshot(id))
+                .cloned()
+                .unwrap_or_else(|| update.clone())
+        } else {
+            update.clone()
+        };
 
         // Generic complete-stream passthrough (docs/arch/ACP_EVENT_TAXONOMY.md):
         // forward every NON-streaming session/update to the gateway verbatim so
@@ -2587,7 +2594,7 @@ impl RuntimeContext {
                 title,
                 status,
                 data,
-            }) = describe_session_update(kind, &update)
+            }) = describe_session_update(kind, &trace_update)
             {
                 // Structure the trace from the ACP update's OWN fields. tool_call /
                 // tool_call_update carry `title` ("ls -la …"), `kind` and `status`
@@ -2955,7 +2962,7 @@ impl ActiveRun {
     /// `tool_call_update` is a delta: merge its fields over what we already have so
     /// a later status-only update can't erase the title/content we need.
     fn remember_tool_call(&mut self, update: &Value) {
-        let Some(id) = update.get("toolCallId").and_then(Value::as_str) else {
+        let Some(id) = tool_call_id_from_update(update) else {
             return;
         };
         if let Some(existing) = self

@@ -20,7 +20,47 @@ struct BotTracePanelView: View {
     @State private var errorText: String?
 
     private var displayedEvents: [TraceEntryDto] {
-        durableEvents ?? liveEvents
+        coalescedEvents(durableEvents ?? liveEvents)
+    }
+
+    /// The trace table is append-only for auditability, but the activity sheet
+    /// presents one step per correlated operation. Fold tool deltas by
+    /// `tool_call_id` and approval lifecycle rows by `request_id`, retaining the
+    /// descriptive fields from the opening event when a terminal delta omits them.
+    private func coalescedEvents(_ events: [TraceEntryDto]) -> [TraceEntryDto] {
+        var result: [TraceEntryDto] = []
+        var indexes: [String: Int] = [:]
+
+        for event in events.sorted(by: { $0.traceSeq < $1.traceSeq }) {
+            // REST and the live socket can contain the same persisted row. Use
+            // its durable id as a fallback key so merging both sources does not
+            // duplicate lifecycle-independent events.
+            let key = event.operationKey ?? "event:\(event.id)"
+            guard let index = indexes[key] else {
+                indexes[key] = result.count
+                result.append(event)
+                continue
+            }
+
+            let opening = result[index]
+            var merged = event
+            merged.id = opening.id
+            merged.traceSeq = opening.traceSeq
+            merged.title = event.title ?? opening.title
+            merged.message = event.message ?? opening.message
+            if let openingData = opening.data, let terminalData = event.data {
+                merged.data = openingData.merging(withNewer: terminalData)
+            } else {
+                merged.data = event.data ?? opening.data
+            }
+            merged.requestId = event.requestId ?? opening.requestId
+            merged.approvalKind = event.approvalKind ?? opening.approvalKind
+            merged.decision = event.decision ?? opening.decision
+            merged.optionId = event.optionId ?? opening.optionId
+            merged.actorId = event.actorId ?? opening.actorId
+            result[index] = merged
+        }
+        return result
     }
 
     var body: some View {
@@ -63,8 +103,12 @@ struct BotTracePanelView: View {
                 .task { await loadDurableTrace() }
             }
             .onChange(of: liveEvents) { _, latest in
-                // While running, live socket data is newer than any durable read.
-                if isRunning { durableEvents = latest }
+                // A terminal socket delta can be less descriptive than the
+                // opening row returned by REST. Merge both sources through the
+                // same lifecycle fold instead of replacing the durable rows.
+                if isRunning {
+                    durableEvents = coalescedEvents((durableEvents ?? []) + latest)
+                }
             }
         }
     }
@@ -105,9 +149,9 @@ struct BotTracePanelView: View {
         defer { loading = false }
         do {
             let fetched = try await api.fetchMessageTrace(channelId: channelId, msgId: msgId)
-            if !isRunning || fetched.count >= liveEvents.count {
-                durableEvents = fetched
-            }
+            durableEvents = isRunning
+                ? coalescedEvents(fetched + liveEvents)
+                : fetched
         } catch {
             errorText = String(localized: "Failed to load activity.")
             if durableEvents == nil, !liveEvents.isEmpty { durableEvents = liveEvents }
@@ -390,6 +434,16 @@ private enum TraceCategory {
 }
 
 private extension TraceEntryDto {
+    var operationKey: String? {
+        if let requestId = requestId?.nilIfEmpty {
+            return "approval:\(requestId)"
+        }
+        if let toolCallId = data?.firstString("tool_call_id", "toolCallId")?.nilIfEmpty {
+            return "tool:\(toolCallId)"
+        }
+        return nil
+    }
+
     var category: TraceCategory {
         if kind == "approval" || phase == "approval" { return .approval }
         if status == "failed" || phase.contains("failed") { return .failure }
@@ -465,6 +519,26 @@ private extension TraceEntryDto {
 }
 
 private extension JSONValue {
+    /// Merge an append-only lifecycle delta over an earlier payload. Object keys
+    /// from the terminal event win recursively, while omitted (or explicitly
+    /// null) keys keep the richer opening-event detail such as tool input/diff.
+    func merging(withNewer newer: JSONValue) -> JSONValue {
+        if case .null = newer { return self }
+        guard case .object(let oldObject) = self,
+              case .object(let newObject) = newer
+        else { return newer }
+
+        var result = oldObject
+        for (key, value) in newObject {
+            if let oldValue = result[key] {
+                result[key] = oldValue.merging(withNewer: value)
+            } else if value != .null {
+                result[key] = value
+            }
+        }
+        return .object(result)
+    }
+
     var prettyPrinted: String {
         guard let encoded = try? JSONEncoder().encode(self),
               let object = try? JSONSerialization.jsonObject(with: encoded),

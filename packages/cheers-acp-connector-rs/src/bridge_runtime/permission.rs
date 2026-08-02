@@ -59,7 +59,7 @@ impl RuntimeContext {
                 self.trace_with_data(
                     &run,
                     "approval",
-                    "running",
+                    "approved",
                     "Auto-allowed ACP tool permission (local policy)",
                     None,
                     Some(
@@ -176,6 +176,14 @@ impl RuntimeContext {
                 if let Some(pending) = pending {
                     let _ = pending.respond_to.send(PermissionOutcome::Cancelled);
                 }
+                let _ = self
+                    .io
+                    .send_data(DataOutbound::PermissionCancel {
+                        v: BRIDGE_PROTOCOL_VERSION,
+                        request_id: request_id.clone(),
+                        reason: "bridge_rejected".to_string(),
+                    })
+                    .await;
                 tracing::warn!(
                     account = %self.account_id,
                     request_id = %request_id,
@@ -192,6 +200,14 @@ impl RuntimeContext {
                 if let Some(pending) = pending {
                     let _ = pending.respond_to.send(PermissionOutcome::Cancelled);
                 }
+                let _ = self
+                    .io
+                    .send_data(DataOutbound::PermissionCancel {
+                        v: BRIDGE_PROTOCOL_VERSION,
+                        request_id: request_id.clone(),
+                        reason: "bridge_ack_failed".to_string(),
+                    })
+                    .await;
                 tracing::warn!(
                     account = %self.account_id,
                     request_id = %request_id,

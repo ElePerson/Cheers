@@ -469,6 +469,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn completed_trace_frames_are_terminal_but_progress_is_droppable() {
+        let channel_id = Uuid::new_v4();
+        let completed = WireFrame::channel(
+            channel_id,
+            "bot_trace",
+            json!({"status": "completed", "tool_call_id": "call_1"}),
+        );
+        let approved = WireFrame::channel(
+            channel_id,
+            "bot_trace",
+            json!({"status": "approved", "request_id": "request_1"}),
+        );
+        let running = WireFrame::channel(
+            channel_id,
+            "bot_trace",
+            json!({"status": "in_progress", "tool_call_id": "call_1"}),
+        );
+        assert!(is_terminal_frame(&completed));
+        assert!(is_terminal_frame(&approved));
+        assert!(!is_terminal_frame(&running));
+    }
+
     /// 工作台帧线格式：`{type:"resource_req", req_id, resource, params}` 必须
     /// 反序列化进 `ClientFrame::ResourceReq`（serde tag/rename 接线正确）。
     #[test]
