@@ -670,7 +670,7 @@ struct ChangePasswordResponse: Decodable {
 
 // MARK: - Workspaces (server/src/api/workspaces.rs)
 
-struct WorkspaceDto: Decodable, Identifiable, Hashable {
+struct WorkspaceDto: Codable, Identifiable, Hashable {
     let workspaceId: String
     let name: String
     let avatarUrl: String?
@@ -730,7 +730,7 @@ struct AuthSessionSummary: Decodable, Identifiable, Hashable {
 
 // MARK: - Channels (server/src/api/channels.rs)
 
-struct ChannelDto: Decodable, Identifiable, Hashable {
+struct ChannelDto: Codable, Identifiable, Hashable {
     let channelId: String
     let workspaceId: String?
     let name: String
@@ -2004,6 +2004,43 @@ struct RemoteGitStatusEntry: Decodable, Identifiable, Hashable {
 
 struct RemoteGitDiff: Decodable { let diff: String; let staged: Bool }
 
+struct RemoteGitLog: Decodable {
+    let commits: [RemoteGitCommit]
+    let skip: Int
+    let limit: Int
+}
+
+struct RemoteGitCommit: Decodable, Identifiable, Hashable {
+    let hash: String
+    let author: String
+    let date: String
+    let subject: String
+    var id: String { hash }
+}
+
+struct RemoteGitCommitFiles: Decodable {
+    let commit: String
+    let files: [RemoteGitCommitFile]
+}
+
+struct RemoteGitCommitFile: Decodable, Identifiable, Hashable {
+    let status: String
+    let path: String
+    let oldPath: String?
+    var id: String { "\(status):\(oldPath ?? ""): \(path)" }
+
+    enum CodingKeys: String, CodingKey {
+        case status, path
+        case oldPath = "old_path"
+    }
+}
+
+struct RemoteGitShow: Decodable {
+    let commit: String
+    let path: String?
+    let diff: String
+}
+
 // MARK: - Durable agent-trace timeline (docs/arch/TRACE_PERSISTENCE.md)
 
 /// One persisted step of a bot turn (`message_traces`), including interleaved
@@ -2017,6 +2054,7 @@ struct TraceEntryDto: Codable, Identifiable, Hashable {
     var status: String?
     var title: String?
     var message: String?
+    var data: JSONValue?
     var requestId: String?
     var approvalKind: String?
     var decision: String?
@@ -2025,7 +2063,7 @@ struct TraceEntryDto: Codable, Identifiable, Hashable {
     var createdAt: String
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, phase, status, title, message, decision
+        case id, kind, phase, status, title, message, data, decision
         case msgId = "msg_id"
         case traceSeq = "trace_seq"
         case requestId = "request_id"

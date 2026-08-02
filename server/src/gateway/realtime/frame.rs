@@ -81,6 +81,21 @@ impl WireFrame {
     /// 终态帧：先落 PG 再广播，承诺不丢（I6）。背压时不静默丢弃，
     /// 而是关闭连接让客户端走 REST 补齐。其余（message_stream 等）可丢。
     pub fn is_terminal(&self) -> bool {
+        if self.frame_type == "bot_trace" {
+            return matches!(
+                self.data.get("status").and_then(Value::as_str),
+                Some(
+                    "completed"
+                        | "approved"
+                        | "denied"
+                        | "failed"
+                        | "cancelled"
+                        | "refused"
+                        | "truncated"
+                        | "max_turn_requests"
+                )
+            );
+        }
         matches!(
             self.frame_type.as_str(),
             "message"

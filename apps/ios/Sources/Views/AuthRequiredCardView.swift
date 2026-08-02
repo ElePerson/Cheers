@@ -1,12 +1,10 @@
 import SwiftUI
 
-/// Inline ACP agent re-auth card (`msg_type: auth_required`).
-/// Owner taps "I've signed in" after completing login on the connector host.
+/// Compact channel entry for ACP re-authentication. Detailed content and all
+/// actions live in the shared native channel sheet.
 struct AuthRequiredCardView: View {
     let message: MessageDto
-    @Environment(AppModel.self) private var app
-    @State private var busy: String?
-    @State private var errorMessage: String?
+    @State private var showSheet = false
 
     private var request: AuthRequiredRequest? {
         AuthRequiredRequest(contentData: message.contentData)
@@ -14,11 +12,6 @@ struct AuthRequiredCardView: View {
 
     private var botName: String {
         message.senderName ?? "Agent"
-    }
-
-    private var isOwner: Bool {
-        guard let owner = request?.botOwnerId, let me = app.session?.userId else { return false }
-        return owner == me
     }
 
     var body: some View {
@@ -35,77 +28,37 @@ struct AuthRequiredCardView: View {
 
     private func pendingCard(_ request: AuthRequiredRequest) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "key.fill")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Theme.warning)
-                Text("\(botName) needs sign-in")
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-            }
-            Text(request.title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.textBody)
-            Text(request.description)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
-            if let methodId = request.methodId {
-                Text(methodId)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Theme.textMuted)
-            }
-            if let link = request.link, let url = URL(string: link) {
-                Link("Open login page", destination: url)
-                    .font(.system(size: 12, weight: .medium))
-            }
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.danger)
-            }
-            if isOwner {
-                HStack(spacing: 8) {
-                    Button {
-                        Task { await ack("retry") }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if busy == "retry" { ProgressView().controlSize(.mini) }
-                            Text("I've signed in")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .foregroundStyle(.white)
-                        .background(Theme.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(busy != nil)
+            Label("\(botName) needs sign-in", systemImage: "person.badge.key")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
 
-                    Button {
-                        Task { await ack("cancel") }
-                    } label: {
-                        Text("Cancel")
-                            .font(.system(size: 13, weight: .medium))
-                            .frame(minHeight: 44)
-                            .padding(.horizontal, 14)
-                            .foregroundStyle(Theme.textSecondary)
-                            .background(Theme.bgRaised)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(busy != nil)
-                }
-            } else {
-                Text("Waiting for the bot owner to finish agent authentication.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textMuted)
+            HStack {
+                Text(request.title)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                Spacer()
+                Button("Review", systemImage: "chevron.right") { showSheet = true }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
             }
         }
         .padding(12)
+        .frame(maxWidth: 320, alignment: .leading)
         .background(Theme.bgSurface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.space5)
         .padding(.vertical, 6)
+        .sheet(isPresented: $showSheet) {
+            AuthRequiredSheetView(
+                channelId: message.channelId,
+                botName: botName,
+                request: request
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private func resolvedLine(_ request: AuthRequiredRequest) -> some View {
@@ -116,29 +69,103 @@ struct AuthRequiredCardView: View {
             }
             return "Auth resolved"
         }()
-        return HStack(spacing: 6) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 11))
-            Text(label)
-                .font(.system(size: 12))
-        }
-        .foregroundStyle(Theme.textMuted)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 4)
+        return Label(label, systemImage: "key.fill")
+            .font(.caption)
+            .foregroundStyle(Theme.textMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.space5)
+            .padding(.vertical, 4)
+    }
+}
+
+private struct AuthRequiredSheetView: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+
+    let channelId: String
+    let botName: String
+    let request: AuthRequiredRequest
+
+    @State private var busy: String?
+    @State private var errorMessage: String?
+
+    private var isOwner: Bool {
+        guard let owner = request.botOwnerId, let me = app.session?.userId else { return false }
+        return owner == me
     }
 
-    private func ack(_ action: String) async {
-        guard let request, let api = app.api else { return }
+    var body: some View {
+        ChannelActionSheet("Agent sign-in", systemImage: "person.badge.key") {
+            Form {
+                Section {
+                    LabeledContent("Agent", value: botName)
+                    LabeledContent("Request", value: request.title)
+                    if let methodId = request.methodId {
+                        LabeledContent("Method", value: methodId)
+                    }
+                }
+
+                Section("Details") {
+                    Text(request.description)
+                    if let link = request.link, let url = URL(string: link) {
+                        Link(destination: url) {
+                            Label("Open login page", systemImage: "safari")
+                        }
+                    }
+                }
+
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.circle")
+                            .foregroundStyle(Theme.danger)
+                    }
+                }
+            }
+        } actions: {
+            if isOwner {
+                HStack(spacing: 12) {
+                    Button("Cancel", role: .destructive) {
+                        Task { await acknowledge("cancel") }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
+                    .disabled(busy != nil)
+
+                    Button {
+                        Task { await acknowledge("retry") }
+                    } label: {
+                        if busy == "retry" {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Text("I've signed in").frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(busy != nil)
+                }
+            } else {
+                Label("Waiting for the agent owner", systemImage: "clock")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private func acknowledge(_ action: String) async {
+        guard let api = app.api, busy == nil else { return }
         busy = action
         errorMessage = nil
         defer { busy = nil }
         do {
             _ = try await api.ackAuthRequired(
-                channelId: message.channelId,
+                channelId: channelId,
                 requestId: request.requestId,
                 action: action
             )
+            dismiss()
         } catch {
             errorMessage = error.localizedDescription
         }

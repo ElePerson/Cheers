@@ -102,20 +102,20 @@ struct SettingsView: View {
                     )
                     VStack(alignment: .leading, spacing: 3) {
                         Text(displayName)
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.body.weight(.semibold))
                             .foregroundStyle(Theme.textPrimary)
                         if let username = app.session?.username {
                             Text(username)
-                                .font(.system(size: 13))
+                                .font(.subheadline)
                                 .foregroundStyle(Theme.textMuted)
                         }
                         Text("Edit profile")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.caption.weight(.medium))
                             .foregroundStyle(Theme.accent)
                     }
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.textFaint)
                 }
                 .padding(.vertical, 4)
@@ -124,13 +124,13 @@ struct SettingsView: View {
 
             LabeledContent {
                 Text(app.session?.userId ?? "—")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.caption.monospaced())
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             } label: {
                 Text("User ID")
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textBody)
             }
             .listRowBackground(Theme.bgSurface)
@@ -143,27 +143,27 @@ struct SettingsView: View {
         Section {
             LabeledContent {
                 Text(app.serverURLString)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.caption.monospaced())
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             } label: {
                 Text("Server")
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textBody)
             }
             .listRowBackground(Theme.bgSurface)
 
             HStack {
                 Text("Realtime")
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textBody)
                 Spacer()
                 Circle()
                     .fill(app.socketConnected ? Theme.online : Theme.textFaint)
                     .frame(width: 8, height: 8)
                 Text(app.socketConnected ? "Connected" : "Offline")
-                    .font(.system(size: 13))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textMuted)
             }
             .listRowBackground(Theme.bgSurface)
@@ -177,7 +177,7 @@ struct SettingsView: View {
             sectionHeader("Server")
         } footer: {
             Text("Switching servers signs you out. Tokens belong to one server.")
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(Theme.textFaint)
         }
     }
@@ -200,7 +200,7 @@ struct SettingsView: View {
 
             Button { showChangePassword = true } label: {
                 Label("Change password", systemImage: "key")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.textBody)
             }
             .listRowBackground(Theme.bgSurface)
@@ -250,7 +250,7 @@ struct SettingsView: View {
                             .controlSize(.small)
                     }
                     Text(isSigningOut ? "Signing out…" : "Sign out")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(Theme.danger)
                 }
             }
@@ -305,7 +305,7 @@ struct SettingsView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 12, weight: .semibold))
+            .font(.caption.weight(.semibold))
             .tracking(0.8)
             .foregroundStyle(Theme.textMuted)
     }
@@ -354,12 +354,12 @@ private struct ProfileEditSheet: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 PhotosPicker(selection: $pickerItem, matching: .images) {
                                     Text(isUploadingAvatar ? "Uploading…" : "Change photo")
-                                        .font(.system(size: 14, weight: .semibold))
+                                        .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(Theme.accent)
                                 }
                                 .disabled(isUploadingAvatar)
                                 Text("JPEG or PNG, used across Cheers clients.")
-                                    .font(.system(size: 12))
+                                    .font(.caption)
                                     .foregroundStyle(Theme.textMuted)
                             }
                         }
@@ -590,7 +590,7 @@ private struct AppleAuthorizationControl: View {
             .opacity(challenge == nil ? 0.55 : 1)
 
             if isBusy { ProgressView().controlSize(.small) }
-            if let errorText { Text(errorText).font(.system(size: 12)).foregroundStyle(Theme.danger) }
+            if let errorText { Text(errorText).font(.caption).foregroundStyle(Theme.danger) }
         }
         .task { await reload() }
     }

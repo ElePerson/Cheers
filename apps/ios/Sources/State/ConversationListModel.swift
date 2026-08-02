@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-struct ConversationRow: Identifiable {
+struct ConversationRow: Identifiable, Codable {
     var channel: ChannelDto
     var workspaceName: String?
     var lastMessage: MessageDto?
@@ -47,9 +47,48 @@ final class ConversationListModel {
     @ObservationIgnored private var listenerId: UUID?
     @ObservationIgnored private var loadedOnce = false
     @ObservationIgnored private var loadInFlight = false
+    @ObservationIgnored private var restoredCacheScope: String?
+
+    /// Lean navigation snapshot: channel metadata only. Full message DTOs can
+    /// be large and already belong to MessageStore, not UserDefaults.
+    private struct CachedConversationRow: Codable {
+        let channel: ChannelDto
+        let workspaceName: String?
+        let unreadCount: Int
+        let lastActivityAt: Date?
+
+        init(_ row: ConversationRow) {
+            channel = row.channel
+            workspaceName = row.workspaceName
+            unreadCount = row.unreadCount
+            lastActivityAt = row.lastActivityAt
+        }
+
+        var restored: ConversationRow {
+            ConversationRow(
+                channel: channel,
+                workspaceName: workspaceName,
+                lastMessage: nil,
+                unreadCount: unreadCount,
+                lastActivityAt: lastActivityAt
+            )
+        }
+    }
 
     func attach(_ app: AppModel) {
         self.app = app
+        let scope = "\(app.session?.userId ?? "")|\(app.serverURLString)"
+        if restoredCacheScope != scope {
+            restoredCacheScope = scope
+            if let cached = NavigationCache.load(
+                [CachedConversationRow].self,
+                kind: .conversations,
+                userId: app.session?.userId,
+                server: app.serverURLString
+            ) {
+                rows = cached.map(\.restored)
+            }
+        }
         if listenerId == nil {
             listenerId = app.addSocketListener { [weak self] event in
                 self?.handle(event)
@@ -108,47 +147,56 @@ final class ConversationListModel {
                 }
             }
 
-            // Last-message previews (limit 1), fetched concurrently. Preview
-            // failures (e.g. race with membership changes) are non-fatal.
-            var previews: [String: MessageDto] = [:]
-            await withTaskGroup(of: (String, MessageDto?).self) { group in
-                for (channel, _) in channels {
-                    group.addTask {
-                        let response = try? await api.listMessages(channelId: channel.channelId, limit: 1)
-                        return (channel.channelId, response?.messages.last)
-                    }
-                }
-                for await (channelId, message) in group {
-                    if let message {
-                        previews[channelId] = message
-                    }
-                }
-            }
-
+            // Publish channel metadata immediately. Reuse cached previews until
+            // each channel's fresh preview arrives; the drawer is useful now,
+            // instead of waiting for the slowest fan-out request.
+            let cachedByChannel = Dictionary(
+                uniqueKeysWithValues: rows.map { ($0.channel.channelId, $0) }
+            )
             var newRows = channels.map { channel, wsName in
-                ConversationRow(
+                let cached = cachedByChannel[channel.channelId]
+                return ConversationRow(
                     channel: channel,
                     workspaceName: wsName,
-                    lastMessage: previews[channel.channelId],
-                    unreadCount: channel.unreadCount ?? 0,
-                    lastActivityAt: previews[channel.channelId]?.createdDate
+                    lastMessage: cached?.lastMessage,
+                    unreadCount: channel.unreadCount ?? cached?.unreadCount ?? 0,
+                    lastActivityAt: cached?.lastActivityAt
                 )
             }
-            newRows.sort { lhs, rhs in
-                switch (lhs.lastActivity, rhs.lastActivity) {
-                case let (l?, r?): return l > r
-                case (_?, nil): return true
-                case (nil, _?): return false
-                case (nil, nil): return lhs.channel.displayName < rhs.channel.displayName
-                }
-            }
+            sortRows(&newRows)
             rows = newRows
             loadedOnce = true
+            persistCache()
 
-            // Live previews/unreads for every conversation. Replace (don't
-            // union) the socket's subscription set: a stale channel we left
-            // makes the server close the whole connection with 4403 on replay.
+            // Subscribe as soon as channels are known so preview fetching does
+            // not create a realtime blind spot.
             app.socket.resetSubscriptions(to: Set(newRows.map { $0.channel.channelId }))
+
+            // Last-message previews (limit 1), fetched concurrently and applied
+            // progressively. Preview failures keep the cached value and remain
+            // non-fatal.
+            await withTaskGroup(of: (String, MessageDto?, Bool).self) { group in
+                for (channel, _) in channels {
+                    group.addTask {
+                        do {
+                            let response = try await api.listMessages(channelId: channel.channelId, limit: 1)
+                            return (channel.channelId, response.messages.last, true)
+                        } catch {
+                            return (channel.channelId, nil, false)
+                        }
+                    }
+                }
+                for await (channelId, message, succeeded) in group {
+                    guard succeeded else { continue }
+                    guard let index = rows.firstIndex(where: { $0.channel.channelId == channelId }) else {
+                        continue
+                    }
+                    rows[index].lastMessage = message
+                    rows[index].lastActivityAt = message?.createdDate
+                    sortRows(&rows)
+                }
+            }
+            persistCache()
         } catch let error as APIError {
             if case .unauthorized = error {
                 app.clearSession()
@@ -163,6 +211,7 @@ final class ConversationListModel {
     func markRead(channelId: String) {
         guard let index = rows.firstIndex(where: { $0.channel.channelId == channelId }) else { return }
         rows[index].unreadCount = 0
+        persistCache()
     }
 
     // MARK: Socket events
@@ -207,6 +256,28 @@ final class ConversationListModel {
         rows.remove(at: index)
         // Newest activity floats to the top.
         rows.insert(row, at: 0)
+        persistCache()
+    }
+
+    private func persistCache() {
+        guard let app else { return }
+        NavigationCache.save(
+            rows.map(CachedConversationRow.init),
+            kind: .conversations,
+            userId: app.session?.userId,
+            server: app.serverURLString
+        )
+    }
+
+    private func sortRows(_ rows: inout [ConversationRow]) {
+        rows.sort { lhs, rhs in
+            switch (lhs.lastActivity, rhs.lastActivity) {
+            case let (l?, r?): return l > r
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return lhs.channel.displayName < rhs.channel.displayName
+            }
+        }
     }
 
     /// Channel currently on screen (its messages should not bump unread).

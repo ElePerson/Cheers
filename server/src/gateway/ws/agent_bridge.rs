@@ -1184,10 +1184,20 @@ async fn handle_trace_frame(frame: &Value, state: &AppState, bot: &BotInfo) {
         json!({
             "msg_id": msg_id,
             "channel_id": channel_id,
+            "event_id": frame
+                .get("id")
+                .or_else(|| frame.get("event_id"))
+                .or_else(|| frame.get("tool_call_id"))
+                .or_else(|| frame.get("request_id"))
+                .and_then(Value::as_str),
+            "tool_call_id": frame.get("tool_call_id").and_then(Value::as_str),
+            "request_id": frame.get("request_id").and_then(Value::as_str),
             "phase": phase,
             "status": status,
             "title": title,
             "message": frame.get("message").and_then(Value::as_str),
+            "data": frame.get("data"),
+            "created_at": chrono::Utc::now().to_rfc3339(),
         }),
     );
     // Live per-subscriber SEE (docs/arch/ACP_EVENT_TAXONOMY.md): the bot's internal
@@ -1262,7 +1272,7 @@ async fn cached_load_rules(
 /// users allowed to SEE an agent event of `event_class` for `bot`. Platform admins
 /// bypass; absent rules → members allowed (the default). Fail-open on a rules error
 /// (return everyone online) so a query hiccup never *hides* the bot's activity.
-async fn allowed_seers(
+pub(crate) async fn allowed_seers(
     state: &AppState,
     bot_id: Uuid,
     channel_id: Uuid,
@@ -2016,14 +2026,7 @@ async fn handle_permission_cancel_frame(frame: &Value, state: &AppState, bot: &B
 
     // Shared finalize (atomic CAS + audit + trace + broadcast); identical to the
     // server-side TTL sweeper so the two paths can never diverge.
-    if crate::gateway::approval_sweeper::finalize_expired(
-        &state.db,
-        &state.fanout,
-        &pending,
-        reason,
-    )
-    .await
-    {
+    if crate::gateway::approval_sweeper::finalize_expired(state, &pending, reason).await {
         tracing::info!(request_id, reason, "permission card finalized as expired");
     }
 }

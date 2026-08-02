@@ -3,8 +3,8 @@ import Speech
 import SwiftUI
 
 /// Growing multiline composer pinned to the bottom of the chat screen.
-/// Visuals follow the web MessageComposer: raised capsule, strong border that
-/// turns indigo on focus, 32pt indigo send button.
+/// Uses native SwiftUI input, menu, list and button styles so interaction,
+/// focus, disabled states and accessibility follow iOS automatically.
 struct ComposerView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Draft and keyboard focus live inside this leaf view. A keystroke now
@@ -13,9 +13,7 @@ struct ComposerView: View {
     let clearTick: Int
     let placeholder: String
     let isSending: Bool
-    let streamingCount: Int
     let onSend: (String) async -> Bool
-    let onStopStreaming: () async -> Void
     let channelId: String
     let api: APIClient?
     var onChooseSession: () -> Void = {}
@@ -30,15 +28,15 @@ struct ComposerView: View {
 
     @FocusState private var isFocused: Bool
     @State private var dictation = ComposerDictationController()
+    @State private var showMentionPicker = false
+    @State private var mentionSearch = ""
 
     init(
         initialText: String,
         clearTick: Int,
         placeholder: String,
         isSending: Bool,
-        streamingCount: Int = 0,
         onSend: @escaping (String) async -> Bool,
-        onStopStreaming: @escaping () async -> Void = {},
         channelId: String,
         api: APIClient?,
         onChooseSession: @escaping () -> Void = {},
@@ -53,9 +51,7 @@ struct ComposerView: View {
         self.clearTick = clearTick
         self.placeholder = placeholder
         self.isSending = isSending
-        self.streamingCount = streamingCount
         self.onSend = onSend
-        self.onStopStreaming = onStopStreaming
         self.channelId = channelId
         self.api = api
         self.onChooseSession = onChooseSession
@@ -69,11 +65,6 @@ struct ComposerView: View {
 
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
-    }
-
-    private var showStop: Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !isSending && streamingCount > 0
     }
 
     // MARK: @-mention typeahead
@@ -92,92 +83,176 @@ struct ComposerView: View {
         return (atIndex..<text.endIndex, String(query))
     }
 
-    /// Matches for the active token, ranked bots → group tokens → people (web
-    /// parity). Capped at 5 rows so the list never buries the input.
-    private var mentionMatches: [MentionCandidate] {
-        guard let token = mentionToken, !mentionPool.isEmpty else { return [] }
-        let q = token.query.lowercased()
-        let hits = mentionPool.filter {
-            q.isEmpty || $0.label.lowercased().contains(q)
-                || ($0.sublabel?.lowercased().contains(q) ?? false)
-        }
-        // Stable rank sort: decorate with the original index as tie-break.
-        return hits.enumerated()
-            .sorted { ($0.element.kind.rawValue, $0.offset) < ($1.element.kind.rawValue, $1.offset) }
-            .prefix(5)
-            .map(\.element)
-    }
-
     private func pick(_ candidate: MentionCandidate) {
         guard let token = mentionToken else { return }
         text.replaceSubrange(token.range, with: "@\(candidate.label) ")
         onMentionPicked(candidate)
+        showMentionPicker = false
+        Task { @MainActor in
+            await Task.yield()
+            isFocused = true
+        }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !mentionMatches.isEmpty {
-                mentionPicker
-            }
-            inputRow
-        }
+        inputRow
         .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
-        .background(Theme.bgApp)
+        .padding(.vertical, 8)
         .onChange(of: clearTick) {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) { text = "" }
         }
+        .onChange(of: text) { oldValue, newValue in
+            guard newValue != oldValue,
+                  newValue.last == "@",
+                  mentionToken?.query.isEmpty == true,
+                  !mentionPool.isEmpty else { return }
+            presentMentionPicker()
+        }
+        .onChange(of: showMentionPicker) { _, isPresented in
+            if !isPresented { mentionSearch = "" }
+        }
     }
 
-    private var mentionPicker: some View {
-        VStack(spacing: 0) {
-            ForEach(mentionMatches) { candidate in
-                Button { pick(candidate) } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: candidate.kind == .bot ? "sparkles"
-                            : candidate.kind == .group ? "person.3" : "person")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(candidate.kind == .bot ? Theme.accent : Theme.textSecondary)
-                            .frame(width: 22)
-                        Text(candidate.label)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1)
-                        if let sub = candidate.sublabel, !sub.isEmpty {
-                            Text(candidate.kind == .group ? sub : "@\(sub)")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.textSecondary)
-                                .lineLimit(1)
+    private var mentionPickerSheet: some View {
+        NavigationStack {
+            Group {
+                if filteredMentionPool.isEmpty {
+                    ContentUnavailableView.search(text: mentionSearch)
+                } else {
+                    List {
+                        if !filteredGroups.isEmpty {
+                            Section("Groups") {
+                                ForEach(filteredGroups) { candidate in
+                                    mentionRow(candidate)
+                                }
+                            }
                         }
-                        Spacer(minLength: 0)
-                        if candidate.kind == .bot {
-                            Text("BOT")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(Theme.accent)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 2)
-                                .background(Theme.accent.opacity(0.15))
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        if !filteredBots.isEmpty {
+                            Section("Bots") {
+                                ForEach(filteredBots) { candidate in
+                                    mentionRow(candidate)
+                                }
+                            }
+                        }
+                        if !filteredPeople.isEmpty {
+                            Section("People") {
+                                ForEach(filteredPeople) { candidate in
+                                    mentionRow(candidate)
+                                }
+                            }
                         }
                     }
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 44)   // HIG tap target
-                    .contentShape(Rectangle())
+                    .listStyle(.insetGrouped)
                 }
-                .buttonStyle(.plain)
+            }
+            .navigationTitle("Mention")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $mentionSearch, prompt: "Search people and groups")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showMentionPicker = false }
+                }
             }
         }
-        .background(Theme.bgRaised)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
-        .padding(.bottom, 6)
+    }
+
+    private var filteredMentionPool: [MentionCandidate] {
+        let query = mentionSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return mentionPool }
+        return mentionPool.filter { candidate in
+            candidate.label.localizedCaseInsensitiveContains(query)
+                || (candidate.sublabel?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
+    private var filteredGroups: [MentionCandidate] {
+        filteredMentionPool.filter { $0.kind == .group }
+    }
+
+    private var filteredBots: [MentionCandidate] {
+        filteredMentionPool.filter { $0.kind == .bot }
+    }
+
+    private var filteredPeople: [MentionCandidate] {
+        filteredMentionPool.filter { $0.kind == .user }
+    }
+
+    private func mentionRow(_ candidate: MentionCandidate) -> some View {
+        Button {
+            pick(candidate)
+        } label: {
+            HStack(spacing: Theme.space3) {
+                mentionIcon(candidate)
+                VStack(alignment: .leading, spacing: Theme.space1) {
+                    Text("@\(candidate.label)")
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                    if let sublabel = candidate.sublabel, !sublabel.isEmpty {
+                        Text(candidate.kind == .group ? sublabel : "@\(sublabel)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                if candidate.kind == .bot {
+                    Text("BOT")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Mention \(candidate.label)")
+    }
+
+    @ViewBuilder
+    private func mentionIcon(_ candidate: MentionCandidate) -> some View {
+        if candidate.kind == .group {
+            Image(systemName: groupMentionIcon(candidate.id))
+                .font(.title3)
+                .foregroundStyle(.tint)
+                .frame(width: 40, height: 40)
+                .background(.quaternary, in: Circle())
+                .accessibilityHidden(true)
+        } else {
+            AvatarView(
+                seedId: candidate.id,
+                name: candidate.label,
+                size: 40,
+                imageURL: resolveAvatarURL(candidate.avatarURL)
+            )
+        }
+    }
+
+    private func groupMentionIcon(_ id: String) -> String {
+        switch id {
+        case "all": return "person.3.fill"
+        case "bots": return "cpu"
+        case "humans": return "person.2.fill"
+        case "here": return "location.fill"
+        default: return "at"
+        }
+    }
+
+    private func resolveAvatarURL(_ raw: String?) -> URL? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let absolute = URL(string: raw), absolute.scheme != nil { return absolute }
+        guard let base = api?.baseURL,
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return URL(string: raw, relativeTo: components.url)?.absoluteURL
     }
 
     private var inputRow: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .center, spacing: 2) {
             Menu {
                 Button { onUploadFile() } label: { Label("Upload file", systemImage: "paperclip") }
                 Button { onBrowseFiles() } label: { Label("Channel files", systemImage: "folder") }
@@ -187,72 +262,73 @@ struct ComposerView: View {
                 Button { onModelSettings() } label: { Label("Model & bot settings", systemImage: "slider.horizontal.3") }
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 34, height: 34)
-                    .background(.thinMaterial, in: Circle())
+                    .font(.title3.weight(.medium))
                     .frame(width: Theme.hitMin, height: Theme.hitMin)
                     .contentShape(Rectangle())
             }
-            .padding(.leading, 2)
+            .buttonStyle(.plain)
             .accessibilityLabel("Add message options")
 
             TextField(placeholder, text: $text, axis: .vertical)
                 .font(.body)
-                .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1...8)
-                .focused($isFocused)
+                .textFieldStyle(.plain)
                 .padding(.vertical, 11)
+                .frame(minHeight: Theme.hitMin, alignment: .center)
+                .focused($isFocused)
                 .accessibilityLabel(placeholder)
+
+            Button {
+                insertMention()
+            } label: {
+                Text("@")
+                    .font(.title3.weight(.medium))
+                    .frame(width: Theme.hitMin, height: Theme.hitMin)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Mention someone")
+            .popover(
+                isPresented: $showMentionPicker,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .bottom
+            ) {
+                mentionPickerSheet
+                    .frame(idealWidth: 360, minHeight: 420)
+                    .presentationCompactAdaptation(.popover)
+            }
+            .contextMenu {
+                ForEach(mentionPool.filter { $0.kind == .group }) { candidate in
+                    Button {
+                        quickPick(candidate)
+                    } label: {
+                        Label("@\(candidate.label)", systemImage: groupMentionIcon(candidate.id))
+                    }
+                }
+            }
 
             dictationButton
 
             Button {
-                if showStop {
-                    Task { await onStopStreaming() }
-                    return
-                }
-                // Sending is an intentional completion point for a mobile
-                // draft. Clear focus first so UIKit reliably dismisses the
-                // software keyboard even while the network request is pending.
-                isFocused = false
-                let draft = text
-                Task {
-                    if await onSend(draft) {
-                        var transaction = Transaction()
-                        transaction.disablesAnimations = true
-                        withTransaction(transaction) { text = "" }
-                    }
-                }
+                sendDraft()
             } label: {
-                Group {
-                    if isSending {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.white)
-                    } else {
-                        Image(systemName: showStop ? "stop.fill" : "paperplane.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(canSend || showStop ? Color.white : Theme.textFaint)
-                    }
+                if isSending {
+                    ProgressView()
+                } else {
+                    Image(systemName: "arrow.up")
                 }
-                .frame(width: 36, height: 36)
-                .background(showStop ? Theme.danger : (canSend ? Theme.accent : Theme.bgSelected.opacity(0.5)))
-                .clipShape(Circle())
-                .shadow(color: canSend ? Theme.accent.opacity(0.22) : .clear, radius: 5, y: 2)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
             }
-            .disabled(!canSend && !showStop)
-            .padding(.trailing, 2)
-            .accessibilityLabel(isSending ? "Sending message" : (showStop ? "Stop response" : "Send message"))
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.circle)
+            .controlSize(.large)
+            .frame(width: Theme.hitMin, height: Theme.hitMin)
+            .disabled(!canSend)
+            .accessibilityLabel(primaryActionLabel)
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(isFocused ? Theme.accentHover.opacity(0.55) : Color.primary.opacity(0.08), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+        .padding(6)
+        .background(.regularMaterial, in: Capsule())
+        .contentShape(Capsule())
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .alert("Voice dictation", isPresented: Binding(
             get: { dictation.errorMessage != nil },
             set: { if !$0 { dictation.errorMessage = nil } }
@@ -271,36 +347,80 @@ struct ComposerView: View {
 
     private var dictationButton: some View {
         Button {
-            Task {
-                await dictation.toggle(channelId: channelId, api: api) { transcript in
-                    let separator = text.isEmpty || text.last?.isWhitespace == true ? "" : " "
-                    // A final transcript can grow the multiline field by
-                    // several rows. Insert it in one non-animated transaction
-                    // so UIKit does not animate the keyboard/layout through
-                    // intermediate composer states.
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        text += separator + transcript
-                        isFocused = true
-                    }
-                }
-            }
+            toggleDictation()
         } label: {
-            Group {
-                if dictation.isWorking {
-                    ProgressView().controlSize(.small).tint(Theme.accent)
-                } else {
-                    Image(systemName: dictation.isRecording ? "stop.circle.fill" : "mic")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(dictation.isRecording ? Color.red : Theme.textSecondary)
-                }
+            if dictation.isWorking {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: dictation.isRecording ? "stop.circle.fill" : "mic")
+                    .font(.title3)
             }
-            .frame(width: 40, height: 44)
-            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(dictation.isRecording ? Color.red : Color.primary)
+        .frame(width: Theme.hitMin, height: Theme.hitMin)
+        .contentShape(Rectangle())
         .disabled(dictation.isWorking || api == nil)
         .accessibilityLabel(dictation.isRecording ? "Stop voice dictation" : "Start voice dictation")
+    }
+
+    private var primaryActionLabel: String {
+        isSending ? "Sending message" : "Send message"
+    }
+
+    private func insertMention() {
+        if !text.isEmpty, text.last?.isWhitespace != true {
+            text += " "
+        }
+        text += "@"
+        presentMentionPicker()
+    }
+
+    private func presentMentionPicker() {
+        guard !mentionPool.isEmpty else { return }
+        isFocused = false
+        showMentionPicker = true
+    }
+
+    private func quickPick(_ candidate: MentionCandidate) {
+        if mentionToken == nil {
+            if !text.isEmpty, text.last?.isWhitespace != true {
+                text += " "
+            }
+            text += "@"
+        }
+        pick(candidate)
+    }
+
+    private func sendDraft() {
+        guard canSend else { return }
+        // Sending is an intentional completion point for a mobile draft. Clear
+        // focus first so UIKit reliably dismisses the software keyboard.
+        isFocused = false
+        let draft = text
+        Task {
+            if await onSend(draft) {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { text = "" }
+            }
+        }
+    }
+
+    private func toggleDictation() {
+        Task {
+            await dictation.toggle(channelId: channelId, api: api) { transcript in
+                let separator = text.isEmpty || text.last?.isWhitespace == true ? "" : " "
+                // A final transcript can grow the multiline field by several
+                // rows. Insert it without intermediate layout animations.
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    text += separator + transcript
+                    isFocused = true
+                }
+            }
+        }
     }
 }
 
