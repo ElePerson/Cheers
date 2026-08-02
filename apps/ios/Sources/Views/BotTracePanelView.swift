@@ -48,7 +48,11 @@ struct BotTracePanelView: View {
             merged.traceSeq = opening.traceSeq
             merged.title = event.title ?? opening.title
             merged.message = event.message ?? opening.message
-            merged.data = event.data ?? opening.data
+            if let openingData = opening.data, let terminalData = event.data {
+                merged.data = openingData.merging(withNewer: terminalData)
+            } else {
+                merged.data = event.data ?? opening.data
+            }
             merged.requestId = event.requestId ?? opening.requestId
             merged.approvalKind = event.approvalKind ?? opening.approvalKind
             merged.decision = event.decision ?? opening.decision
@@ -511,6 +515,26 @@ private extension TraceEntryDto {
 }
 
 private extension JSONValue {
+    /// Merge an append-only lifecycle delta over an earlier payload. Object keys
+    /// from the terminal event win recursively, while omitted (or explicitly
+    /// null) keys keep the richer opening-event detail such as tool input/diff.
+    func merging(withNewer newer: JSONValue) -> JSONValue {
+        if case .null = newer { return self }
+        guard case .object(let oldObject) = self,
+              case .object(let newObject) = newer
+        else { return newer }
+
+        var result = oldObject
+        for (key, value) in newObject {
+            if let oldValue = result[key] {
+                result[key] = oldValue.merging(withNewer: value)
+            } else if value != .null {
+                result[key] = value
+            }
+        }
+        return .object(result)
+    }
+
     var prettyPrinted: String {
         guard let encoded = try? JSONEncoder().encode(self),
               let object = try? JSONSerialization.jsonObject(with: encoded),
