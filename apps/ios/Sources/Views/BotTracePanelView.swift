@@ -32,10 +32,10 @@ struct BotTracePanelView: View {
         var indexes: [String: Int] = [:]
 
         for event in events.sorted(by: { $0.traceSeq < $1.traceSeq }) {
-            guard let key = event.operationKey else {
-                result.append(event)
-                continue
-            }
+            // REST and the live socket can contain the same persisted row. Use
+            // its durable id as a fallback key so merging both sources does not
+            // duplicate lifecycle-independent events.
+            let key = event.operationKey ?? "event:\(event.id)"
             guard let index = indexes[key] else {
                 indexes[key] = result.count
                 result.append(event)
@@ -103,8 +103,12 @@ struct BotTracePanelView: View {
                 .task { await loadDurableTrace() }
             }
             .onChange(of: liveEvents) { _, latest in
-                // While running, live socket data is newer than any durable read.
-                if isRunning { durableEvents = latest }
+                // A terminal socket delta can be less descriptive than the
+                // opening row returned by REST. Merge both sources through the
+                // same lifecycle fold instead of replacing the durable rows.
+                if isRunning {
+                    durableEvents = coalescedEvents((durableEvents ?? []) + latest)
+                }
             }
         }
     }
@@ -145,9 +149,9 @@ struct BotTracePanelView: View {
         defer { loading = false }
         do {
             let fetched = try await api.fetchMessageTrace(channelId: channelId, msgId: msgId)
-            if !isRunning || fetched.count >= liveEvents.count {
-                durableEvents = fetched
-            }
+            durableEvents = isRunning
+                ? coalescedEvents(fetched + liveEvents)
+                : fetched
         } catch {
             errorText = String(localized: "Failed to load activity.")
             if durableEvents == nil, !liveEvents.isEmpty { durableEvents = liveEvents }
