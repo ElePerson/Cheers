@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
+import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { apiFetch } from "@/api/client";
 
@@ -16,7 +16,7 @@ export function PdfViewer({ path }: { path: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    let doc: PDFDocumentProxy | null = null;
+    let loadingTask: ReturnType<typeof getDocument> | null = null;
     setState("loading");
 
     (async () => {
@@ -25,7 +25,8 @@ export function PdfViewer({ path }: { path: string }) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.arrayBuffer();
         if (cancelled) return;
-        doc = await getDocument({ data }).promise;
+        loadingTask = getDocument({ data });
+        const doc = await loadingTask.promise;
         const host = hostRef.current;
         if (cancelled || !host) return;
         host.replaceChildren();
@@ -37,8 +38,6 @@ export function PdfViewer({ path }: { path: string }) {
           if (cancelled) return;
           const viewport = page.getViewport({ scale });
           const canvas = document.createElement("canvas");
-          const ctx = canvas.getContext("2d");
-          if (!ctx) continue;
           canvas.width = Math.floor(viewport.width * outputScale);
           canvas.height = Math.floor(viewport.height * outputScale);
           canvas.style.width = `${Math.floor(viewport.width)}px`;
@@ -46,7 +45,7 @@ export function PdfViewer({ path }: { path: string }) {
           canvas.className = "mx-auto mb-3 max-w-full rounded shadow-lg shadow-black/30";
           host.appendChild(canvas);
           await page.render({
-            canvasContext: ctx,
+            canvas,
             viewport,
             transform:
               outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined,
@@ -60,7 +59,7 @@ export function PdfViewer({ path }: { path: string }) {
 
     return () => {
       cancelled = true;
-      if (doc) doc.destroy();
+      void loadingTask?.destroy();
     };
   }, [path]);
 

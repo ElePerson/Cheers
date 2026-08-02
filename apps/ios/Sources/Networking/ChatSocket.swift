@@ -39,28 +39,6 @@ private struct VoiceTranscriptPayload: Decodable {
     let data: VoiceTranscriptSegment
 }
 
-struct BotTracePayload: Decodable, Hashable {
-    let msgId: String
-    let eventId: String?
-    let toolCallId: String?
-    let requestId: String?
-    let phase: String
-    let status: String?
-    let title: String?
-    let message: String?
-    let data: JSONValue?
-    let createdAt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case msgId = "msg_id"
-        case eventId = "event_id"
-        case toolCallId = "tool_call_id"
-        case requestId = "request_id"
-        case phase, status, title, message, data
-        case createdAt = "created_at"
-    }
-}
-
 private struct MemberUpdatedPayload: Decodable {
     let memberId: String?
 
@@ -78,7 +56,7 @@ enum SocketEvent {
     case messageStream(channelId: String, msgId: String, delta: String)
     case messageDone(channelId: String, MessageDto)
     case messageDeleted(channelId: String, msgId: String)
-    case botTrace(channelId: String, BotTracePayload)
+    case botTrace(channelId: String, TraceEventDto)
     case memberUpdated(channelId: String, memberId: String?)
     case presence(channelId: String, PresencePayload)
     case voiceTranscript(channelId: String, VoiceTranscriptSegment)
@@ -439,7 +417,7 @@ final class ChatSocket: NSObject {
             }
         case "bot_trace":
             if let channelId = head.channelId,
-               let payload = try? JSONDecoder().decode(DataEnvelope<BotTracePayload>.self, from: data) {
+               let payload = try? JSONDecoder().decode(DataEnvelope<TraceEventDto>.self, from: data) {
                 onEvent?(.botTrace(channelId: channelId, payload.data))
             }
         case "member_updated":

@@ -60,6 +60,7 @@ import {
   setActivePushChannel,
 } from "@/lib/push";
 import { useChatRealtime, type PresenceFocus } from "./hooks/useChatRealtime";
+import { coalesceTraceEvents } from "./traceEvent";
 import { WorkbenchDrawer } from "./workbench/WorkbenchDrawer";
 import { ViewBoardDrawer } from "./workbench/ViewBoardDrawer";
 import { LaneBoundsContext } from "@/hooks/useLaneWindow";
@@ -102,6 +103,7 @@ import type {
   Channel,
   PermissionContentData,
   MemberItem,
+  TraceEvent,
   VoiceTranscriptSegment,
 } from "@/types";
 
@@ -660,11 +662,19 @@ export function ChannelView({
   );
 
   const handleBotTrace = useCallback(
-    (msgId: string | null, title: string | null) => {
-      if (!msgId) return;
-      setMessages((prev) =>
-        upsertMessage(prev, { msg_id: msgId, _trace: title }),
-      );
+    (event: TraceEvent) => {
+      setMessages((prev) => {
+        const current = prev.find((message) => message.msg_id === event.msg_id);
+        const traceEvents = coalesceTraceEvents(
+          current?._trace_events ?? [],
+          [event],
+        );
+        return upsertMessage(prev, {
+          msg_id: event.msg_id,
+          _trace: event.title ?? event.status ?? null,
+          _trace_events: traceEvents,
+        });
+      });
     },
     [],
   );

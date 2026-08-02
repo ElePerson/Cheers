@@ -1084,7 +1084,7 @@ struct APIClient: Sendable {
         channelId: String,
         msgId: String,
         limit: Int = 500
-    ) async throws -> [TraceEntryDto] {
+    ) async throws -> [TraceEventDto] {
         let encoded = msgId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? msgId
         let response = try await getJSON(
             "/channels/\(channelId)/messages/\(encoded)/trace",

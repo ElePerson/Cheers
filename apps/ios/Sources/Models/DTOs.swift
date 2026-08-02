@@ -2045,10 +2045,14 @@ struct RemoteGitShow: Decodable {
 
 /// One persisted step of a bot turn (`message_traces`), including interleaved
 /// approval lifecycle rows (`kind == "approval"`).
-struct TraceEntryDto: Codable, Identifiable, Hashable {
+struct TraceEventDto: Codable, Identifiable, Hashable {
+    var v: Int = 1
     var id: String
+    var eventId: String? = nil
     var msgId: String
-    var traceSeq: Int
+    var channelId: String? = nil
+    var traceSeq: Int? = nil
+    var producerSeq: Int? = nil
     var kind: String
     var phase: String
     var status: String?
@@ -2056,6 +2060,10 @@ struct TraceEntryDto: Codable, Identifiable, Hashable {
     var message: String?
     var data: JSONValue?
     var requestId: String?
+    var toolCallId: String? = nil
+    var operationKind: String? = nil
+    var operationId: String? = nil
+    var isTerminal: Bool = false
     var approvalKind: String?
     var decision: String?
     var optionId: String?
@@ -2063,10 +2071,17 @@ struct TraceEntryDto: Codable, Identifiable, Hashable {
     var createdAt: String
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, phase, status, title, message, data, decision
+        case v, id, kind, phase, status, title, message, data, decision
+        case eventId = "event_id"
         case msgId = "msg_id"
+        case channelId = "channel_id"
         case traceSeq = "trace_seq"
+        case producerSeq = "producer_seq"
         case requestId = "request_id"
+        case toolCallId = "tool_call_id"
+        case operationKind = "operation_kind"
+        case operationId = "operation_id"
+        case isTerminal = "is_terminal"
         case approvalKind = "approval_kind"
         case optionId = "option_id"
         case actorId = "actor_id"
@@ -2075,5 +2090,152 @@ struct TraceEntryDto: Codable, Identifiable, Hashable {
 }
 
 struct MessageTraceResponse: Decodable {
-    var events: [TraceEntryDto]
+    var events: [TraceEventDto]
+}
+
+extension TraceEventDto {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        v = try container.decodeIfPresent(Int.self, forKey: .v) ?? 1
+        eventId = try container.decodeIfPresent(String.self, forKey: .eventId)
+        msgId = try container.decode(String.self, forKey: .msgId)
+        channelId = try container.decodeIfPresent(String.self, forKey: .channelId)
+        traceSeq = try container.decodeIfPresent(Int.self, forKey: .traceSeq)
+        producerSeq = try container.decodeIfPresent(Int.self, forKey: .producerSeq)
+        phase = try container.decode(String.self, forKey: .phase)
+        status = TraceEventContract.normalizeStatus(
+            try container.decodeIfPresent(String.self, forKey: .status)
+        )
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+        data = try container.decodeIfPresent(JSONValue.self, forKey: .data)
+        requestId = try container.decodeIfPresent(String.self, forKey: .requestId)
+            ?? data?["request_id"]?.stringValue
+        toolCallId = try container.decodeIfPresent(String.self, forKey: .toolCallId)
+            ?? data?.firstString("tool_call_id", "toolCallId")
+        operationKind = try container.decodeIfPresent(String.self, forKey: .operationKind)
+            ?? (requestId != nil ? "approval" : toolCallId != nil ? "tool" : nil)
+        operationId = try container.decodeIfPresent(String.self, forKey: .operationId)
+            ?? requestId
+            ?? toolCallId
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+            ?? eventId
+            ?? operationId
+            ?? "\(msgId):\(phase):\(title ?? message ?? "event")"
+        eventId = eventId ?? id
+        kind = try container.decodeIfPresent(String.self, forKey: .kind)
+            ?? (phase == "approval" ? "approval" : "trace")
+        approvalKind = try container.decodeIfPresent(String.self, forKey: .approvalKind)
+            ?? data?["approval_kind"]?.stringValue
+        decision = try container.decodeIfPresent(String.self, forKey: .decision)
+            ?? data?["decision"]?.stringValue
+        optionId = try container.decodeIfPresent(String.self, forKey: .optionId)
+            ?? data?["option_id"]?.stringValue
+        actorId = try container.decodeIfPresent(String.self, forKey: .actorId)
+            ?? data?["actor_id"]?.stringValue
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
+        isTerminal = try container.decodeIfPresent(Bool.self, forKey: .isTerminal)
+            ?? TraceEventContract.terminalStatuses.contains(status ?? "")
+    }
+}
+
+enum TraceEventContract {
+    static let version = 1
+    static let terminalStatuses: Set<String> = [
+        "completed", "approved", "denied", "failed", "cancelled",
+        "refused", "truncated", "max_turn_requests",
+    ]
+
+    static func normalizeStatus(_ status: String?) -> String? {
+        guard let status else { return nil }
+        switch status {
+        case "running", "started": return "in_progress"
+        case "complete", "done", "success", "succeeded": return "completed"
+        case "error": return "failed"
+        default: return status
+        }
+    }
+
+    static func coalesce(_ sources: [TraceEventDto]...) -> [TraceEventDto] {
+        let ordered = sources.flatMap { $0 }.enumerated().sorted { left, right in
+            switch (left.element.traceSeq, right.element.traceSeq) {
+            case let (lhs?, rhs?) where lhs != rhs: return lhs < rhs
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: return left.offset < right.offset
+            }
+        }.map(\.element)
+
+        var result: [TraceEventDto] = []
+        var indexes: [String: Int] = [:]
+        for event in ordered {
+            let key: String
+            if let operationId = event.operationId,
+               !operationId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                key = "\(event.operationKind ?? "operation"):\(operationId)"
+            } else {
+                key = "event:\(event.id)"
+            }
+            guard let index = indexes[key] else {
+                indexes[key] = result.count
+                result.append(event)
+                continue
+            }
+            result[index] = merge(older: result[index], newer: event)
+        }
+        return result
+    }
+
+    private static func merge(older: TraceEventDto, newer: TraceEventDto) -> TraceEventDto {
+        var merged = newer
+        merged.id = older.id
+        merged.eventId = older.eventId ?? older.id
+        merged.traceSeq = older.traceSeq ?? newer.traceSeq
+        merged.channelId = newer.channelId ?? older.channelId
+        merged.status = newer.status ?? older.status
+        merged.title = newer.title ?? older.title
+        merged.message = newer.message ?? older.message
+        if let oldData = older.data, let newData = newer.data {
+            merged.data = oldData.mergingTraceLifecycle(withNewer: newData)
+        } else {
+            merged.data = newer.data ?? older.data
+        }
+        merged.requestId = newer.requestId ?? older.requestId
+        merged.toolCallId = newer.toolCallId ?? older.toolCallId
+        merged.operationKind = newer.operationKind ?? older.operationKind
+        merged.operationId = newer.operationId ?? older.operationId
+        merged.isTerminal = older.isTerminal
+            || newer.isTerminal
+            || terminalStatuses.contains(newer.status ?? "")
+        if older.isTerminal, !newer.isTerminal {
+            merged.status = older.status
+        }
+        merged.approvalKind = newer.approvalKind ?? older.approvalKind
+        merged.decision = newer.decision ?? older.decision
+        merged.optionId = newer.optionId ?? older.optionId
+        merged.actorId = newer.actorId ?? older.actorId
+        if merged.createdAt.isEmpty { merged.createdAt = older.createdAt }
+        return merged
+    }
+}
+
+extension JSONValue {
+    /// Lifecycle deltas may omit or null rich opening data. New non-null values
+    /// win recursively; null keeps the older value.
+    func mergingTraceLifecycle(withNewer newer: JSONValue) -> JSONValue {
+        if case .null = newer { return self }
+        guard case .object(let oldObject) = self,
+              case .object(let newObject) = newer
+        else { return newer }
+
+        var result = oldObject
+        for (key, value) in newObject {
+            if let oldValue = result[key] {
+                result[key] = oldValue.mergingTraceLifecycle(withNewer: value)
+            } else if value != .null {
+                result[key] = value
+            }
+        }
+        return .object(result)
+    }
 }

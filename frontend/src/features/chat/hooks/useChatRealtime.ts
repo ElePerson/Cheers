@@ -1,7 +1,8 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { buildWsUrl } from "@/api/client";
 import { useAuthStore } from "@/stores/authStore";
-import type { Message, VoiceTranscriptSegment, WsEvent } from "@/types";
+import type { Message, TraceEvent, VoiceTranscriptSegment, WsEvent } from "@/types";
+import { normalizeTraceEvent } from "../traceEvent";
 
 /** Live-connection state for the open channel, driving the tier-M banner:
  *  connecting → first attempt (no banner; the channel is still loading anyway),
@@ -37,8 +38,8 @@ interface Callbacks {
     botIds?: string[],
     focus?: PresenceFocus[]
   ) => void;
-  /** Agent progress (trace) for a streaming bot message. */
-  onBotTrace?: (msgId: string | null, title: string | null) => void;
+  /** Canonical agent lifecycle event for a streaming bot message. */
+  onBotTrace?: (event: TraceEvent) => void;
   /** ViewBoard live-push: a board's underlying data changed → re-pull that board.
    *  `board` is e.g. "plan" | "cost" | "commands" (gateway board_signal) or
    *  "activity" (synthesized here on each new message). `botId` is the emitting
@@ -294,12 +295,8 @@ function handleFrame(event: WsEvent & { channel_id?: string }) {
       focus
     );
   } else if (type === "bot_trace") {
-    const d = data as {
-      msg_id?: string | null;
-      title?: string | null;
-      status?: string | null;
-    };
-    cbs.onBotTrace?.(d.msg_id ?? null, d.title ?? d.status ?? null);
+    const event = normalizeTraceEvent(data);
+    if (event) cbs.onBotTrace?.(event);
   } else if (type === "board_signal") {
     const d = data as { board?: string; bot_id?: string };
     cbs.onBoardSignal?.(d.board ?? "", d.bot_id ?? null);

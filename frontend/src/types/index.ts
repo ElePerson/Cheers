@@ -193,6 +193,33 @@ export interface AuthRequiredContentData {
   chosen_action?: "retry" | "cancel" | string;
 }
 
+/** Canonical agent lifecycle event shared by REST trace reads and live bot_trace frames. */
+export interface TraceEvent {
+  v: number;
+  id: string;
+  event_id?: string | null;
+  msg_id: string;
+  channel_id?: string | null;
+  trace_seq: number | null;
+  producer_seq?: number | null;
+  kind: string;
+  phase: string;
+  status?: string | null;
+  title?: string | null;
+  message?: string | null;
+  data?: unknown;
+  request_id?: string | null;
+  tool_call_id?: string | null;
+  operation_kind?: string | null;
+  operation_id?: string | null;
+  is_terminal: boolean;
+  approval_kind?: string | null;
+  decision?: string | null;
+  option_id?: string | null;
+  actor_id?: string | null;
+  created_at: string;
+}
+
 export interface Message {
   msg_id: string;
   channel_seq?: number;
@@ -241,6 +268,8 @@ export interface Message {
   _streaming?: boolean;
   /** Latest agent progress (trace) title shown while streaming. */
   _trace?: string | null;
+  /** Canonical live lifecycle events retained until durable REST replay arrives. */
+  _trace_events?: TraceEvent[];
   /** Client-only: lifecycle of an outgoing message the server hasn't confirmed.
    *  "sending" = a retry is in flight; "failed" = the send failed and is retryable.
    *  Absent on normal (server-confirmed) messages. Never sent to the server. */

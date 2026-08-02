@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -14,11 +14,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { fetchMessageTrace, type TraceEntry } from "@/api/approval";
+import { fetchMessageTrace } from "@/api/approval";
+import type { TraceEvent } from "@/types";
+import { coalesceTraceEvents } from "./traceEvent";
 
 interface Props {
   channelId: string;
   msgId: string;
+  liveEvents?: TraceEvent[];
 }
 
 /** Icon + tone + short label for a persisted trace row. Approval rows get the
@@ -27,7 +30,7 @@ interface Props {
 // category, but the palette stays muted zinc so steps read as ambient progress
 // rather than a loud status board. Color is reserved for genuine failures (and a
 // soft amber for a still-pending approval).
-function eventMeta(e: TraceEntry): { Icon: LucideIcon; tone: string; label: string } {
+function eventMeta(e: TraceEvent): { Icon: LucideIcon; tone: string; label: string } {
   if (e.kind === "approval") {
     const ak = e.approval_kind ?? "";
     if (ak === "resolved") {
@@ -85,11 +88,15 @@ function statusLabel(status: string): string {
  * renders each persisted step — including approval events interleaved inline.
  * Self-hides when a turn has no recorded steps.
  */
-export function BotTracePanel({ channelId, msgId }: Props) {
+export function BotTracePanel({ channelId, msgId, liveEvents = [] }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const [events, setEvents] = useState<TraceEntry[] | null>(null);
+  const [events, setEvents] = useState<TraceEvent[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const displayedEvents = useMemo(
+    () => coalesceTraceEvents(events ?? [], liveEvents),
+    [events, liveEvents],
+  );
 
   async function load() {
     if (loading) return;
@@ -113,13 +120,11 @@ export function BotTracePanel({ channelId, msgId }: Props) {
   }
 
   // Once we've loaded and found nothing, drop the toggle entirely (no noise).
-  if (events !== null && events.length === 0 && !expanded) return null;
+  if (events !== null && displayedEvents.length === 0 && !expanded) return null;
 
   // Approvals resolved during this turn — surfaced as a shield badge so the reveal
   // doubles as "review this turn's approvals" (their inline cards are hidden once resolved).
-  const approvalCount = events
-    ? events.filter((e) => e.kind === "approval").length
-    : 0;
+  const approvalCount = displayedEvents.filter((e) => e.kind === "approval").length;
 
   return (
     <div className="mt-1 max-w-md">
@@ -135,7 +140,12 @@ export function BotTracePanel({ channelId, msgId }: Props) {
         ) : (
           <ChevronRight className="w-3 h-3" />
         )}
-        <span>Agent steps{events ? ` · ${events.length}` : ""}</span>
+        <span>
+          Agent steps
+          {events !== null || displayedEvents.length > 0
+            ? ` · ${displayedEvents.length}`
+            : ""}
+        </span>
         {approvalCount > 0 && (
           <span className="inline-flex items-center gap-0.5 text-zinc-400">
             <ShieldCheck className="w-3 h-3" />
@@ -145,9 +155,9 @@ export function BotTracePanel({ channelId, msgId }: Props) {
         {loading && <Loader2 className="w-3 h-3 animate-spin" />}
       </button>
 
-      {expanded && events && events.length > 0 && (
+      {expanded && displayedEvents.length > 0 && (
         <div className="mt-1.5 ml-[5px] flex flex-col gap-1 border-l border-zinc-800/70 pl-3">
-          {events.map((e) => {
+          {displayedEvents.map((e) => {
             const { Icon, tone, label } = eventMeta(e);
             const isApproval = e.kind === "approval";
             return (
@@ -187,7 +197,7 @@ export function BotTracePanel({ channelId, msgId }: Props) {
         </div>
       )}
 
-      {expanded && events && events.length === 0 && !loading && !error && (
+      {expanded && events && displayedEvents.length === 0 && !loading && !error && (
         <div className="mt-1 px-2.5 text-[11px] text-zinc-400">
           No steps recorded.
         </div>
