@@ -568,26 +568,18 @@ pub(super) struct SessionUpdateTrace {
 ///
 /// Grounded in the real ACP schema (verified against claude-agent-acp output):
 /// `tool_call` / `tool_call_update` carry `{ title, kind, status, toolCallId,
-/// content, rawInput, rawOutput }`. The `title` is the agent's own human label
-/// (e.g. the shell command); status-only updates have none, so we skip them and
-/// let the titled call/update be the informative trace.
+/// content, rawInput, rawOutput }`. Several ACP agents finish a call with a
+/// status-only delta, so the stable tool-call id is always forwarded and such a
+/// delta must never be dropped merely because it has no title.
 pub(super) fn describe_session_update(kind: &str, update: &Value) -> Option<SessionUpdateTrace> {
-    let status = update
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or("running")
-        .to_string();
+    let status = normalize_tool_status(
+        update
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("in_progress"),
+    );
     match kind {
-        "tool_call" | "tool_call_update" => {
-            update
-                .get("title")
-                .and_then(Value::as_str)
-                .map(|title| SessionUpdateTrace {
-                    title: title.to_string(),
-                    status,
-                    data: None,
-                })
-        }
+        "tool_call" | "tool_call_update" => describe_tool_call(update, status),
         "agent_thought_chunk" => Some(SessionUpdateTrace {
             title: "Thinking…".to_string(),
             status: "running".to_string(),
@@ -596,6 +588,69 @@ pub(super) fn describe_session_update(kind: &str, update: &Value) -> Option<Sess
         "plan" => Some(describe_plan(update)),
         _ => None,
     }
+}
+
+/// ACP's canonical spelling is `toolCallId`; accepting the snake-case spelling
+/// keeps the bridge tolerant of adapters that expose their native JSON shape.
+pub(super) fn tool_call_id_from_update(update: &Value) -> Option<&str> {
+    update
+        .get("toolCallId")
+        .or_else(|| update.get("tool_call_id"))
+        .and_then(Value::as_str)
+}
+
+fn normalize_tool_status(status: &str) -> String {
+    match status {
+        "running" | "started" => "in_progress".to_string(),
+        "complete" | "done" | "success" | "succeeded" => "completed".to_string(),
+        "error" => "failed".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn describe_tool_call(update: &Value, status: String) -> Option<SessionUpdateTrace> {
+    let tool_call_id = tool_call_id_from_update(update);
+    let title = update
+        .get("title")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            update
+                .get("kind")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| format!("{value} tool"))
+        })
+        .or_else(|| tool_call_id.map(|_| "Tool call".to_string()))?;
+
+    let mut data = serde_json::Map::new();
+    data.insert("kind".to_string(), Value::String("tool_call".to_string()));
+    if let Some(id) = tool_call_id {
+        data.insert("tool_call_id".to_string(), Value::String(id.to_string()));
+    }
+    if let Some(tool_kind) = update.get("kind").filter(|value| !value.is_null()) {
+        data.insert("tool_name".to_string(), tool_kind.clone());
+    }
+    for (source, target) in [
+        ("rawInput", "input"),
+        ("raw_input", "input"),
+        ("rawOutput", "output"),
+        ("raw_output", "output"),
+        ("content", "content"),
+    ] {
+        if !data.contains_key(target) {
+            if let Some(value) = update.get(source).filter(|value| !value.is_null()) {
+                data.insert(target.to_string(), value.clone());
+            }
+        }
+    }
+
+    Some(SessionUpdateTrace {
+        title,
+        status,
+        data: Some(Value::Object(data)),
+    })
 }
 
 /// Build a trace for an ACP `plan` update. The agent's live to-do list
@@ -1637,6 +1692,42 @@ mod tests {
                 .unwrap()
                 .len(),
             0
+        );
+    }
+
+    #[test]
+    fn tool_trace_carries_a_stable_correlation_id_and_details() {
+        let trace = describe_session_update(
+            "tool_call",
+            &json!({
+                "toolCallId": "call_1",
+                "title": "Read settings",
+                "kind": "read",
+                "status": "running",
+                "rawInput": {"path": "Settings.swift"}
+            }),
+        )
+        .expect("tool trace");
+        assert_eq!(trace.title, "Read settings");
+        assert_eq!(trace.status, "in_progress");
+        let data = trace.data.expect("tool data");
+        assert_eq!(data["tool_call_id"], "call_1");
+        assert_eq!(data["tool_name"], "read");
+        assert_eq!(data["input"]["path"], "Settings.swift");
+    }
+
+    #[test]
+    fn status_only_tool_completion_is_not_dropped() {
+        let trace = describe_session_update(
+            "tool_call_update",
+            &json!({"tool_call_id": "call_2", "status": "done"}),
+        )
+        .expect("terminal tool trace");
+        assert_eq!(trace.title, "Tool call");
+        assert_eq!(trace.status, "completed");
+        assert_eq!(
+            trace.data.expect("correlation data")["tool_call_id"],
+            "call_2"
         );
     }
 

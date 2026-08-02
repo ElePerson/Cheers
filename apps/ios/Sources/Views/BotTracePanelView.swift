@@ -20,7 +20,43 @@ struct BotTracePanelView: View {
     @State private var errorText: String?
 
     private var displayedEvents: [TraceEntryDto] {
-        durableEvents ?? liveEvents
+        coalescedEvents(durableEvents ?? liveEvents)
+    }
+
+    /// The trace table is append-only for auditability, but the activity sheet
+    /// presents one step per correlated operation. Fold tool deltas by
+    /// `tool_call_id` and approval lifecycle rows by `request_id`, retaining the
+    /// descriptive fields from the opening event when a terminal delta omits them.
+    private func coalescedEvents(_ events: [TraceEntryDto]) -> [TraceEntryDto] {
+        var result: [TraceEntryDto] = []
+        var indexes: [String: Int] = [:]
+
+        for event in events.sorted(by: { $0.traceSeq < $1.traceSeq }) {
+            guard let key = event.operationKey else {
+                result.append(event)
+                continue
+            }
+            guard let index = indexes[key] else {
+                indexes[key] = result.count
+                result.append(event)
+                continue
+            }
+
+            let opening = result[index]
+            var merged = event
+            merged.id = opening.id
+            merged.traceSeq = opening.traceSeq
+            merged.title = event.title ?? opening.title
+            merged.message = event.message ?? opening.message
+            merged.data = event.data ?? opening.data
+            merged.requestId = event.requestId ?? opening.requestId
+            merged.approvalKind = event.approvalKind ?? opening.approvalKind
+            merged.decision = event.decision ?? opening.decision
+            merged.optionId = event.optionId ?? opening.optionId
+            merged.actorId = event.actorId ?? opening.actorId
+            result[index] = merged
+        }
+        return result
     }
 
     var body: some View {
@@ -390,6 +426,16 @@ private enum TraceCategory {
 }
 
 private extension TraceEntryDto {
+    var operationKey: String? {
+        if let requestId = requestId?.nilIfEmpty {
+            return "approval:\(requestId)"
+        }
+        if let toolCallId = data?.firstString("tool_call_id", "toolCallId")?.nilIfEmpty {
+            return "tool:\(toolCallId)"
+        }
+        return nil
+    }
+
     var category: TraceCategory {
         if kind == "approval" || phase == "approval" { return .approval }
         if status == "failed" || phase.contains("failed") { return .failure }

@@ -28,6 +28,42 @@ use crate::gateway::realtime::fanout::Fanout;
 use crate::gateway::realtime::frame::WireFrame;
 use crate::infra::db::models::MESSAGE_SCHEMA_VERSION;
 
+/// Build the live counterpart of an append-only approval trace row. The
+/// `request_id` is also the event id so clients replace the pending lifecycle
+/// step instead of rendering a second, unrelated terminal row.
+pub(crate) fn approval_trace_wire(
+    channel_id: uuid::Uuid,
+    msg_id: &str,
+    request_id: &str,
+    status: &str,
+    approval_kind: &str,
+    decision: Option<&str>,
+    option_id: Option<&str>,
+    actor_id: Option<&str>,
+) -> WireFrame {
+    WireFrame::channel(
+        channel_id,
+        "bot_trace",
+        json!({
+            "msg_id": msg_id,
+            "channel_id": channel_id,
+            "event_id": request_id,
+            "request_id": request_id,
+            "phase": "approval",
+            "status": status,
+            "data": {
+                "kind": "approval",
+                "request_id": request_id,
+                "approval_kind": approval_kind,
+                "decision": decision,
+                "option_id": option_id,
+                "actor_id": actor_id,
+            },
+            "created_at": chrono::Utc::now().to_rfc3339(),
+        }),
+    )
+}
+
 /// Finalize a still-pending approval card as `expired` and broadcast the resolved
 /// card. Atomic: returns `false` (no audit/trace/broadcast) if a human resolve
 /// already won the CAS, so it never writes contradictory `content_data` or dual
@@ -89,7 +125,7 @@ pub(crate) async fn finalize_expired(
     let _ = trace::record(
         db,
         trace::TraceEvent {
-            msg_id: anchor,
+            msg_id: anchor.clone(),
             channel_id: pending.channel_id.to_string(),
             bot_id: Some(pending.bot_id.to_string()),
             kind: "approval",
@@ -102,6 +138,22 @@ pub(crate) async fn finalize_expired(
         },
     )
     .await;
+
+    fanout
+        .broadcast_channel(
+            pending.channel_id,
+            approval_trace_wire(
+                pending.channel_id,
+                &anchor,
+                &request_id,
+                "cancelled",
+                "expired",
+                Some("expired"),
+                None,
+                None,
+            ),
+        )
+        .await;
 
     let mut content_data = pending.content_data.clone();
     if let (Value::Object(target), Value::Object(src)) = (&mut content_data, &patch) {

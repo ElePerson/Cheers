@@ -278,27 +278,26 @@ pub async fn resolve_permission(
         .and_then(Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(|| pending.msg_id.to_string());
+    let trace_status = if kind.starts_with("allow") {
+        "approved"
+    } else {
+        "denied"
+    };
+    let actor_id = uid.to_string();
     if let Err(err) = crate::domain::trace::record(
         &state.db,
         crate::domain::trace::TraceEvent {
-            msg_id: resolve_anchor,
+            msg_id: resolve_anchor.clone(),
             channel_id: channel_id.to_string(),
             bot_id: Some(pending.bot_id.to_string()),
             kind: "approval",
             phase: "approval".to_string(),
-            status: Some(
-                if kind.starts_with("allow") {
-                    "approved"
-                } else {
-                    "denied"
-                }
-                .to_string(),
-            ),
+            status: Some(trace_status.to_string()),
             request_id: Some(request_id.clone()),
             approval_kind: Some("resolved".to_string()),
             decision: Some(kind.clone()),
             option_id: Some(option_id.clone()),
-            actor_id: Some(uid.to_string()),
+            actor_id: Some(actor_id.clone()),
             ..Default::default()
         },
     )
@@ -306,6 +305,23 @@ pub async fn resolve_permission(
     {
         tracing::warn!(error = %err, "resolve_permission: trace write failed");
     }
+
+    state
+        .fanout
+        .broadcast_channel(
+            channel_id,
+            crate::gateway::approval_sweeper::approval_trace_wire(
+                channel_id,
+                &resolve_anchor,
+                &request_id,
+                trace_status,
+                "resolved",
+                Some(&kind),
+                Some(&option_id),
+                Some(&actor_id),
+            ),
+        )
+        .await;
 
     // Push the decision to the bot's connector (control frame → ACP outcome).
     let resolution = if kind.starts_with("allow") {
