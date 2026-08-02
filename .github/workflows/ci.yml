@@ -295,9 +295,24 @@ jobs:
       # and a hard-coded path breaks on the next image bump. The version is
       # printed so a future toolchain-drift failure is obvious in the log.
       - name: Select newest Xcode
+        id: xcode
         run: |
           sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
           xcodebuild -version
+          XCODE_CACHE_KEY="$(xcodebuild -version | paste -sd- - | tr ' /' '--')"
+          echo "cache-key=$XCODE_CACHE_KEY" >> "$GITHUB_OUTPUT"
+
+      # Cache package repositories and binary artifacts, not all of DerivedData.
+      # A full DerivedData cache is large and can retain stale SDK/compiler state;
+      # the explicit clone directory is stable across otherwise-ephemeral runners
+      # and is invalidated by both Xcode and Package.resolved.
+      - name: Cache SwiftPM packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cheers-swiftpm
+          key: ios-spm-${{ runner.os }}-${{ steps.xcode.outputs.cache-key }}-${{ hashFiles('apps/ios/Cheers.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: |
+            ios-spm-${{ runner.os }}-${{ steps.xcode.outputs.cache-key }}-
 
       # Runs first: when ids collide this names the two colliding files in a
       # second, where xcodebuild would instead fail minutes later pointing at
@@ -305,14 +320,19 @@ jobs:
       - name: Check project file
         run: python3 ../../scripts/check-pbxproj.py
 
-      - name: Build (iOS Simulator, unsigned)
+      # Compile the Debug app and both test bundles once. The following test step
+      # only launches those products instead of asking xcodebuild to plan/build a
+      # second time for the concrete simulator destination.
+      - name: Build for testing (iOS Simulator, unsigned)
         run: |
           xcodebuild \
             -project Cheers.xcodeproj \
             -scheme Cheers \
             -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$RUNNER_TEMP/cheers-ios-debug" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/cheers-swiftpm" \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build-for-testing
 
       - name: Select available iPhone simulator
         id: ios-simulator
@@ -327,11 +347,13 @@ jobs:
             -project Cheers.xcodeproj \
             -scheme Cheers \
             -destination "id=${{ steps.ios-simulator.outputs.id }}" \
+            -derivedDataPath "$RUNNER_TEMP/cheers-ios-debug" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/cheers-swiftpm" \
             -parallel-testing-enabled NO \
             -test-timeouts-enabled YES \
             -maximum-test-execution-time-allowance 120 \
             CODE_SIGNING_ALLOWED=NO \
-            test
+            test-without-building
 
       - name: Build (Release device, unsigned)
         run: |
@@ -341,6 +363,7 @@ jobs:
             -configuration Release \
             -destination "generic/platform=iOS" \
             -derivedDataPath "$RUNNER_TEMP/cheers-ios-release" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/cheers-swiftpm" \
             CODE_SIGNING_ALLOWED=NO \
             build
 
