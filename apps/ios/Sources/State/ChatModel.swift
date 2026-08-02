@@ -91,7 +91,7 @@ final class ChatModel {
     private(set) var mentionPool: [MentionCandidate] = MentionCandidate.groups
     /// Live per-message agent activity. Kept after completion so the status
     /// control does not move or lose its count when the final token arrives.
-    private(set) var liveTraceEvents: [String: [TraceEntryDto]] = [:]
+    private(set) var liveTraceEvents: [String: [TraceEventDto]] = [:]
     /// Small observation token used by the UIKit-backed timeline to reconfigure
     /// only the owning message row when a trace frame arrives.
     private(set) var traceRevision = 0
@@ -322,7 +322,7 @@ final class ChatModel {
             }
     }
 
-    func traceEvents(for msgId: String) -> [TraceEntryDto] {
+    func traceEvents(for msgId: String) -> [TraceEventDto] {
         liveTraceEvents[msgId] ?? []
     }
 
@@ -652,37 +652,11 @@ final class ChatModel {
         }
     }
 
-    private func upsertTrace(_ payload: BotTracePayload) {
-        let dataToolId = payload.data?["tool_call_id"]?.stringValue
-        let identity = payload.eventId
-            ?? payload.toolCallId
-            ?? payload.requestId
-            ?? dataToolId
-            ?? "\(payload.phase):\(payload.title ?? payload.message ?? "event")"
-        var events = liveTraceEvents[payload.msgId] ?? []
-        let entry = TraceEntryDto(
-            id: identity,
-            msgId: payload.msgId,
-            traceSeq: events.firstIndex(where: { $0.id == identity }) ?? events.count,
-            kind: payload.phase == "approval" ? "approval" : "trace",
-            phase: payload.phase,
-            status: payload.status,
-            title: payload.title,
-            message: payload.message,
-            data: payload.data,
-            requestId: payload.requestId ?? payload.data?["request_id"]?.stringValue,
-            approvalKind: payload.data?["approval_kind"]?.stringValue,
-            decision: payload.data?["decision"]?.stringValue,
-            optionId: payload.data?["option_id"]?.stringValue,
-            actorId: payload.data?["actor_id"]?.stringValue,
-            createdAt: payload.createdAt ?? TimeFormat.iso.string(from: Date())
+    private func upsertTrace(_ event: TraceEventDto) {
+        liveTraceEvents[event.msgId] = TraceEventContract.coalesce(
+            liveTraceEvents[event.msgId] ?? [],
+            [event]
         )
-        if let index = events.firstIndex(where: { $0.id == identity }) {
-            events[index] = entry
-        } else {
-            events.append(entry)
-        }
-        liveTraceEvents[payload.msgId] = events
         traceRevision &+= 1
     }
 

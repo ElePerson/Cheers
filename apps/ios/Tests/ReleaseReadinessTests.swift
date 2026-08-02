@@ -119,6 +119,126 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertFalse(document.isImageAttachment)
     }
 
+    func testTraceEventNormalizesLegacyLivePayload() throws {
+        let event = try traceEvent("""
+        {
+          "event_id":"call-1",
+          "msg_id":"message-1",
+          "phase":"tool_call_update",
+          "status":"completed",
+          "data":{"tool_call_id":"call-1"}
+        }
+        """)
+
+        XCTAssertEqual(event.v, TraceEventContract.version)
+        XCTAssertEqual(event.id, "call-1")
+        XCTAssertEqual(event.toolCallId, "call-1")
+        XCTAssertEqual(event.operationKind, "tool")
+        XCTAssertEqual(event.operationId, "call-1")
+        XCTAssertTrue(event.isTerminal)
+    }
+
+    func testTraceEventNormalizesCrossAgentStatusVocabulary() throws {
+        let event = try traceEvent("""
+        {
+          "msg_id":"message-1",
+          "phase":"tool_call_update",
+          "status":"done",
+          "tool_call_id":"call-1"
+        }
+        """)
+
+        XCTAssertEqual(event.status, "completed")
+        XCTAssertTrue(event.isTerminal)
+    }
+
+    func testTraceLifecycleCoalescingPreservesOpeningDetail() throws {
+        let opening = try traceEvent("""
+        {
+          "v":1,
+          "id":"row-1",
+          "msg_id":"message-1",
+          "trace_seq":1,
+          "kind":"trace",
+          "phase":"tool_call",
+          "status":"in_progress",
+          "title":"Write novel.txt",
+          "data":{
+            "tool_call_id":"call-1",
+            "input":{"path":"novel.txt","content":"draft"}
+          },
+          "created_at":"2026-08-02T09:00:00Z"
+        }
+        """)
+        let terminal = try traceEvent("""
+        {
+          "v":1,
+          "id":"call-1",
+          "msg_id":"message-1",
+          "kind":"trace",
+          "phase":"tool_call_update",
+          "status":"completed",
+          "data":{
+            "tool_call_id":"call-1",
+            "input":null,
+            "output":{"bytes":5}
+          },
+          "created_at":"2026-08-02T09:00:01Z"
+        }
+        """)
+
+        let merged = try XCTUnwrap(TraceEventContract.coalesce([opening], [terminal]).first)
+        XCTAssertEqual(merged.id, "row-1")
+        XCTAssertEqual(merged.traceSeq, 1)
+        XCTAssertEqual(merged.title, "Write novel.txt")
+        XCTAssertEqual(merged.status, "completed")
+        XCTAssertTrue(merged.isTerminal)
+        XCTAssertEqual(merged.data?["input"]?["path"]?.stringValue, "novel.txt")
+        XCTAssertEqual(merged.data?["output"]?["bytes"]?.numberValue, 5)
+    }
+
+    func testTraceCoalescingDeduplicatesSameTransportRow() throws {
+        let event = try traceEvent("""
+        {
+          "id":"plan-1",
+          "msg_id":"message-1",
+          "trace_seq":2,
+          "phase":"plan",
+          "status":"completed",
+          "created_at":"2026-08-02T09:00:00Z"
+        }
+        """)
+
+        XCTAssertEqual(TraceEventContract.coalesce([event], [event]).count, 1)
+    }
+
+    func testTraceTerminalOperationCannotReopenFromStaleFrame() throws {
+        let terminal = try traceEvent("""
+        {
+          "id":"call-1",
+          "msg_id":"message-1",
+          "phase":"tool_call_update",
+          "status":"completed",
+          "data":{"tool_call_id":"call-1"},
+          "created_at":"2026-08-02T09:00:01Z"
+        }
+        """)
+        let stale = try traceEvent("""
+        {
+          "id":"call-1",
+          "msg_id":"message-1",
+          "phase":"tool_call_update",
+          "status":"in_progress",
+          "data":{"tool_call_id":"call-1"},
+          "created_at":"2026-08-02T09:00:00Z"
+        }
+        """)
+
+        let merged = try XCTUnwrap(TraceEventContract.coalesce([terminal], [stale]).first)
+        XCTAssertTrue(merged.isTerminal)
+        XCTAssertEqual(merged.status, "completed")
+    }
+
     private func permissionRequest(_ json: String) throws -> PermissionRequest {
         let value = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
         return try XCTUnwrap(PermissionRequest(contentData: value))
@@ -132,5 +252,9 @@ final class ReleaseReadinessTests: XCTestCase {
         if let contentType { object["content_type"] = contentType }
         let data = try JSONSerialization.data(withJSONObject: object)
         return try JSONDecoder().decode(MessageFileRef.self, from: data)
+    }
+
+    private func traceEvent(_ json: String) throws -> TraceEventDto {
+        try JSONDecoder().decode(TraceEventDto.self, from: Data(json.utf8))
     }
 }

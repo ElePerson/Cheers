@@ -11,6 +11,158 @@ use serde_json::{json, Value};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+/// Public wire contract shared by durable REST reads and live `bot_trace`
+/// frames. Additive changes keep this version; incompatible semantics require a
+/// new version and a migration period in every client.
+pub const TRACE_EVENT_VERSION: u8 = 1;
+
+const TERMINAL_STATUSES: &[&str] = &[
+    "completed",
+    "approved",
+    "denied",
+    "failed",
+    "cancelled",
+    "refused",
+    "truncated",
+    "max_turn_requests",
+];
+
+pub fn is_terminal_status(status: Option<&str>) -> bool {
+    status.is_some_and(|value| TERMINAL_STATUSES.contains(&value))
+}
+
+fn normalize_status(status: Option<String>) -> Option<String> {
+    status.map(|value| {
+        match value.as_str() {
+            "running" | "started" => "in_progress",
+            "complete" | "done" | "success" | "succeeded" => "completed",
+            "error" => "failed",
+            _ => value.as_str(),
+        }
+        .to_string()
+    })
+}
+
+fn string_at(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+fn nested_string(value: &Value, parent: &str, keys: &[&str]) -> Option<String> {
+    let object = value.get(parent)?;
+    keys.iter().find_map(|key| string_at(object, key))
+}
+
+/// Normalize a trace object into the canonical v1 shape. Producers may still
+/// send the historical `event_id`, camel-case tool id, or lifecycle metadata
+/// nested under `data`; consumers always receive one explicit contract.
+pub fn normalize_event_payload(mut value: Value) -> Value {
+    let Some(object) = value.as_object_mut() else {
+        return value;
+    };
+
+    let request_id = string_at(&Value::Object(object.clone()), "request_id")
+        .or_else(|| nested_string(&Value::Object(object.clone()), "data", &["request_id"]));
+    let tool_call_id = string_at(&Value::Object(object.clone()), "tool_call_id")
+        .or_else(|| string_at(&Value::Object(object.clone()), "toolCallId"))
+        .or_else(|| {
+            nested_string(
+                &Value::Object(object.clone()),
+                "data",
+                &["tool_call_id", "toolCallId"],
+            )
+        });
+    let phase = string_at(&Value::Object(object.clone()), "phase").unwrap_or_default();
+    let kind = string_at(&Value::Object(object.clone()), "kind").unwrap_or_else(|| {
+        if phase == "approval" {
+            "approval"
+        } else {
+            "trace"
+        }
+        .to_string()
+    });
+    let operation = request_id
+        .as_ref()
+        .map(|id| ("approval", id.clone()))
+        .or_else(|| tool_call_id.as_ref().map(|id| ("tool", id.clone())));
+    let producer_seq = object
+        .get("producer_seq")
+        .or_else(|| object.get("seq"))
+        .cloned();
+    let id = string_at(&Value::Object(object.clone()), "id")
+        .or_else(|| string_at(&Value::Object(object.clone()), "event_id"))
+        .or_else(|| {
+            producer_seq.as_ref().map(|producer_seq| {
+                let seed = json!({
+                    "msg_id": object.get("msg_id"),
+                    "run_id": object.get("run_id"),
+                    "stream": object.get("stream"),
+                    "producer_seq": producer_seq,
+                    "phase": phase,
+                })
+                .to_string();
+                Uuid::new_v5(&Uuid::NAMESPACE_OID, seed.as_bytes()).to_string()
+            })
+        })
+        .or_else(|| operation.as_ref().map(|(_, id)| id.clone()))
+        .unwrap_or_else(|| {
+            let seed = json!({
+                "msg_id": object.get("msg_id"),
+                "run_id": object.get("run_id"),
+                "stream": object.get("stream"),
+                "phase": phase,
+                "title": object.get("title"),
+                "created_at": object.get("created_at"),
+            })
+            .to_string();
+            Uuid::new_v5(&Uuid::NAMESPACE_OID, seed.as_bytes()).to_string()
+        });
+    let status = normalize_status(string_at(&Value::Object(object.clone()), "status"));
+
+    object.insert("v".to_string(), json!(TRACE_EVENT_VERSION));
+    object.insert("id".to_string(), json!(id.clone()));
+    // Compatibility alias for released clients. New consumers use `id`.
+    object.insert("event_id".to_string(), json!(id));
+    object.insert("kind".to_string(), json!(kind));
+    object.insert("phase".to_string(), json!(phase));
+    object.insert("status".to_string(), json!(status.clone()));
+    object.insert("request_id".to_string(), json!(request_id));
+    object.insert("tool_call_id".to_string(), json!(tool_call_id));
+    object.insert(
+        "operation_kind".to_string(),
+        json!(operation.as_ref().map(|(kind, _)| *kind)),
+    );
+    object.insert(
+        "operation_id".to_string(),
+        json!(operation.as_ref().map(|(_, id)| id)),
+    );
+    object.insert(
+        "is_terminal".to_string(),
+        json!(is_terminal_status(status.as_deref())),
+    );
+    if !object.contains_key("trace_seq") {
+        object.insert("trace_seq".to_string(), Value::Null);
+    }
+    if !object.contains_key("producer_seq") {
+        object.insert(
+            "producer_seq".to_string(),
+            producer_seq.unwrap_or(Value::Null),
+        );
+    }
+    if !object.contains_key("created_at") {
+        object.insert(
+            "created_at".to_string(),
+            json!(chrono::Utc::now().to_rfc3339()),
+        );
+    }
+    for field in ["approval_kind", "decision", "option_id", "actor_id"] {
+        if !object.contains_key(field) {
+            let nested = nested_string(&Value::Object(object.clone()), "data", &[field]);
+            object.insert(field.to_string(), json!(nested));
+        }
+    }
+    value
+}
+
 /// Run-skeleton phases persisted durably (besides `kind="approval"`, which is
 /// always kept). Per-token / thought chunks are dropped by default — see
 /// [`should_persist`]. Keeps durable rows ~tool-call-count per turn, not token
@@ -50,6 +202,7 @@ pub fn should_persist(kind: &str, phase: &str) -> bool {
 /// for the approval lifecycle (sub-state in `approval_kind`).
 #[derive(Default)]
 pub struct TraceEvent {
+    pub id: Option<String>,
     pub msg_id: String,
     pub channel_id: String,
     pub bot_id: Option<String>,
@@ -90,6 +243,7 @@ pub async fn record(db: &PgPool, ev: TraceEvent) -> Result<(), sqlx::Error> {
     }
     let stream = ev.stream.clone().unwrap_or_else(|| "acp".to_string());
     let kind = if ev.kind.is_empty() { "trace" } else { ev.kind };
+    let event_id = ev.id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let mut last_err: Option<sqlx::Error> = None;
     for _ in 0..SEQ_RETRY {
         let res = sqlx::query(
@@ -99,9 +253,10 @@ pub async fn record(db: &PgPool, ev: TraceEvent) -> Result<(), sqlx::Error> {
                  request_id, approval_kind, decision, option_id, actor_id)
              VALUES ($1, $2, $3, $4, $5, $6,
                  (SELECT COALESCE(MAX(trace_seq), 0) + 1 FROM message_traces WHERE msg_id = $2),
-                 $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
+                 $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+             ON CONFLICT (id) DO NOTHING",
         )
-        .bind(Uuid::new_v4().to_string())
+        .bind(&event_id)
         .bind(&ev.msg_id)
         .bind(&ev.channel_id)
         .bind(&ev.bot_id)
@@ -137,7 +292,7 @@ pub async fn record(db: &PgPool, ev: TraceEvent) -> Result<(), sqlx::Error> {
 }
 
 fn row_to_json(r: sqlx::postgres::PgRow) -> Value {
-    json!({
+    normalize_event_payload(json!({
         "id": r.try_get::<String, _>("id").unwrap_or_default(),
         "msg_id": r.try_get::<String, _>("msg_id").unwrap_or_default(),
         "channel_id": r.try_get::<String, _>("channel_id").unwrap_or_default(),
@@ -161,7 +316,108 @@ fn row_to_json(r: sqlx::postgres::PgRow) -> Value {
             .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
             .map(|t| t.to_rfc3339())
             .unwrap_or_default(),
-    })
+    }))
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_live_tool_event_to_v1_contract() {
+        let event = normalize_event_payload(json!({
+            "event_id": "call-1",
+            "msg_id": "message-1",
+            "phase": "tool_call_update",
+            "status": "completed",
+            "data": {"tool_call_id": "call-1", "output": {"ok": true}}
+        }));
+
+        assert_eq!(event["v"], TRACE_EVENT_VERSION);
+        assert_eq!(event["id"], "call-1");
+        assert_eq!(event["kind"], "trace");
+        assert_eq!(event["tool_call_id"], "call-1");
+        assert_eq!(event["operation_kind"], "tool");
+        assert_eq!(event["operation_id"], "call-1");
+        assert_eq!(event["is_terminal"], true);
+        assert!(event.get("trace_seq").is_some());
+        assert!(event.get("created_at").is_some());
+    }
+
+    #[test]
+    fn normalizes_nested_approval_metadata() {
+        let event = normalize_event_payload(json!({
+            "msg_id": "message-1",
+            "phase": "approval",
+            "status": "approved",
+            "data": {
+                "request_id": "request-1",
+                "approval_kind": "resolved",
+                "decision": "allow_once"
+            }
+        }));
+
+        assert_eq!(event["kind"], "approval");
+        assert_eq!(event["request_id"], "request-1");
+        assert_eq!(event["operation_kind"], "approval");
+        assert_eq!(event["operation_id"], "request-1");
+        assert_eq!(event["approval_kind"], "resolved");
+        assert_eq!(event["decision"], "allow_once");
+        assert_eq!(event["is_terminal"], true);
+    }
+
+    #[test]
+    fn normalizes_cross_agent_status_vocabulary() {
+        let event = normalize_event_payload(json!({
+            "msg_id": "message-1",
+            "phase": "tool_call_update",
+            "status": "done",
+            "tool_call_id": "call-1"
+        }));
+
+        assert_eq!(event["status"], "completed");
+        assert_eq!(event["is_terminal"], true);
+    }
+
+    #[test]
+    fn mints_stable_id_for_non_operation_event() {
+        let payload = json!({
+            "msg_id": "message-1",
+            "run_id": "run-1",
+            "stream": "acp",
+            "producer_seq": 7,
+            "phase": "plan",
+            "status": "completed"
+        });
+
+        let first = normalize_event_payload(payload.clone());
+        let second = normalize_event_payload(payload);
+        assert_eq!(first["id"], second["id"]);
+        assert_eq!(first["event_id"], second["event_id"]);
+    }
+
+    #[test]
+    fn lifecycle_rows_have_distinct_ids_and_shared_operation_id() {
+        let opening = normalize_event_payload(json!({
+            "msg_id": "message-1",
+            "run_id": "run-1",
+            "producer_seq": 1,
+            "phase": "tool_call",
+            "status": "in_progress",
+            "data": {"tool_call_id": "call-1"}
+        }));
+        let terminal = normalize_event_payload(json!({
+            "msg_id": "message-1",
+            "run_id": "run-1",
+            "producer_seq": 2,
+            "phase": "tool_call_update",
+            "status": "completed",
+            "data": {"tool_call_id": "call-1"}
+        }));
+
+        assert_ne!(opening["id"], terminal["id"]);
+        assert_eq!(opening["operation_id"], terminal["operation_id"]);
+    }
 }
 
 const SELECT_COLS: &str = "SELECT id, msg_id, channel_id, bot_id, task_id, run_id, trace_seq, \

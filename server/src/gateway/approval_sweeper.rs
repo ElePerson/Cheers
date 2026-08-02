@@ -42,7 +42,7 @@ pub(crate) fn approval_trace_wire(
     WireFrame::channel(
         channel_id,
         "bot_trace",
-        json!({
+        crate::domain::trace::normalize_event_payload(json!({
             "msg_id": msg_id,
             "channel_id": channel_id,
             "event_id": request_id,
@@ -58,7 +58,7 @@ pub(crate) fn approval_trace_wire(
                 "actor_id": actor_id,
             },
             "created_at": chrono::Utc::now().to_rfc3339(),
-        }),
+        })),
     )
 }
 

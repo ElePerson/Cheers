@@ -358,6 +358,7 @@ export const MessageItem = memo(function MessageItem({
               key={`trace-${message.msg_id}`}
               channelId={channelId}
               msgId={message.msg_id}
+              liveEvents={message._trace_events}
             />
           )}
         </div>
@@ -441,6 +442,7 @@ export const MessageItem = memo(function MessageItem({
             key={`trace-${message.msg_id}`}
             channelId={channelId}
             msgId={message.msg_id}
+            liveEvents={message._trace_events}
           />
         )}
       </div>
