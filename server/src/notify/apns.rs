@@ -174,7 +174,9 @@ impl ApnsClient {
             .json(payload)
             .send()
             .await
-            .map_err(|e| ApnsError::Transport(e.to_string()))?;
+            // Display formatting drops the nested hyper/rustls cause, which is
+            // the only useful diagnostic for APNs TLS/HTTP2 failures.
+            .map_err(|e| ApnsError::Transport(format!("{e:?}")))?;
 
         let status = response.status().as_u16();
         if status == 200 {

@@ -294,10 +294,14 @@ private struct TraceDetailView: View {
                 }
             }
 
-            if let input = entry.data?["input"] ?? entry.data?["raw_input"] {
+            // Generic/"Other" ACP agents put their concrete tool payload one
+            // level deeper under `tool`; honor that shared gateway shape too.
+            if let input = entry.data?["input"] ?? entry.data?["raw_input"]
+                ?? entry.data?["tool"]?["input"] ?? entry.data?["tool"]?["raw_input"] {
                 jsonSection("Input", value: input)
             }
-            if let output = entry.data?["output"] ?? entry.data?["raw_output"] {
+            if let output = entry.data?["output"] ?? entry.data?["raw_output"]
+                ?? entry.data?["tool"]?["output"] ?? entry.data?["tool"]?["raw_output"] {
                 jsonSection("Output", value: output)
             } else if let message = entry.message?.nilIfEmpty {
                 Section("Result") {
@@ -415,15 +419,23 @@ private extension TraceEventDto {
     }
 
     var targetLabel: String? {
-        path?.split(separator: "/").last.map(String.init)
-            ?? data?.firstString("command", "cmd", "query", "target", "tool_name")
-            ?? title?.nilIfEmpty
-            ?? message?.nilIfEmpty
+        if let pathComponent = path?.split(separator: "/").last.map(String.init) {
+            return pathComponent
+        }
+        if let directTarget = data?.firstString("command", "cmd", "query", "target", "tool_name") {
+            return directTarget
+        }
+        if let nestedTarget = data?["tool"]?.firstString("summary", "command", "title", "kind") {
+            return nestedTarget
+        }
+        return title?.nilIfEmpty ?? message?.nilIfEmpty
     }
 
     var path: String? {
         data?.firstString("path", "file_path", "filename")
             ?? data?["input"]?.firstString("path", "file_path", "filename")
+            ?? data?["tool"]?.firstString("path", "file_path", "filename")
+            ?? data?["tool"]?["raw_input"]?.firstString("path", "file_path", "filename")
     }
 
     var diff: String? {
