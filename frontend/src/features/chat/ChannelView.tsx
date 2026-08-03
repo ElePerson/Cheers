@@ -499,6 +499,7 @@ export function ChannelView({
             // Bots: whether the agent can hear audio prompts (null/undefined =
             // unknown → the composer treats it as "can't", fail-safe).
             canReceiveAudio: m.can_receive_audio ?? false,
+            isOnline: m.is_online,
           })),
       );
     };
@@ -1423,22 +1424,10 @@ export function ChannelView({
         const { content: body, ...opts } = sendParams;
         await sendMessage(channel.channel_id, body, opts);
         useContextPickStore.getState().clear(channel.channel_id);
-      } catch {
-        // Don't lose the message: drop a client-only "failed" bubble into the
-        // timeline (the composer already cleared the draft) so it stays visible
-        // with its content and a Retry button. Never persisted / sent to the server.
-        const failed: Message = {
-          msg_id: `local-failed-${crypto.randomUUID()}`,
-          sender_id: user?.user_id ?? "",
-          sender_type: "user",
-          sender_name: user?.display_name ?? user?.username,
-          content,
-          created_at: new Date().toISOString(),
-          ...(fileIds.length ? { file_ids: fileIds } : {}),
-          _status: "failed",
-          _sendParams: sendParams,
-        };
-        setMessages((prev) => sortMessages([...prev, failed]));
+      } catch (error) {
+        // Rejections such as an offline @bot are intentionally not persisted.
+        // Keep the draft in the composer and surface the server's reason instead.
+        toast.error(error instanceof Error ? error.message : "Couldn't send message");
       }
     },
     [channel, selectedSessionId, replyTo, user],
