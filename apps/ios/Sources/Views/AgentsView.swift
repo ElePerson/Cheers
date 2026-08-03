@@ -161,7 +161,12 @@ struct FleetView: View {
     private func botRow(_ bot: BotDto) -> some View {
         HStack(spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
-                AvatarView(seedId: bot.botId, name: bot.name, size: 44)
+                AvatarView(
+                    seedId: bot.botId,
+                    name: bot.name,
+                    size: 44,
+                    imageURL: bot.avatarUrl.flatMap(URL.init(string:))
+                )
                 Circle()
                     .fill(bot.isDisabled == true ? Theme.danger : (bot.online ? Theme.online : Theme.textFaint))
                     .frame(width: 12, height: 12)

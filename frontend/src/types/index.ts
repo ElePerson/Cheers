@@ -24,6 +24,7 @@ export interface Workspace {
 export interface Channel {
   channel_id: string;
   name: string;
+  avatar_url?: string | null;
   type: string;
   /** Interaction kind, independent from public/private/DM access semantics. */
   kind?: "text" | "voice";

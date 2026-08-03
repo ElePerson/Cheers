@@ -89,6 +89,14 @@ pub enum PushKind {
 }
 
 impl PushKind {
+    fn channel_id_for_mute(&self) -> Option<Uuid> {
+        match self {
+            Self::DirectMessage { channel_id, .. } | Self::Mention { channel_id, .. } => {
+                Some(*channel_id)
+            }
+            Self::PermissionRequest { .. } | Self::Invite { .. } => None,
+        }
+    }
     /// APNs alert title/body — deliberately generic (payload minimization).
     fn alert(&self) -> (String, String) {
         match self {
@@ -183,6 +191,11 @@ pub fn push_to_user(state: &AppState, user_id: Uuid, kind: PushKind) {
     };
     let db = state.db.clone();
     tokio::spawn(async move {
+        if let Some(channel_id) = kind.channel_id_for_mute() {
+            if is_channel_muted(&db, user_id, channel_id).await {
+                return;
+            }
+        }
         let tokens = device_tokens(&db, user_id).await;
         if tokens.is_empty() {
             return;
@@ -206,6 +219,19 @@ pub fn push_to_user(state: &AppState, user_id: Uuid, kind: PushKind) {
             }
         }
     });
+}
+
+async fn is_channel_muted(db: &PgPool, user_id: Uuid, channel_id: Uuid) -> bool {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT muted FROM channel_notification_preferences WHERE user_id = $1 AND channel_id = $2",
+    )
+    .bind(user_id.to_string())
+    .bind(channel_id.to_string())
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(false)
 }
 
 fn build_payload(kind: &PushKind, title: &str, body: &str) -> Value {

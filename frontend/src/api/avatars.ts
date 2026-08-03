@@ -23,3 +23,8 @@ export function uploadUserAvatar(file: File): Promise<string> {
 export function uploadBotAvatar(botId: string, file: File): Promise<string> {
   return uploadAvatar(`/bots/${botId}/avatar`, file);
 }
+
+/** Set a channel's avatar (channel owner/admin). Returns the new avatar_url. */
+export function uploadChannelAvatar(channelId: string, file: File): Promise<string> {
+  return uploadAvatar(`/channels/${channelId}/avatar`, file);
+}

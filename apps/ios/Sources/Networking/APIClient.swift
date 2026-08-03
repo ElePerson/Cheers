@@ -492,6 +492,24 @@ struct APIClient: Sendable {
         return try decode(Resp.self, from: try await send(request)).avatarURL
     }
 
+    func uploadBotAvatar(botId: String, data: Data, contentType: String) async throws -> String {
+        try await uploadAvatar(path: "/bots/\(botId)/avatar", data: data, contentType: contentType)
+    }
+
+    func uploadChannelAvatar(channelId: String, data: Data, contentType: String) async throws -> String {
+        try await uploadAvatar(path: "/channels/\(channelId)/avatar", data: data, contentType: contentType)
+    }
+
+    private func uploadAvatar(path: String, data: Data, contentType: String) async throws -> String {
+        struct Resp: Decodable {
+            let avatarURL: String
+            enum CodingKeys: String, CodingKey { case avatarURL = "avatar_url" }
+        }
+        var request = try makeRequest("POST", path, body: data)
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        return try decode(Resp.self, from: try await send(request)).avatarURL
+    }
+
     func grantAIConsent(channelId: String, disclosure: AIDataDisclosure) async throws {
         _ = try await postJSON(
             "/channels/\(channelId)/bots/\(disclosure.botId)/ai-consent",
@@ -744,12 +762,29 @@ struct APIClient: Sendable {
         try await patchJSON("/channels/\(channelId)", body: update, as: ChannelDto.self)
     }
 
+    func getChannel(channelId: String) async throws -> ChannelDto {
+        try await getJSON("/channels/\(channelId)", as: ChannelDto.self)
+    }
+
     func deleteChannel(channelId: String) async throws {
         try await deleteEmpty("/channels/\(channelId)")
     }
 
     func leaveChannel(channelId: String) async throws {
         try await postEmpty("/channels/\(channelId)/leave")
+    }
+
+    func setChannelMuted(channelId: String, muted: Bool) async throws {
+        struct Body: Encodable { let muted: Bool }
+        _ = try await putJSON("/channels/\(channelId)/notification-preference", body: Body(muted: muted), as: JSONValue.self)
+    }
+
+    func listMutedChannelIds() async throws -> Set<String> {
+        struct Response: Decodable {
+            let channelIds: [String]
+            enum CodingKeys: String, CodingKey { case channelIds = "channel_ids" }
+        }
+        return Set(try await getJSON("/channels/notification-preferences", as: Response.self).channelIds)
     }
 
     // MARK: Invite links (WORKSPACE-scoped, workspace-admin gated)

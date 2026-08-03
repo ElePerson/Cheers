@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// Bot detail / management sheet: edit profile, reconnect, enable/disable, delete.
@@ -21,12 +22,16 @@ struct BotDetailView: View {
     @State private var showDisableConfirm = false
     @State private var showReconnect = false
     @State private var errorText: String?
+    @State private var avatarURL: URL?
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var isUploadingAvatar = false
 
     init(bot: BotDto, onChanged: @escaping () -> Void) {
         self.bot = bot
         self.onChanged = onChanged
         _displayName = State(initialValue: bot.displayName ?? bot.username ?? "")
         _descriptionText = State(initialValue: bot.description ?? "")
+        _avatarURL = State(initialValue: URL(string: bot.avatarUrl ?? ""))
     }
 
     private var canManage: Bool { bot.canManage ?? false }
@@ -38,7 +43,7 @@ struct BotDetailView: View {
                 Section {
                     HStack(spacing: 12) {
                         ZStack(alignment: .bottomTrailing) {
-                            AvatarView(seedId: bot.botId, name: bot.name, size: 52)
+                            AvatarView(seedId: bot.botId, name: bot.name, size: 52, imageURL: avatarURL)
                             Circle()
                                 .fill(bot.online ? Theme.online : Theme.textFaint)
                                 .frame(width: 12, height: 12)
@@ -61,6 +66,13 @@ struct BotDetailView: View {
 
                 if canManage {
                     Section("Profile") {
+                        HStack {
+                            PhotosPicker(selection: $pickerItem, matching: .images) {
+                                Text(isUploadingAvatar ? "Uploading…" : "Change photo")
+                            }
+                            .disabled(isUploadingAvatar)
+                            Spacer()
+                        }
                         TextField("Display name", text: $displayName)
                         TextField("Description", text: $descriptionText, axis: .vertical)
                             .lineLimit(3...6)
@@ -185,6 +197,10 @@ struct BotDetailView: View {
                 async let governance: Void = loadPermissions()
                 _ = await (live, governance)
             }
+            .onChange(of: pickerItem) { _, item in
+                guard let item else { return }
+                Task { await uploadAvatar(from: item) }
+            }
         }
     }
 
@@ -288,6 +304,35 @@ struct BotDetailView: View {
         } catch {
             errorText = error.localizedDescription
         }
+    }
+
+    private func uploadAvatar(from item: PhotosPickerItem) async {
+        guard let api = app.api else { return }
+        isUploadingAvatar = true
+        defer { isUploadingAvatar = false; pickerItem = nil }
+        do {
+            guard let jpeg = try await Self.jpegData(from: item) else {
+                errorText = "Could not read the selected photo."
+                return
+            }
+            let url = try await api.uploadBotAvatar(botId: bot.botId, data: jpeg, contentType: "image/jpeg")
+            avatarURL = app.resolveServerResourceURL(url)
+            errorText = nil
+            onChanged()
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private static func jpegData(from item: PhotosPickerItem) async throws -> Data? {
+        if let data = try await item.loadTransferable(type: Data.self),
+           let image = UIImage(data: data),
+           let jpeg = image.jpegData(compressionQuality: 0.88) { return jpeg }
+        if let url = try await item.loadTransferable(type: URL.self),
+           let data = try? Data(contentsOf: url),
+           let image = UIImage(data: data),
+           let jpeg = image.jpegData(compressionQuality: 0.88) { return jpeg }
+        return nil
     }
 
     private func setDisabled(_ disabled: Bool) async {

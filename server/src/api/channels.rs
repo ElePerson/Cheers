@@ -14,6 +14,7 @@ pub struct ChannelDto {
     pub channel_id: String,
     pub workspace_id: String,
     pub name: String,
+    pub avatar_url: Option<String>,
     #[serde(rename = "type")]
     pub channel_type: String,
     /// Interaction kind, orthogonal to public/private/DM access semantics.
@@ -82,6 +83,11 @@ pub struct ChannelUpdateRequest {
 }
 
 #[derive(Deserialize)]
+pub struct ChannelNotificationPreferenceRequest {
+    pub muted: bool,
+}
+
+#[derive(Deserialize)]
 pub struct AddMemberRequest {
     pub member_id: String,
     pub member_type: String,
@@ -113,6 +119,7 @@ fn dto(row: sqlx::postgres::PgRow) -> ChannelDto {
         channel_id: row.try_get("channel_id").unwrap_or_default(),
         workspace_id: row.try_get("workspace_id").unwrap_or_default(),
         name: row.try_get("name").unwrap_or_default(),
+        avatar_url: row.try_get("avatar_url").ok(),
         channel_type: row.try_get("type").unwrap_or_else(|_| "public".to_string()),
         kind: row.try_get("kind").unwrap_or_else(|_| "text".to_string()),
         purpose: row.try_get("purpose").ok(),
@@ -158,7 +165,7 @@ async fn is_channel_member(
     Ok(ok)
 }
 
-async fn ensure_channel_admin(
+pub(crate) async fn ensure_channel_admin(
     state: &AppState,
     channel_id: &str,
     user_id: &str,
@@ -210,7 +217,7 @@ pub async fn list_channels(
         let rows = sqlx::query(
             // One lateral scan for both counts (cm is an INNER JOIN here, so every row
             // is a member — no non-member guard needed).
-            "SELECT c.channel_id, c.workspace_id, c.name, c.type, c.kind, c.purpose,
+            "SELECT c.channel_id, c.workspace_id, c.name, c.avatar_url, c.type, c.kind, c.purpose,
                     c.auto_assist, c.allow_member_invites, c.allow_bot_adds, c.created_at,
                     w.name AS workspace_name,
                     counts.unread_count,
@@ -268,7 +275,7 @@ pub async fn list_channels(
         // (`cm.member_id IS NOT NULL`) lives inside the lateral WHERE, so non-members
         // scan zero rows and an aggregate over zero rows still yields one row of 0 —
         // preserving the old CASE-based "non-members get 0" invariant.
-        "SELECT DISTINCT c.channel_id, c.workspace_id, c.name, c.type, c.kind, c.purpose,
+        "SELECT DISTINCT c.channel_id, c.workspace_id, c.name, c.avatar_url, c.type, c.kind, c.purpose,
                 c.auto_assist, c.allow_member_invites, c.allow_bot_adds, c.created_at,
                 (cm.member_id IS NOT NULL) AS is_member,
                 cm.role AS my_role,
@@ -372,7 +379,7 @@ pub async fn create_dm(
     let channel_id =
         crate::domain::dms::find_or_create_dm(&state.db, me, &target_id, is_bot).await?;
     let row = sqlx::query(
-        "SELECT channel_id, workspace_id, name, type, kind, purpose, auto_assist,
+        "SELECT channel_id, workspace_id, name, avatar_url, type, kind, purpose, auto_assist,
                 allow_member_invites, allow_bot_adds
          FROM channels WHERE channel_id = $1",
     )
@@ -390,7 +397,7 @@ pub async fn list_dms(
     Extension(claims): Extension<Claims>,
 ) -> Result<Json<Vec<Value>>, AppError> {
     let rows = sqlx::query(
-        "SELECT c.channel_id, c.workspace_id, c.name, c.type, c.kind, c.purpose, c.auto_assist,
+        "SELECT c.channel_id, c.workspace_id, c.name, c.avatar_url, c.type, c.kind, c.purpose, c.auto_assist,
                 c.allow_member_invites, c.allow_bot_adds,
                 COALESCE((
                     -- Bounded unread scan: cap at the newest 100 unread messages so a
@@ -481,7 +488,7 @@ pub async fn create_channel(
         "INSERT INTO channels
             (channel_id, workspace_id, name, type, kind, purpose, allow_member_invites, allow_bot_adds)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING channel_id, workspace_id, name, type, kind, purpose, auto_assist, allow_member_invites, allow_bot_adds",
+         RETURNING channel_id, workspace_id, name, avatar_url, type, kind, purpose, auto_assist, allow_member_invites, allow_bot_adds",
     )
     .bind(&channel_id)
     .bind(&body.workspace_id)
@@ -594,7 +601,7 @@ pub async fn get_channel(
         return Err(AppError::Forbidden("not a channel member".into()));
     }
     let row = sqlx::query(
-        "SELECT c.channel_id, c.workspace_id, c.name, c.type, c.kind, c.purpose,
+        "SELECT c.channel_id, c.workspace_id, c.name, c.avatar_url, c.type, c.kind, c.purpose,
                 c.auto_assist, c.allow_member_invites, c.allow_bot_adds,
                 cm.role AS my_role,
                 (cm.role IN ('owner', 'admin') OR $2::boolean) AS can_manage
@@ -627,7 +634,7 @@ pub async fn update_channel(
              allow_member_invites = COALESCE($6, allow_member_invites),
              allow_bot_adds = COALESCE($7, allow_bot_adds)
          WHERE channel_id = $1
-         RETURNING channel_id, workspace_id, name, type, kind, purpose, auto_assist, allow_member_invites, allow_bot_adds",
+         RETURNING channel_id, workspace_id, name, avatar_url, type, kind, purpose, auto_assist, allow_member_invites, allow_bot_adds",
     )
     .bind(&channel_id)
     .bind(body.name)
@@ -640,6 +647,49 @@ pub async fn update_channel(
     .await?
     .ok_or(AppError::NotFound)?;
     Ok(Json(dto(row)))
+}
+
+/// PUT /channels/:channel_id/notification-preference — per-user, cross-device mute.
+pub async fn update_notification_preference(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(channel_id): Path<String>,
+    Json(body): Json<ChannelNotificationPreferenceRequest>,
+) -> Result<Json<Value>, AppError> {
+    if !is_channel_member(&state, &channel_id, &claims.sub, &claims.role).await? {
+        return Err(AppError::Forbidden("not a channel member".into()));
+    }
+    sqlx::query(
+        "INSERT INTO channel_notification_preferences (user_id, channel_id, muted)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, channel_id) DO UPDATE SET muted = EXCLUDED.muted, updated_at = NOW()",
+    )
+    .bind(&claims.sub)
+    .bind(&channel_id)
+    .bind(body.muted)
+    .execute(&state.db)
+    .await?;
+    Ok(Json(
+        json!({ "channel_id": channel_id, "muted": body.muted }),
+    ))
+}
+
+/// GET /channels/notification-preferences — muted IDs for the current user.
+pub async fn list_notification_preferences(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+) -> Result<Json<Value>, AppError> {
+    let rows = sqlx::query(
+        "SELECT channel_id FROM channel_notification_preferences WHERE user_id = $1 AND muted = TRUE",
+    )
+    .bind(&claims.sub)
+    .fetch_all(&state.db)
+    .await?;
+    let channel_ids: Vec<String> = rows
+        .into_iter()
+        .filter_map(|r| r.try_get("channel_id").ok())
+        .collect();
+    Ok(Json(json!({ "channel_ids": channel_ids })))
 }
 
 pub async fn delete_channel(
