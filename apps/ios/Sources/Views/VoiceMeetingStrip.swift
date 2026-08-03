@@ -97,6 +97,7 @@ struct VoiceMeetingStrip: View {
             }
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.circle)
+            .tint(.green)
             .disabled(voice.isJoining)
             .accessibilityLabel(voice.isJoining ? "Joining voice meeting" : "Join voice meeting")
         }
