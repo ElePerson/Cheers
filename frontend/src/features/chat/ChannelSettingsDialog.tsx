@@ -4,6 +4,8 @@ import { Bot, Trash2, UserPlus, X, LogOut } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
+import { AvatarUpload } from "@/components/ui/AvatarUpload";
+import { uploadChannelAvatar } from "@/api/avatars";
 import {
   listChannelMembers,
   addChannelMember,
@@ -114,6 +116,12 @@ export function ChannelSettingsDialog({
     }
   }
 
+  async function uploadAvatar(file: File) {
+    const avatar_url = await uploadChannelAvatar(channel.channel_id, file);
+    patchChannel(channel.channel_id, { avatar_url });
+    return avatar_url;
+  }
+
   async function addMember(it: InvitableItem) {
     try {
       await addChannelMember(channel.channel_id, {
@@ -180,6 +188,17 @@ export function ChannelSettingsDialog({
       <div className="space-y-5">
         {/* Meta */}
         <div className="space-y-2">
+          {channel.type !== "dm" && canManage && (
+            <div className="flex items-center gap-3 pb-2">
+              <AvatarUpload
+                name={channel.name}
+                id={channel.channel_id}
+                src={channel.avatar_url}
+                onUpload={uploadAvatar}
+              />
+              <span className="text-sm text-zinc-400">Channel avatar</span>
+            </div>
+          )}
           <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
             Name
           </label>

@@ -40,6 +40,7 @@ struct ConversationRow: Identifiable, Codable {
 @Observable
 final class ConversationListModel {
     private(set) var rows: [ConversationRow] = []
+    private(set) var mutedChannelIds: Set<String> = []
     private(set) var isLoading = false
     var errorMessage: String?
 
@@ -103,6 +104,18 @@ final class ConversationListModel {
         listenerId = nil
     }
 
+    func remove(channelId: String) {
+        rows.removeAll { $0.channel.channelId == channelId }
+        mutedChannelIds.remove(channelId)
+        persistCache()
+    }
+
+    func isMuted(channelId: String) -> Bool { mutedChannelIds.contains(channelId) }
+
+    func setMuted(channelId: String, muted: Bool) {
+        if muted { mutedChannelIds.insert(channelId) } else { mutedChannelIds.remove(channelId) }
+    }
+
     func loadIfNeeded() async {
         guard !loadedOnce else { return }
         await load()
@@ -127,6 +140,7 @@ final class ConversationListModel {
             let teams = try await teamsTask
             let dms = try await dmsTask
             let personal = try? await personalTask
+            async let mutedTask = api.listMutedChannelIds()
 
             var channels: [(ChannelDto, String?)] = dms.map { ($0, nil) }
             // Channel lists per workspace, fetched concurrently. Personal
@@ -165,6 +179,7 @@ final class ConversationListModel {
             }
             sortRows(&newRows)
             rows = newRows
+            mutedChannelIds = (try? await mutedTask) ?? []
             loadedOnce = true
             persistCache()
 

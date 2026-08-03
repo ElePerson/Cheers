@@ -17,6 +17,7 @@ struct DrawerView: View {
     @State private var showWorkspaceAdmin = false
     @State private var workspaceAvatarImages: [String: UIImage] = [:]
     @State private var userAvatarURL: URL?
+    @State private var leaveTarget: ConversationRow?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -97,6 +98,22 @@ struct DrawerView: View {
             NewWorkspaceSheet()
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+        }
+        .confirmationDialog(
+            "Leave #\(leaveTarget?.channel.name ?? "channel")?",
+            isPresented: Binding(
+                get: { leaveTarget != nil },
+                set: { if !$0 { leaveTarget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Leave channel", role: .destructive) {
+                guard let row = leaveTarget else { return }
+                Task { await leave(row) }
+            }
+            Button("Cancel", role: .cancel) { leaveTarget = nil }
+        } message: {
+            Text("You will stop receiving messages from this channel until someone invites you again.")
         }
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .onChange(of: showSearch) { _, presented in
@@ -270,6 +287,22 @@ struct DrawerView: View {
         }
         .buttonStyle(.plain)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                Task { await toggleMute(row) }
+            } label: {
+                Label(
+                    convo.isMuted(channelId: row.channel.channelId) ? "Unmute" : "Mute",
+                    systemImage: convo.isMuted(channelId: row.channel.channelId) ? "bell" : "bell.slash"
+                )
+            }
+            .tint(.orange)
+            if !row.channel.isDM {
+                Button(role: .destructive) {
+                    leaveTarget = row
+                } label: {
+                    Label("Leave", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
             if row.unreadCount > 0 {
                 Button {
                     Task { await markRead(row) }
@@ -280,6 +313,21 @@ struct DrawerView: View {
             }
         }
         .contextMenu {
+            Button {
+                Task { await toggleMute(row) }
+            } label: {
+                Label(
+                    convo.isMuted(channelId: row.channel.channelId) ? "Unmute channel" : "Mute channel",
+                    systemImage: convo.isMuted(channelId: row.channel.channelId) ? "bell" : "bell.slash"
+                )
+            }
+            if !row.channel.isDM {
+                Button(role: .destructive) {
+                    leaveTarget = row
+                } label: {
+                    Label("Leave channel", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
             if row.unreadCount > 0 {
                 Button {
                     Task { await markRead(row) }
@@ -296,6 +344,27 @@ struct DrawerView: View {
             convo.markRead(channelId: row.channel.channelId)
         } catch {
             // Keep the badge if the server did not accept the read receipt.
+        }
+    }
+
+    private func leave(_ row: ConversationRow) async {
+        defer { leaveTarget = nil }
+        do {
+            try await app.api?.leaveChannel(channelId: row.channel.channelId)
+            convo.remove(channelId: row.channel.channelId)
+            shell.clearCurrentChannel(ifMatching: row.channel.channelId)
+        } catch {
+            // Keep the row in place; a refresh or the channel settings surface can retry.
+        }
+    }
+
+    private func toggleMute(_ row: ConversationRow) async {
+        let muted = !convo.isMuted(channelId: row.channel.channelId)
+        do {
+            try await app.api?.setChannelMuted(channelId: row.channel.channelId, muted: muted)
+            convo.setMuted(channelId: row.channel.channelId, muted: muted)
+        } catch {
+            // The control reflects the server-synced state, so do not change it on failure.
         }
     }
 

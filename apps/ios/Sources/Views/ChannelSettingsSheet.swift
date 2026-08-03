@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// Name, purpose, visibility, and the danger zone. Editing is gated on the same
@@ -17,6 +18,9 @@ struct ChannelSettingsSheet: View {
     @State private var errorText: String?
     @State private var confirmDelete = false
     @State private var confirmLeave = false
+    @State private var avatarURL: URL?
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var isUploadingAvatar = false
 
     private var myRole: String? {
         guard let me = app.session?.userId else { return nil }
@@ -46,6 +50,15 @@ struct ChannelSettingsSheet: View {
                     }
                 }
                 Section("General") {
+                    if !channel.isDM && canManage {
+                        HStack {
+                            AvatarView(seedId: channel.channelId, name: channel.name, size: 48, imageURL: avatarURL)
+                            PhotosPicker(selection: $pickerItem, matching: .images) {
+                                Text(isUploadingAvatar ? "Uploading…" : "Change photo")
+                            }
+                            .disabled(isUploadingAvatar)
+                        }
+                    }
                     LabeledContent("Name") {
                         TextField("channel-name", text: $name)
                             .multilineTextAlignment(.trailing)
@@ -97,11 +110,16 @@ struct ChannelSettingsSheet: View {
         }
         .task {
             name = channel.name
+            avatarURL = channel.avatarUrl.flatMap(URL.init(string:))
             purpose = channel.purpose ?? ""
             isPublic = channel.channelType == "public"
             if let api = app.api {
                 members = (try? await api.listMembers(channelId: channel.channelId)) ?? []
             }
+        }
+        .onChange(of: pickerItem) { _, item in
+            guard let item else { return }
+            Task { await uploadAvatar(from: item) }
         }
         // Destructive actions get an explicit confirm with Cancel as the default —
         // deleting a channel must never be one stray tap away.
@@ -168,6 +186,37 @@ struct ChannelSettingsSheet: View {
         } catch {
             errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
+    }
+
+    private func uploadAvatar(from item: PhotosPickerItem) async {
+        guard let api = app.api else { return }
+        isUploadingAvatar = true
+        defer { isUploadingAvatar = false; pickerItem = nil }
+        do {
+            guard let jpeg = try await Self.jpegData(from: item) else {
+                errorText = "Could not read the selected photo."
+                return
+            }
+            let url = try await api.uploadChannelAvatar(channelId: channel.channelId, data: jpeg, contentType: "image/jpeg")
+            avatarURL = app.resolveServerResourceURL(url)
+            if let refreshed = try? await api.getChannel(channelId: channel.channelId) {
+                shell.replaceCurrentChannel(refreshed)
+            }
+            errorText = nil
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private static func jpegData(from item: PhotosPickerItem) async throws -> Data? {
+        if let data = try await item.loadTransferable(type: Data.self),
+           let image = UIImage(data: data),
+           let jpeg = image.jpegData(compressionQuality: 0.88) { return jpeg }
+        if let url = try await item.loadTransferable(type: URL.self),
+           let data = try? Data(contentsOf: url),
+           let image = UIImage(data: data),
+           let jpeg = image.jpegData(compressionQuality: 0.88) { return jpeg }
+        return nil
     }
 
     private func leave() async {

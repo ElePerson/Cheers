@@ -57,7 +57,7 @@ fn content_type_header(headers: &HeaderMap) -> &str {
         .unwrap_or("")
 }
 
-/// Store image bytes and return the public serving URL. `kind` is "user"|"bot".
+/// Store image bytes and return the public serving URL. `kind` is "user"|"bot"|"channel".
 async fn store_avatar(
     state: &AppState,
     kind: &str,
@@ -143,6 +143,37 @@ pub async fn get_bot_avatar(
     Path((bot_id, file)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
     serve_avatar(&state, "bot", &bot_id, &file).await
+}
+
+/// `POST /api/v1/channels/:channel_id/avatar` — channel owner/admin only.
+pub async fn upload_channel_avatar(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(channel_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, AppError> {
+    crate::api::channels::ensure_channel_admin(&state, &channel_id, &claims.sub, &claims.role)
+        .await?;
+    let ct = content_type_header(&headers).to_string();
+    let url = store_avatar(&state, "channel", &channel_id, &ct, body).await?;
+    let changed = sqlx::query("UPDATE channels SET avatar_url = $1 WHERE channel_id = $2")
+        .bind(&url)
+        .bind(&channel_id)
+        .execute(&state.db)
+        .await?;
+    if changed.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(json!({ "avatar_url": url })))
+}
+
+/// `GET /api/v1/channels/:channel_id/avatar/:file` — PUBLIC image bytes.
+pub async fn get_channel_avatar(
+    State(state): State<AppState>,
+    Path((channel_id, file)): Path<(String, String)>,
+) -> Result<Response, AppError> {
+    serve_avatar(&state, "channel", &channel_id, &file).await
 }
 
 async fn serve_avatar(
