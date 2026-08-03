@@ -21,6 +21,10 @@ enum Theme {
     static let hitMin: CGFloat = 44
     /// Comfortable list-row vertical inset (beyond default List insets).
     static let rowVertical: CGFloat = 10
+    /// Separation after a complete message group (including its agent trace).
+    /// This is deliberately larger than `space2` so adjacent messages remain
+    /// visually distinct without loosening the sender/content relationship.
+    static let messageGroupGap: CGFloat = 20
     /// Avatar size for primary list rows (friends / conversations).
     static let avatarList: CGFloat = 40
 

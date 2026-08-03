@@ -1087,7 +1087,6 @@ private struct ChatTimelineRow: View {
                     message: message,
                     isOwn: isOwn,
                     showAvatar: showAvatar,
-                    isLastInGroup: isLast,
                     formattedTime: time,
                     repliedTo: repliedTo,
                     onReply: { onReply(message) },
@@ -1105,8 +1104,6 @@ private struct ChatTimelineRow: View {
                         isRunning: message.isPartial == true
                     )
                     .padding(.horizontal, Theme.space5)
-                    .padding(.top, Theme.space1)
-                    .padding(.bottom, message.isPartial == true ? 0 : 4)
                 }
                 if message.msgType == "task_claim_confirmation" {
                     TaskClaimConfirmationFooter(message: message, channelId: channelId)
@@ -1114,6 +1111,9 @@ private struct ChatTimelineRow: View {
                         .padding(.top, 2)
                 }
             }
+            // Keep the trace visually attached to its message, then create a
+            // clear boundary before the next sender/content/trace unit.
+            .padding(.bottom, isLast ? Theme.messageGroupGap : Theme.space1)
         }
     }
 }
