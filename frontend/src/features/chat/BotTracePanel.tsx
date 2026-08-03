@@ -92,14 +92,26 @@ function asRecord(value: unknown): JsonRecord | null {
     : null;
 }
 
-function formatJson(value: unknown): string {
-  return JSON.stringify(value, null, 2) ?? String(value);
+const DETAIL_PREVIEW_LIMIT = 12_000;
+const DIFF_SOURCE_LIMIT = 8_000;
+const DIFF_LINE_LIMIT = 2_000;
+
+function formatJson(value: unknown, limit = DETAIL_PREVIEW_LIMIT): string {
+  const formatted = JSON.stringify(value, null, 2) ?? String(value);
+  return formatted.length > limit
+    ? `${formatted.slice(0, limit)}\n… preview truncated (${formatted.length - limit} more characters)`
+    : formatted;
 }
 
 function DetailValue({ value }: { value: unknown }) {
+  const rendered = typeof value === "string"
+    ? value.length > DETAIL_PREVIEW_LIMIT
+      ? `${value.slice(0, DETAIL_PREVIEW_LIMIT)}\n… preview truncated (${value.length - DETAIL_PREVIEW_LIMIT} more characters)`
+      : value
+    : formatJson(value);
   return (
     <pre className="whitespace-pre-wrap break-words font-mono">
-      {typeof value === "string" ? value : formatJson(value)}
+      {rendered}
     </pre>
   );
 }
@@ -131,23 +143,69 @@ function fileDiffs(data: JsonRecord | null): FileDiff[] {
   });
 }
 
-/** A bounded unified representation for DiffView. ACP sends full before/after
- * files, so intentionally cap this inspector preview rather than expanding the
- * message indefinitely. */
+/** A real, bounded unified diff. For oversized files we deliberately decline
+ * rendering rather than misrepresenting every unchanged line as a replacement. */
 function fileDiffPreview({ path, oldText, newText }: FileDiff): string {
-  const limit = 12_000;
-  const clip = (text: string) =>
-    text.length > limit ? `${text.slice(0, limit)}\n… preview truncated` : text;
-  const oldLines = clip(oldText).split("\n").map((line) => `-${line}`);
-  const newLines = clip(newText).split("\n").map((line) => `+${line}`);
+  const oldLines = oldText ? oldText.split("\n") : [];
+  const newLines = newText ? newText.split("\n") : [];
+  if (
+    oldText.length + newText.length > DIFF_SOURCE_LIMIT ||
+    oldLines.length + newLines.length > DIFF_LINE_LIMIT
+  ) {
+    return [
+      `diff --git a/${path} b/${path}`,
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      "@@ diff omitted @@",
+      " Diff is too large to render safely in the inspector.",
+    ].join("\n");
+  }
+
+  const width = newLines.length + 1;
+  const lcs = new Uint16Array((oldLines.length + 1) * width);
+  for (let oldIndex = oldLines.length - 1; oldIndex >= 0; oldIndex--) {
+    for (let newIndex = newLines.length - 1; newIndex >= 0; newIndex--) {
+      const offset = oldIndex * width + newIndex;
+      lcs[offset] = oldLines[oldIndex] === newLines[newIndex]
+        ? lcs[(oldIndex + 1) * width + newIndex + 1] + 1
+        : Math.max(lcs[(oldIndex + 1) * width + newIndex], lcs[oldIndex * width + newIndex + 1]);
+    }
+  }
+
+  const lines: string[] = [];
+  let oldIndex = 0;
+  let newIndex = 0;
+  while (oldIndex < oldLines.length || newIndex < newLines.length) {
+    if (oldIndex < oldLines.length && newIndex < newLines.length && oldLines[oldIndex] === newLines[newIndex]) {
+      lines.push(` ${oldLines[oldIndex++]}`);
+      newIndex++;
+    } else if (newIndex < newLines.length && (oldIndex === oldLines.length || lcs[oldIndex * width + newIndex + 1] >= lcs[(oldIndex + 1) * width + newIndex])) {
+      lines.push(`+${newLines[newIndex++]}`);
+    } else {
+      lines.push(`-${oldLines[oldIndex++]}`);
+    }
+  }
   return [
     `diff --git a/${path} b/${path}`,
     `--- a/${path}`,
     `+++ b/${path}`,
     `@@ -1,${oldLines.length} +1,${newLines.length} @@`,
-    ...oldLines,
-    ...newLines,
+    ...lines,
   ].join("\n");
+}
+
+function RawEventData({ metadata, data }: { metadata: JsonRecord; data: JsonRecord | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">Raw event data</summary>
+      {open && (
+        <div className="mt-2 max-h-64 overflow-auto">
+          <DetailValue value={{ ...metadata, ...(data ? { data } : {}) }} />
+        </div>
+      )}
+    </details>
+  );
 }
 
 function FileEditInspector({ diffs }: { diffs: FileDiff[] }) {
@@ -262,12 +320,7 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
           <div className="max-h-56 overflow-auto rounded-lg bg-zinc-950 px-2.5 py-2 text-zinc-300"><DetailValue value={output} /></div>
         </div>
       )}
-      <details>
-        <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">Raw event data</summary>
-        <div className="mt-2 max-h-64 overflow-auto">
-          <DetailValue value={{ ...metadata, ...(data ? { data } : {}) }} />
-        </div>
-      </details>
+      <RawEventData metadata={metadata} data={data} />
     </div>
   );
 }
