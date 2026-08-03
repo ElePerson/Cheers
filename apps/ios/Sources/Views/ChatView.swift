@@ -266,10 +266,7 @@ struct ChatView: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             if model.channel.isVoice {
-                VoiceMeetingStrip(
-                    voice: voice,
-                    canManageTranscription: voice.canManageTranscription
-                )
+                VoiceMeetingStrip(voice: voice)
             }
             messageScroll
             TaskClaimsPanelView(model: model)
