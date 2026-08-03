@@ -102,7 +102,9 @@ function ChannelItem({ channel, selected, onClick, voicePresence }: ChannelItemP
             : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
         )}
       >
-        {channel.kind === "voice" ? (
+        {channel.avatar_url ? (
+          <Avatar name={channel.name} src={channel.avatar_url} id={channel.channel_id} size="xs" />
+        ) : channel.kind === "voice" ? (
           <Volume2 className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
         ) : (
           <Hash className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />

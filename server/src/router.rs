@@ -269,6 +269,10 @@ fn build_authed_routes(state: AppState) -> Router<AppState> {
             "/api/v1/channels",
             get(api::channels::list_channels).post(api::channels::create_channel),
         )
+        .route(
+            "/api/v1/channels/notification-preferences",
+            get(api::channels::list_notification_preferences),
+        )
         // DM: a type='dm' channel. Static segment → matches before :channel_id.
         .route(
             "/api/v1/channels/dm",
@@ -279,6 +283,10 @@ fn build_authed_routes(state: AppState) -> Router<AppState> {
             get(api::channels::get_channel)
                 .patch(api::channels::update_channel)
                 .delete(api::channels::delete_channel),
+        )
+        .route(
+            "/api/v1/channels/:channel_id/notification-preference",
+            put(api::channels::update_notification_preference),
         )
         .route(
             "/api/v1/channels/:channel_id/members",
@@ -561,6 +569,10 @@ fn build_authed_routes(state: AppState) -> Router<AppState> {
         .route(
             "/api/v1/bots/:bot_id/avatar",
             post(api::avatars::upload_bot_avatar),
+        )
+        .route(
+            "/api/v1/channels/:channel_id/avatar",
+            post(api::avatars::upload_channel_avatar),
         )
         .route(
             "/api/v1/files/:file_id/confirm",
@@ -870,6 +882,10 @@ fn build_public_routes() -> Router<AppState> {
         .route(
             "/api/v1/bots/:bot_id/avatar/:file",
             get(api::avatars::get_bot_avatar),
+        )
+        .route(
+            "/api/v1/channels/:channel_id/avatar/:file",
+            get(api::avatars::get_channel_avatar),
         )
 }
 

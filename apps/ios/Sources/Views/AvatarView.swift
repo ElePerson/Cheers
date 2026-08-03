@@ -38,8 +38,7 @@ struct AvatarView: View {
     }
 }
 
-/// Hash-glyph tile for group channels (web sidebar uses a Hash glyph, not an
-/// avatar, for channels).
+/// Group channels show their uploaded avatar, falling back to the familiar hash tile.
 struct ChannelAvatarView: View {
     let channel: ChannelDto
     var size: CGFloat = 44
@@ -47,6 +46,8 @@ struct ChannelAvatarView: View {
     var body: some View {
         if channel.isDM {
             AvatarView(seedId: channel.channelId, name: channel.displayName, size: size)
+        } else if let avatarURL = channel.avatarUrl.flatMap(URL.init(string:)) {
+            AvatarView(seedId: channel.channelId, name: channel.name, size: size, imageURL: avatarURL)
         } else {
             ZStack {
                 Circle()

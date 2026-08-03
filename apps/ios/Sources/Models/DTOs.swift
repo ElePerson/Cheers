@@ -734,6 +734,7 @@ struct ChannelDto: Codable, Identifiable, Hashable {
     let channelId: String
     let workspaceId: String?
     let name: String
+    let avatarUrl: String?
     /// serde: struct field `channel_type` is renamed to "type".
     let channelType: String
     /// `text` (default) or `voice`. Voice channels retain the normal message
@@ -760,6 +761,7 @@ struct ChannelDto: Codable, Identifiable, Hashable {
         case channelId = "channel_id"
         case workspaceId = "workspace_id"
         case name
+        case avatarUrl = "avatar_url"
         case channelType = "type"
         case kind
         case purpose
