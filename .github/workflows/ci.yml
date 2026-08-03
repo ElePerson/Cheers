@@ -8,7 +8,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A merge into develop and its develop → main promotion PR reference the
+  # same head SHA. Group by that SHA so they do not spend two macOS runners
+  # performing the identical iOS validation.
+  group: ci-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -356,6 +359,10 @@ jobs:
             test-without-building
 
       - name: Build (Release device, unsigned)
+        # Feature PRs already verify the app and tests on the Simulator. The
+        # costly device Release build runs after merge to develop/main and on
+        # the develop → main promotion PR, where it is a release gate.
+        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.base_ref == 'main')
         run: |
           xcodebuild \
             -project Cheers.xcodeproj \
@@ -368,6 +375,7 @@ jobs:
             build
 
       - name: Validate release metadata and privacy manifest
+        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.base_ref == 'main')
         run: |
           APP_INFO="$RUNNER_TEMP/cheers-ios-release/Build/Products/Release-iphoneos/Cheers.app/Info.plist"
           test "$(plutil -extract CFBundleIdentifier raw "$APP_INFO")" = "app.cheers.ios"
