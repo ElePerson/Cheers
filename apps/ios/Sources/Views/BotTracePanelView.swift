@@ -296,12 +296,10 @@ private struct TraceDetailView: View {
 
             // Generic/"Other" ACP agents put their concrete tool payload one
             // level deeper under `tool`; honor that shared gateway shape too.
-            if let input = entry.data?["input"] ?? entry.data?["raw_input"]
-                ?? entry.data?["tool"]?["input"] ?? entry.data?["tool"]?["raw_input"] {
+            if let input = entry.inputPayload {
                 jsonSection("Input", value: input)
             }
-            if let output = entry.data?["output"] ?? entry.data?["raw_output"]
-                ?? entry.data?["tool"]?["output"] ?? entry.data?["tool"]?["raw_output"] {
+            if let output = entry.outputPayload {
                 jsonSection("Output", value: output)
             } else if let message = entry.message?.nilIfEmpty {
                 Section("Result") {
@@ -355,7 +353,7 @@ private struct TraceDetailView: View {
     @ViewBuilder
     private func jsonSection(_ title: LocalizedStringKey, value: JSONValue) -> some View {
         Section {
-            Text(value.prettyPrinted)
+            Text(value.prettyPrinted(maximumCharacters: 12_000))
                 .font(.caption.monospaced())
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -398,6 +396,28 @@ private enum TraceCategory {
 }
 
 private extension TraceEventDto {
+    var inputPayload: JSONValue? {
+        firstNonNullPayload(
+            data?["input"],
+            data?["raw_input"],
+            data?["tool"]?["input"],
+            data?["tool"]?["raw_input"]
+        )
+    }
+
+    var outputPayload: JSONValue? {
+        firstNonNullPayload(
+            data?["output"],
+            data?["raw_output"],
+            data?["tool"]?["output"],
+            data?["tool"]?["raw_output"]
+        )
+    }
+
+    private func firstNonNullPayload(_ candidates: JSONValue?...) -> JSONValue? {
+        candidates.compactMap { $0 }.first { !$0.isNull }
+    }
+
     var category: TraceCategory {
         if kind == "approval" || phase == "approval" { return .approval }
         if status == "failed" || phase.contains("failed") { return .failure }
@@ -481,13 +501,70 @@ private extension TraceEventDto {
 }
 
 private extension JSONValue {
-    var prettyPrinted: String {
+    var isNull: Bool {
+        if case .null = self { return true }
+        return false
+    }
+
+    func prettyPrinted(maximumCharacters: Int? = nil) -> String {
+        if let maximumCharacters {
+            return boundedPrettyPrinted(maximumCharacters: maximumCharacters)
+        }
         guard let encoded = try? JSONEncoder().encode(self),
               let object = try? JSONSerialization.jsonObject(with: encoded),
               let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
               let string = String(data: pretty, encoding: .utf8)
         else { return String(describing: self) }
         return string
+    }
+
+    private func boundedPrettyPrinted(maximumCharacters: Int) -> String {
+        var output = ""
+        var remaining = maximumCharacters
+        appendPreview(to: &output, remaining: &remaining)
+        return remaining > 0 ? output : output + "\n… (truncated)"
+    }
+
+    private func appendPreview(to output: inout String, remaining: inout Int) {
+        guard remaining > 0 else { return }
+        func append(_ fragment: String) {
+            guard remaining > 0 else { return }
+            let prefix = fragment.prefix(remaining)
+            output += prefix
+            remaining -= prefix.count
+        }
+
+        switch self {
+        case .null:
+            append("null")
+        case .bool(let value):
+            append(value ? "true" : "false")
+        case .number(let value):
+            append(String(value))
+        case .string(let value):
+            let preview = String(value.prefix(remaining))
+            let quoted = (try? JSONEncoder().encode(preview))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? preview
+            append(quoted)
+        case .array(let values):
+            append("[")
+            for (index, value) in values.enumerated() where remaining > 0 {
+                if index > 0 { append(", ") }
+                value.appendPreview(to: &output, remaining: &remaining)
+            }
+            append("]")
+        case .object(let values):
+            append("{")
+            for (index, key) in values.keys.sorted().enumerated() where remaining > 0 {
+                if index > 0 { append(", ") }
+                let quotedKey = (try? JSONEncoder().encode(key))
+                    .flatMap { String(data: $0, encoding: .utf8) } ?? key
+                append(quotedKey)
+                append(": ")
+                values[key]?.appendPreview(to: &output, remaining: &remaining)
+            }
+            append("}")
+        }
     }
 }
 
