@@ -23,19 +23,23 @@ struct MentionCandidate: Identifiable, Hashable {
     let sublabel: String?
     /// Real channel-member avatar. Group mentions intentionally have none.
     let avatarURL: String?
+    /// Bots report connector liveness; users have no comparable presence value.
+    let isOnline: Bool?
 
     init(
         id: String,
         kind: Kind,
         label: String,
         sublabel: String?,
-        avatarURL: String? = nil
+        avatarURL: String? = nil,
+        isOnline: Bool? = nil
     ) {
         self.id = id
         self.kind = kind
         self.label = label
         self.sublabel = sublabel
         self.avatarURL = avatarURL
+        self.isOnline = isOnline
     }
 
     /// Group tokens the server expands to real members. `@here` currently
@@ -317,7 +321,8 @@ final class ChatModel {
                     kind: member.isBot ? .bot : .user,
                     label: member.name,
                     sublabel: member.username,
-                    avatarURL: member.avatarUrl
+                    avatarURL: member.avatarUrl,
+                    isOnline: member.isOnline
                 )
             }
     }

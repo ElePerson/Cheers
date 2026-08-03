@@ -122,6 +122,24 @@ pub async fn create_message(
         }
     }
     debug!(channel_id = %params.channel_id, mentions = mentions.len(), "mentions resolved (names + ids)");
+
+    // A human @mention is a request to start work, not merely decorative text.
+    // Reject before allocating a sequence or persisting anything when its target
+    // bot cannot receive a task. This keeps a failed trigger out of every
+    // client's timeline instead of creating a message that no bot can answer.
+    let mut offline_bots = Vec::new();
+    for mention in &mentions {
+        if matches!(mention.member_type, mentions::MemberType::Bot)
+            && !bot_locator.is_online(mention.member_id).await
+        {
+            offline_bots.push(mention.member_id);
+        }
+    }
+    if !offline_bots.is_empty() {
+        return Err(AppError::Conflict(
+            "the mentioned bot is currently offline".into(),
+        ));
+    }
     let msg_id = Uuid::new_v4();
     let msg_type = params.msg_type.as_deref().unwrap_or("text");
     let now = Utc::now();
