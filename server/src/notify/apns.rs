@@ -3,7 +3,14 @@
 //! when unconfigured the gateway runs with push disabled — in-app WS delivery
 //! is unaffected.
 //!
-//! Provider JWTs are valid 20–60 minutes; we cache one and re-mint after 40.
+//! Follows Apple's provider guidance
+//! ([Communicating with APNs](https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/RemoteNotificationsPG/CommunicatingwithAPNs.html),
+//! [Sending notification requests to APNs](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns)):
+//! - HTTP/2 + TLS 1.2+
+//! - reuse long-lived connections (do not open/close per push)
+//! - HTTP/2 PING on idle connections
+//! - reuse the provider JWT for up to one hour
+//! - on GOAWAY / broken connection: open a fresh connection and retry once
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -11,7 +18,17 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde_json::Value;
 
+/// Provider JWTs are valid ~1 hour; re-mint before expiry (Apple: reuse, don't
+/// mint per push).
 const TOKEN_TTL: Duration = Duration::from_secs(40 * 60);
+/// One reconnect covers GOAWAY / BrokenPipe / DispatchGone on a reused stream.
+const SEND_ATTEMPTS: u8 = 2;
+/// Apple allows PING after ~1h idle; we ping sooner so NAT/middleboxes don't
+/// silently drop the reused HTTP/2 connection before the next push.
+const HTTP2_PING_INTERVAL: Duration = Duration::from_secs(60);
+const HTTP2_PING_TIMEOUT: Duration = Duration::from_secs(15);
+/// Keep idle pooled connections for hours (Apple: reuse for hours–days).
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApnsError {
@@ -34,6 +51,33 @@ pub struct ApnsClient {
     topic: String,
     endpoint: String,
     cached: Mutex<Option<(Instant, String)>>,
+}
+
+fn build_http_client() -> reqwest::Client {
+    // Long-lived HTTP/2 pool + PING (Apple: reuse connections; ping when idle).
+    // Do NOT disable the pool — rapid connect/disconnect is treated as DoS.
+    reqwest::Client::builder()
+        .http2_adaptive_window(true)
+        .http2_keep_alive_interval(HTTP2_PING_INTERVAL)
+        .http2_keep_alive_timeout(HTTP2_PING_TIMEOUT)
+        .http2_keep_alive_while_idle(true)
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+        .pool_max_idle_per_host(4)
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+fn is_reconnectable_transport(msg: &str) -> bool {
+    // hyper surfaces GOAWAY / reset / dropped dispatch as these strings.
+    let lower = msg.to_ascii_lowercase();
+    lower.contains("brokenpipe")
+        || lower.contains("dispatchgone")
+        || lower.contains("connection reset")
+        || lower.contains("connection closed")
+        || lower.contains("goaway")
+        || lower.contains("stream closed")
 }
 
 type ProviderCredentials = (String, String, String);
@@ -119,7 +163,7 @@ impl ApnsClient {
         };
 
         Some(Self {
-            http: reqwest::Client::new(),
+            http: build_http_client(),
             key,
             key_id,
             team_id,
@@ -161,22 +205,55 @@ impl ApnsClient {
         payload: &Value,
         collapse_id: &str,
     ) -> Result<(), ApnsError> {
+        let mut last_transport = None;
+        for attempt in 1..=SEND_ATTEMPTS {
+            match self.send_once(device_token, payload, collapse_id).await {
+                Ok(()) => return Ok(()),
+                Err(ApnsError::Transport(msg))
+                    if attempt < SEND_ATTEMPTS && is_reconnectable_transport(&msg) =>
+                {
+                    // Apple: on GOAWAY / dropped connection, open a new one.
+                    // hyper drops the failed pooled connection; the retry opens fresh.
+                    tracing::warn!(
+                        attempt,
+                        error = %msg,
+                        "apns connection dropped; reconnecting and retrying once"
+                    );
+                    last_transport = Some(msg);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Err(ApnsError::Transport(last_transport.unwrap_or_else(|| {
+            "exhausted APNs reconnect retries".into()
+        })))
+    }
+
+    async fn send_once(
+        &self,
+        device_token: &str,
+        payload: &Value,
+        collapse_id: &str,
+    ) -> Result<(), ApnsError> {
         let bearer = self.provider_token()?;
         let url = format!("{}/3/device/{}", self.endpoint, device_token);
-        let response = self
+        let mut req = self
             .http
             .post(&url)
             .header("authorization", format!("bearer {bearer}"))
             .header("apns-topic", &self.topic)
             .header("apns-push-type", "alert")
             .header("apns-priority", "10")
-            .header("apns-collapse-id", collapse_id)
-            .json(payload)
-            .send()
-            .await
-            // Display formatting drops the nested hyper/rustls cause, which is
-            // the only useful diagnostic for APNs TLS/HTTP2 failures.
-            .map_err(|e| ApnsError::Transport(format!("{e:?}")))?;
+            .json(payload);
+        // Empty collapse ids are invalid; skip rather than send a bad header.
+        if !collapse_id.is_empty() {
+            req = req.header("apns-collapse-id", collapse_id);
+        }
+        let response = req.send().await.map_err(|e| {
+            // Debug formatting keeps the nested hyper/rustls cause — Display
+            // alone drops it, which is what we need for BrokenPipe diagnosis.
+            ApnsError::Transport(format!("{e:?}"))
+        })?;
 
         let status = response.status().as_u16();
         if status == 200 {
@@ -197,7 +274,7 @@ impl ApnsClient {
 
 #[cfg(test)]
 mod tests {
-    use super::complete_credentials;
+    use super::{complete_credentials, is_reconnectable_transport};
 
     #[test]
     fn credential_tuple_requires_all_fields() {
@@ -215,5 +292,17 @@ mod tests {
             credentials,
             ("key".into(), "key-id".into(), "team-id".into())
         );
+    }
+
+    #[test]
+    fn reconnectable_transport_matches_observed_failures() {
+        assert!(is_reconnectable_transport(
+            "stream closed because of a broken pipe"
+        ));
+        assert!(is_reconnectable_transport(
+            "runtime dropped the dispatch task DispatchGone"
+        ));
+        assert!(is_reconnectable_transport("http2 GOAWAY received"));
+        assert!(!is_reconnectable_transport("apns rejected: 403 Forbidden"));
     }
 }
