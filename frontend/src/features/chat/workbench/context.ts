@@ -1,9 +1,8 @@
 import type { FsClient, SendResourceReq } from "./fsClient";
 import type { PluginMeta } from "./sandbox/api";
 
-// The shared context handed to the file browser and every renderer host. The workbench
-// is FILE-centric: one browser; per selected file the user gets pin / preview / raw.
-// (The old panel/tab registry is retired — files, not tabs, are the unit of the UI.)
+// The shared context handed to scene navigation, the Raw file browser, and renderer
+// hosts. Paths remain the storage contract; scene items are the default navigation.
 // This stays a *frontend* convention, NOT a backend isolation contract — the backend
 // seam is just resource verbs (fs.*) gated by channel-role.
 export interface WorkbenchContext {
