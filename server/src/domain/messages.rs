@@ -127,12 +127,18 @@ pub async fn create_message(
     // Reject before allocating a sequence or persisting anything when its target
     // bot cannot receive a task. This keeps a failed trigger out of every
     // client's timeline instead of creating a message that no bot can answer.
+    // Only an eligible dispatch target can reject a human send. In particular,
+    // readonly bot members are intentionally not woken, so @all must still post
+    // when one of those passive members is offline.
+    let mentioned_bots = mentions
+        .iter()
+        .filter(|mention| matches!(mention.member_type, mentions::MemberType::Bot))
+        .map(|mention| mention.member_id)
+        .collect();
     let mut offline_bots = Vec::new();
-    for mention in &mentions {
-        if matches!(mention.member_type, mentions::MemberType::Bot)
-            && !bot_locator.is_online(mention.member_id).await
-        {
-            offline_bots.push(mention.member_id);
+    for bot_id in filter_writable_bots(db, params.channel_id, mentioned_bots).await {
+        if !bot_locator.is_online(bot_id).await {
+            offline_bots.push(bot_id);
         }
     }
     if !offline_bots.is_empty() {
