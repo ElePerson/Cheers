@@ -1,6 +1,26 @@
 import XCTest
 
 final class AuthenticationAccessibilityUITests: XCTestCase {
+    func testGitTraceDetailFixture() {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing-git-trace",
+            "-AppleLanguages", "(en)",
+            "-AppleLocale", "en_US"
+        ]
+        app.launch()
+
+        let detail = app.scrollViews["git-trace-detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["feature/tool-presentation"].exists)
+        XCTAssertTrue(app.buttons["Copy command"].exists)
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "git-status-detail-dark"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testProductionIdentityAtLargestAccessibilityTextSize() {
         let app = XCUIApplication()
         app.launchArguments += [

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// One persistent activity control owned by a bot message.
 ///
@@ -36,9 +37,20 @@ struct BotTracePanelView: View {
                     statusIcon
                         .frame(width: 18)
                     Text(summary)
-                        .font(.subheadline)
+                        .font(.subheadline.weight(singlePresentation == nil ? .regular : .medium))
                         .lineLimit(1)
+                    if let summaryDetail {
+                        Text(summaryDetail)
+                            .font(.caption)
+                            .foregroundStyle(Theme.textMuted)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 8)
+                    if let summaryStatus {
+                        Text(summaryStatus.label)
+                            .font(.caption)
+                            .foregroundStyle(summaryStatus.color)
+                    }
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
@@ -86,9 +98,21 @@ struct BotTracePanelView: View {
         } else if displayedEvents.contains(where: { $0.status == "failed" || $0.phase.contains("failed") }) {
             Image(systemName: "xmark.circle")
                 .foregroundStyle(Theme.danger)
+        } else if let presentation = singlePresentation {
+            Image(systemName: presentation.eventType.symbol)
+                .foregroundStyle(Theme.textMuted)
         } else {
             Image(systemName: "checkmark.circle")
         }
+    }
+
+    private var singlePresentation: ToolPresentation? {
+        guard displayedEvents.count == 1 else { return nil }
+        return displayedEvents[0].toolPresentation
+    }
+
+    private var singleGitStatus: GitStatusResult? {
+        GitStatusResult.parse(singlePresentation)
     }
 
     private var summary: String {
@@ -99,7 +123,22 @@ struct BotTracePanelView: View {
             return current?.compactLabel ?? String(localized: "Running")
         }
         guard !events.isEmpty else { return String(localized: "Agent activity") }
+        if let presentation = singlePresentation { return presentation.eventType.label }
         return String(localized: "\(events.count) actions")
+    }
+
+    private var summaryDetail: String? {
+        guard let result = singleGitStatus else { return nil }
+        return String(localized: "\(result.files.count) files changed")
+    }
+
+    private var summaryStatus: (label: String, color: Color)? {
+        guard singlePresentation != nil else { return nil }
+        if isRunning { return (String(localized: "Running"), Theme.textSecondary) }
+        if displayedEvents.contains(where: { $0.status == "failed" || $0.phase.contains("failed") }) {
+            return (String(localized: "Failed"), Theme.danger)
+        }
+        return (String(localized: "Done"), Theme.online)
     }
 
     private func loadDurableTrace() async {
@@ -129,8 +168,18 @@ private struct TraceActivitySheet: View {
 
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle("Agent activity")
+            Group {
+                if let directGitStatus {
+                    GitTraceDetailView(
+                        entry: directGitStatus.entry,
+                        presentation: directGitStatus.presentation,
+                        result: directGitStatus.result
+                    )
+                } else {
+                    content
+                }
+            }
+                .navigationTitle(directGitStatus == nil ? "Agent activity" : "Git status")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
@@ -148,9 +197,23 @@ private struct TraceActivitySheet: View {
                     }
                 }
                 .navigationDestination(for: TraceEventDto.self) { entry in
-                    TraceDetailView(entry: entry)
+                    if let presentation = entry.toolPresentation,
+                       let result = GitStatusResult.parse(presentation)
+                    {
+                        GitTraceDetailView(entry: entry, presentation: presentation, result: result)
+                    } else {
+                        TraceDetailView(entry: entry)
+                    }
                 }
         }
+    }
+
+    private var directGitStatus: (entry: TraceEventDto, presentation: ToolPresentation, result: GitStatusResult)? {
+        guard events.count == 1,
+              let presentation = events[0].toolPresentation,
+              let result = GitStatusResult.parse(presentation)
+        else { return nil }
+        return (events[0], presentation, result)
     }
 
     @ViewBuilder
@@ -199,7 +262,7 @@ private struct TraceStepRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: entry.category.symbol)
+            Image(systemName: entry.displaySymbol)
                 .font(.body)
                 .foregroundStyle(entry.statusTone)
                 .frame(width: 24)
@@ -249,13 +312,236 @@ private struct TraceStepRow: View {
     }
 }
 
+struct GitTraceDetailView: View {
+    let entry: TraceEventDto
+    let presentation: ToolPresentation
+    let result: GitStatusResult
+
+    @State private var copiedCommand = false
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                statusHeader
+                    .padding(.bottom, Theme.space5)
+
+                Text(result.branch ?? String(localized: "Working tree"))
+                    .font(.body)
+                    .foregroundStyle(Theme.textPrimary)
+                    .textSelection(.enabled)
+
+                Text(countSummary)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.top, Theme.space2)
+
+                if result.clean {
+                    Label("Working tree clean", systemImage: "checkmark.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(minHeight: Theme.hitMin)
+                        .padding(.top, Theme.space5)
+                } else {
+                    LazyVStack(spacing: Theme.space2) {
+                        ForEach(result.files) { file in
+                            gitFileRow(file)
+                        }
+                    }
+                    .padding(.top, Theme.space5)
+                }
+
+                if result.truncated {
+                    Text("More files omitted.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textMuted)
+                        .padding(.top, Theme.space3)
+                }
+
+                if presentation.command != nil || presentation.cwd != nil {
+                    commandContext
+                        .padding(.top, Theme.space5)
+                }
+
+                if presentation.command != nil {
+                    copyCommandButton
+                        .padding(.top, Theme.space4)
+                }
+            }
+            .padding(.horizontal, Theme.space5)
+            .padding(.vertical, Theme.space4)
+        }
+        .accessibilityIdentifier("git-trace-detail")
+        .background(Theme.bgApp)
+        .sensoryFeedback(.success, trigger: copiedCommand)
+    }
+
+    private var statusHeader: some View {
+        HStack(spacing: Theme.space3) {
+            Image(systemName: presentation.eventType.symbol)
+                .font(.title3)
+                .foregroundStyle(Theme.textMuted)
+
+            Text(entry.status == "failed" ? "Failed" : "Done")
+                .font(.body.weight(.medium))
+                .foregroundStyle(entry.status == "failed" ? Theme.danger : Theme.online)
+
+            Spacer(minLength: Theme.space3)
+
+            Text("\(result.files.count) files changed")
+                .font(.subheadline)
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .frame(minHeight: Theme.hitMin)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var countSummary: String {
+        var items: [String] = []
+        if result.counts.staged > 0 { items.append("\(result.counts.staged) staged") }
+        if result.counts.unstaged > 0 { items.append("\(result.counts.unstaged) unstaged") }
+        if result.counts.untracked > 0 { items.append("\(result.counts.untracked) untracked") }
+        if result.counts.conflicted > 0 { items.append("\(result.counts.conflicted) conflicted") }
+        return items.isEmpty ? String(localized: "No changes") : items.joined(separator: " · ")
+    }
+
+    private func gitFileRow(_ file: GitStatusFile) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.space4) {
+            Text(fileMarker(file))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(fileColor(file))
+                .frame(width: 20, alignment: .leading)
+
+            Text(file.path)
+                .font(.caption)
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: Theme.hitMin, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private var commandContext: some View {
+        HStack(alignment: .top, spacing: Theme.space4) {
+            Image(systemName: "terminal")
+                .font(.subheadline)
+                .foregroundStyle(Theme.textMuted)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: Theme.space1) {
+                if let command = presentation.command {
+                    Text(command)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textPrimary)
+                        .textSelection(.enabled)
+                }
+                if let cwd = presentation.cwd {
+                    Text("cwd: \(cwd)")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textMuted)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: Theme.hitMin, alignment: .leading)
+    }
+
+    private var copyCommandButton: some View {
+        Button {
+            guard let command = presentation.command else { return }
+            UIPasteboard.general.string = command
+            copiedCommand = true
+        } label: {
+            Label(
+                copiedCommand ? "Copied" : "Copy command",
+                systemImage: copiedCommand ? "checkmark" : "doc.on.doc"
+            )
+            .font(.subheadline)
+            .foregroundStyle(Theme.textSecondary)
+            .frame(maxWidth: .infinity, minHeight: Theme.hitMin, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func fileMarker(_ file: GitStatusFile) -> String {
+        if file.state == .untracked { return "A" }
+        if file.state == .conflicted { return "!" }
+        let index = file.index.trimmingCharacters(in: .whitespaces)
+        let worktree = file.worktree.trimmingCharacters(in: .whitespaces)
+        return index.first.map(String.init) ?? worktree.first.map(String.init) ?? "M"
+    }
+
+    private func fileColor(_ file: GitStatusFile) -> Color {
+        if file.state == .conflicted || file.index == "D" || file.worktree == "D" {
+            return Theme.danger
+        }
+        if file.state == .untracked || file.index == "A" || file.worktree == "A" {
+            return Theme.online
+        }
+        return Theme.textSecondary
+    }
+}
+
+#if DEBUG
+struct GitTraceFixtureView: View {
+    private let event = TraceEventDto(
+        id: "git-status-fixture",
+        msgId: "message-fixture",
+        kind: "trace",
+        phase: "tool_call_update",
+        status: "completed",
+        createdAt: "2026-08-04T00:00:00Z"
+    )
+
+    private let presentation = ToolPresentation(
+        eventType: .gitStatus,
+        family: "git",
+        operation: "status",
+        target: "--short --branch",
+        path: nil,
+        command: "git status --short --branch",
+        query: nil,
+        cwd: "/repo/Cheers",
+        args: "--short --branch",
+        risk: "read",
+        compound: false,
+        result: nil
+    )
+
+    private let result = GitStatusResult(
+        branch: "feature/tool-presentation",
+        clean: false,
+        counts: GitStatusCounts(staged: 1, unstaged: 2, untracked: 1, conflicted: 0),
+        files: [
+            GitStatusFile(path: "server/src/domain/tool_presentation.rs", index: " ", worktree: "M", state: .unstaged),
+            GitStatusFile(path: "frontend/src/features/chat/BotTracePanel.tsx", index: " ", worktree: "M", state: .unstaged),
+            GitStatusFile(path: "docs/design/TOOL_PRESENTATION.md", index: "A", worktree: " ", state: .staged),
+            GitStatusFile(path: "apps/ios/Sources/Views/BotTracePanelView.swift", index: "?", worktree: "?", state: .untracked),
+        ],
+        truncated: false
+    )
+
+    var body: some View {
+        NavigationStack {
+            GitTraceDetailView(entry: event, presentation: presentation, result: result)
+                .navigationTitle("Git status")
+                .navigationBarTitleDisplayMode(.inline)
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+#endif
+
 private struct TraceDetailView: View {
     let entry: TraceEventDto
 
     var body: some View {
         Form {
             Section("Overview") {
-                LabeledContent("Type", value: entry.category.label)
+                LabeledContent("Type", value: entry.displayLabel)
                 LabeledContent("Status") {
                     Label(
                         entry.statusLabel,
@@ -312,7 +598,7 @@ private struct TraceDetailView: View {
                 }
             }
         }
-        .navigationTitle(entry.category.label)
+        .navigationTitle(entry.displayLabel)
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -421,24 +707,31 @@ private extension TraceEventDto {
     var category: TraceCategory {
         if kind == "approval" || phase == "approval" { return .approval }
         if status == "failed" || phase.contains("failed") { return .failure }
-        let haystack = [phase, title, data?["tool_name"]?.stringValue]
-            .compactMap { $0?.lowercased() }
-            .joined(separator: " ")
-        if haystack.contains("edit") || diff != nil { return .edit }
-        if haystack.contains("write") { return .write }
-        if haystack.contains("read") || haystack.contains("search") { return .read }
-        if haystack.contains("command") || haystack.contains("terminal") || haystack.contains("exec") { return .command }
-        if haystack.contains("plan") { return .plan }
+        if phase == "plan" { return .plan }
         if phase == "prompt_finished" { return .done }
         return .tool
     }
 
+    var displayLabel: String {
+        toolPresentation?.eventType.label ?? category.label
+    }
+
+    var displaySymbol: String {
+        toolPresentation?.eventType.symbol ?? category.symbol
+    }
+
     var compactLabel: String {
-        if let targetLabel { return "\(category.label) · \(targetLabel)" }
-        return title?.nilIfEmpty ?? category.label
+        if let targetLabel { return "\(displayLabel) · \(targetLabel)" }
+        return toolPresentation == nil ? (title?.nilIfEmpty ?? displayLabel) : displayLabel
     }
 
     var targetLabel: String? {
+        if let presentation = toolPresentation {
+            if let path = presentation.path {
+                return path.split(separator: "/").last.map(String.init) ?? path
+            }
+            return presentation.target ?? presentation.query ?? presentation.command
+        }
         if let pathComponent = path?.split(separator: "/").last.map(String.init) {
             return pathComponent
         }
@@ -452,7 +745,8 @@ private extension TraceEventDto {
     }
 
     var path: String? {
-        data?.firstString("path", "file_path", "filename")
+        toolPresentation?.path
+            ?? data?.firstString("path", "file_path", "filename")
             ?? data?["input"]?.firstString("path", "file_path", "filename")
             ?? data?["tool"]?.firstString("path", "file_path", "filename")
             ?? data?["tool"]?["raw_input"]?.firstString("path", "file_path", "filename")
@@ -472,14 +766,15 @@ private extension TraceEventDto {
     }
 
     var hasDetail: Bool {
+        if toolPresentation != nil { return true }
         if diff != nil || path != nil || decision?.nilIfEmpty != nil || message?.nilIfEmpty != nil { return true }
         guard let object = data?.objectValue else { return false }
         return !object.isEmpty
     }
 
     var detailTitle: String {
-        if let targetLabel { return "\(category.label) · \(targetLabel)" }
-        return category.label
+        if let targetLabel { return "\(displayLabel) · \(targetLabel)" }
+        return displayLabel
     }
 
     var statusLabel: String {

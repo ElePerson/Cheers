@@ -38,3 +38,28 @@ Blocked. The source was inspected at original resolution and the production Swif
 - Placement: floating above the bottom safe area rather than occupying a row in the main chat stack.
 
 final result: blocked
+
+---
+
+# iOS Git Trace Design QA
+
+- Source visual truth: `/Users/haowei/.codex/generated_images/019fca9d-8cb9-7132-902c-8b3ab0f45542/exec-b169790d-d7d3-4068-a2c9-42232557ef7c.png`
+- Implementation screenshot: `/tmp/cheers-git-trace-no-new-font/5CCED4C7-AA37-4D15-BCAD-0CCB75AC2386.png`
+- Target viewport: iPhone 17 Pro simulator, portrait, 1206 × 2622 px (@3x)
+- State: dark mode, completed `git_status` event with staged, unstaged, and untracked files
+
+## Full-view comparison evidence
+
+The implementation preserves the source hierarchy—navigation title, outcome summary, branch and counts, changed files, command context, then the secondary action—using spacing and semantic color instead of cards or dividers. The final simulator screenshot was captured by the UI test from the production SwiftUI view and compared at original resolution.
+
+## Comparison history
+
+- Pass 1 [P2]: long paths used body-sized text and wrapped, making the file section visually dense. Fixed with the existing system caption style, one-line layout, and middle truncation.
+- Pass 1 [P2]: a single bottom toolbar action was rendered by iOS as a prominent centered circular control. Fixed by moving Copy command into the scroll content as a native borderless 44 pt action.
+- Intentional difference: View diff is not shown because the authoritative `git_status` event currently contains status entries but no diff payload or queryable repository context. Adding a non-functional action would violate the backend contract.
+
+## Final findings
+
+No P0, P1, or P2 visual issues remain in the tested state. File rows scan cleanly, status is distinguished by color plus the Git status letter, and the screen contains no custom cards or separators.
+
+final result: passed

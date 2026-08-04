@@ -11,6 +11,13 @@ import {
   Clock,
   Zap,
   Loader2,
+  FileSearch,
+  Pencil,
+  FilePlus2,
+  Terminal,
+  Search,
+  GitBranch,
+  GitCommit,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -19,6 +26,12 @@ import { PopoverPanel, usePopoverDismiss } from "@/components/ui/popover";
 import type { TraceEvent } from "@/types";
 import { DiffView } from "./DiffView";
 import { coalesceTraceEvents } from "./traceEvent";
+import {
+  parseGitStatusResult,
+  toolPresentationFromTrace,
+  type ToolEventType,
+  type ToolPresentation,
+} from "./toolPresentation";
 
 interface Props {
   channelId: string;
@@ -26,13 +39,41 @@ interface Props {
   liveEvents?: TraceEvent[];
 }
 
+type EventVisual = { Icon: LucideIcon; tone: string; label: string };
+
+// The Gateway event type is the only tool-display routing input. Adding a new
+// visual treatment requires a new backend event type and an explicit entry here.
+const TOOL_EVENT_META: Record<ToolEventType, EventVisual> = {
+  file_read: { Icon: FileSearch, tone: "text-zinc-500", label: "Read" },
+  file_edit: { Icon: Pencil, tone: "text-zinc-500", label: "Edit" },
+  file_write: { Icon: FilePlus2, tone: "text-zinc-500", label: "Write" },
+  file_delete: { Icon: XCircle, tone: "text-red-400/70", label: "Delete" },
+  file_move: { Icon: Wrench, tone: "text-zinc-500", label: "Move" },
+  file_access: { Icon: FileSearch, tone: "text-zinc-500", label: "File" },
+  shell_command: { Icon: Terminal, tone: "text-zinc-500", label: "Run" },
+  web_search: { Icon: Search, tone: "text-zinc-500", label: "Web search" },
+  web_fetch: { Icon: Search, tone: "text-zinc-500", label: "Web fetch" },
+  search_results: { Icon: Search, tone: "text-zinc-500", label: "Search" },
+  git_status: { Icon: GitBranch, tone: "text-zinc-500", label: "Git status" },
+  git_diff: { Icon: GitBranch, tone: "text-zinc-500", label: "Git diff" },
+  git_show: { Icon: GitCommit, tone: "text-zinc-500", label: "Git show" },
+  git_log: { Icon: GitCommit, tone: "text-zinc-500", label: "Git log" },
+  git_commit: { Icon: GitCommit, tone: "text-zinc-500", label: "Git commit" },
+  git_remote: { Icon: GitBranch, tone: "text-zinc-500", label: "Git remote" },
+  git_command: { Icon: GitBranch, tone: "text-zinc-500", label: "Git command" },
+};
+
+const GIT_EVENT_TYPES = new Set<ToolEventType>([
+  "git_status", "git_diff", "git_show", "git_log", "git_commit", "git_remote", "git_command",
+]);
+
 /** Icon + tone + short label for a persisted trace row. Approval rows get the
  *  shield/check/x family; agent-progress rows map by phase. */
 // Keep the timeline quiet and monochrome (Codex/Claude style): icons carry the
 // category, but the palette stays muted zinc so steps read as ambient progress
 // rather than a loud status board. Color is reserved for genuine failures (and a
 // soft amber for a still-pending approval).
-function eventMeta(e: TraceEvent): { Icon: LucideIcon; tone: string; label: string } {
+function eventMeta(e: TraceEvent): EventVisual {
   if (e.kind === "approval") {
     const ak = e.approval_kind ?? "";
     if (ak === "resolved") {
@@ -49,6 +90,8 @@ function eventMeta(e: TraceEvent): { Icon: LucideIcon; tone: string; label: stri
     }
     return { Icon: ShieldCheck, tone: "text-amber-400/70", label: "Approval" };
   }
+  const presentation = toolPresentationFromTrace(e);
+  if (presentation) return TOOL_EVENT_META[presentation.event_type];
   switch (e.phase) {
     case "tool_call":
     case "tool_call_update":
@@ -85,6 +128,48 @@ function statusLabel(status: string): string {
 }
 
 type JsonRecord = Record<string, unknown>;
+
+function GitStatusInspector({ presentation }: { presentation: ToolPresentation }) {
+  const result = parseGitStatusResult(presentation);
+  if (!result) return null;
+  const countItems = [
+    ["staged", result.counts.staged],
+    ["unstaged", result.counts.unstaged],
+    ["untracked", result.counts.untracked],
+    ["conflicted", result.counts.conflicted],
+  ].filter((item): item is [string, number] => typeof item[1] === "number" && item[1] > 0);
+
+  return (
+    <div className="rounded-lg bg-zinc-950/45 px-3 py-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-5 gap-y-2">
+        <span className="font-mono text-[11px] text-zinc-400">{result.branch ?? "Working tree"}</span>
+        {result.clean === true && <span className="text-emerald-400/80">Clean</span>}
+        {countItems.length > 0 && (
+          <span className="text-[10px] text-zinc-500">
+            {countItems.map(([name, count]) => `${count} ${name}`).join(" · ")}
+          </span>
+        )}
+      </div>
+      {result.files.length > 0 && (
+        <div className="mt-3 max-h-64 space-y-0.5 overflow-auto">
+          {result.files.map((file, index) => {
+            const marker = file.state === "untracked" ? "A" : file.index.trim() || file.worktree.trim() || "M";
+            return (
+              <div key={`${file.path}-${index}`} className="flex min-w-0 items-center gap-3 rounded-md px-1 py-2 hover:bg-zinc-900/60">
+                <span className={cn(
+                  "w-4 shrink-0 font-mono text-[10px]",
+                  file.state === "conflicted" ? "text-red-300/80" : file.state === "untracked" ? "text-emerald-400/80" : "text-zinc-500",
+                )}>{marker}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" title={file.path}>{file.path}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {result.truncated && <div className="mt-2 text-zinc-500">More files omitted.</div>}
+    </div>
+  );
+}
 
 function asRecord(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -236,6 +321,10 @@ function FileEditInspector({ diffs }: { diffs: FileDiff[] }) {
 }
 
 function eventPreview(event: TraceEvent): string | null {
+  const presentation = toolPresentationFromTrace(event);
+  if (presentation) {
+    return presentation.target ?? presentation.path ?? presentation.query ?? presentation.command ?? null;
+  }
   const data = asRecord(event.data);
   const input = asRecord(data?.input);
   const command = stringField(input, "command") ?? stringField(data, "command");
@@ -260,6 +349,18 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
   const diffs = fileDiffs(data);
   const planEntries = Array.isArray(data?.entries) ? data.entries : null;
   const output = data?.output;
+  const presentation = toolPresentationFromTrace(event);
+  const outputText = typeof output === "string"
+    ? output
+    : typeof asRecord(output)?.text === "string"
+      ? asRecord(output)?.text as string
+      : null;
+  const outputDiff = presentation && ["file_edit", "git_diff", "git_show"].includes(presentation.event_type)
+    && outputText?.includes("diff --git ")
+    ? outputText
+    : null;
+  const hasGitStatus = presentation?.event_type === "git_status"
+    && asRecord(presentation.result)?.kind === "git_status";
   const metadata = {
     phase: event.phase,
     kind: event.kind,
@@ -271,7 +372,34 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
 
   return (
     <div className="space-y-3 p-3 text-[11px] text-zinc-400">
+      {presentation && (
+        <div className="rounded-lg bg-zinc-950/45 px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-zinc-200">
+              {TOOL_EVENT_META[presentation.event_type].label}
+            </span>
+            {presentation.risk && (
+              <span className="text-[10px] text-zinc-500">
+                {presentation.risk.replace(/_/g, " ")}
+              </span>
+            )}
+            {presentation.compound && (
+              <span className="text-[10px] text-amber-300/80">
+                compound shell command
+              </span>
+            )}
+          </div>
+          {presentation.command && (
+            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-zinc-300">{presentation.command}</pre>
+          )}
+          {!presentation.command && presentation.target && (
+            <div className="mt-2 break-all font-mono text-zinc-300">{presentation.target}</div>
+          )}
+        </div>
+      )}
       {diffs.length > 0 && <FileEditInspector diffs={diffs} />}
+      {outputDiff && <DiffView diff={outputDiff} className="max-h-80 rounded-lg bg-zinc-950" />}
+      {presentation && hasGitStatus && <GitStatusInspector presentation={presentation} />}
       {planEntries && (
         <div className="space-y-1.5">
           <div className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">Plan</div>
@@ -314,7 +442,7 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
           <div className="mt-1 font-mono text-zinc-200">{filePath}</div>
         </div>
       )}
-      {output != null && (
+      {output != null && !outputDiff && !hasGitStatus && (
         <div>
           <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-400">Output</div>
           <div className="max-h-56 overflow-auto rounded-lg bg-zinc-950 px-2.5 py-2 text-zinc-300"><DetailValue value={output} /></div>
@@ -337,6 +465,13 @@ function TraceItem({
   const rootRef = useRef<HTMLDivElement>(null);
   const { Icon, tone, label } = eventMeta(event);
   const preview = eventPreview(event);
+  const presentation = toolPresentationFromTrace(event);
+  const displayTitle = presentation ? label : event.title || label;
+  const statusTone = event.status === "failed"
+    ? "text-red-400/80"
+    : presentation && GIT_EVENT_TYPES.has(presentation.event_type) && event.status === "completed"
+      ? "text-emerald-400/80"
+      : "text-zinc-400";
   const close = useCallback(() => {
     if (active) onToggle();
   }, [active, onToggle]);
@@ -348,15 +483,15 @@ function TraceItem({
         type="button"
         onClick={onToggle}
         aria-expanded={active}
-        aria-label={`${active ? "Hide" : "Show"} details for ${event.title || label}`}
+        aria-label={`${active ? "Hide" : "Show"} details for ${displayTitle}`}
         className={cn(
           "flex h-7 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-zinc-900/70",
-          active && "bg-indigo-600/15",
+          active && "bg-zinc-900/70",
         )}
       >
         <Icon className={cn("h-3.5 w-3.5 shrink-0", tone)} />
         <span className="min-w-0 max-w-[45%] shrink truncate text-[11px] font-medium text-zinc-200">
-          {event.title || label}
+          {displayTitle}
         </span>
         {preview && (
           <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-400" title={preview}>
@@ -364,14 +499,14 @@ function TraceItem({
           </span>
         )}
         {event.status && (
-          <span className="shrink-0 text-[10px] text-zinc-400">
+          <span className={cn("shrink-0 text-[10px]", statusTone)}>
             {statusLabel(event.status)}
           </span>
         )}
         <ChevronRight
           className={cn(
             "h-3 w-3 shrink-0 text-zinc-500 transition-transform",
-            active && "rotate-90 text-indigo-400",
+            active && "rotate-90 text-zinc-300",
           )}
         />
       </button>
