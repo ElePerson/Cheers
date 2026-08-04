@@ -188,7 +188,7 @@ struct ComposerView: View {
                 VStack(alignment: .leading, spacing: Theme.space1) {
                     Text("@\(candidate.label)")
                         .font(.body)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(candidate.kind == .bot && candidate.isOnline == false ? .secondary : .primary)
                     if let sublabel = candidate.sublabel, !sublabel.isEmpty {
                         Text(candidate.kind == .group ? sublabel : "@\(sublabel)")
                             .font(.subheadline)
@@ -198,14 +198,15 @@ struct ComposerView: View {
                 }
                 Spacer(minLength: 0)
                 if candidate.kind == .bot {
-                    Text("BOT")
+                    Text(candidate.isOnline == false ? "OFFLINE" : "BOT")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(candidate.isOnline == false ? Theme.textFaint : .secondary)
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .opacity(candidate.kind == .bot && candidate.isOnline == false ? 0.55 : 1)
         .accessibilityLabel("Mention \(candidate.label)")
     }
 

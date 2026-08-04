@@ -51,6 +51,8 @@ export interface MentionCandidate {
   type: "user" | "bot" | "group";
   label: string;
   sublabel?: string;
+  /** Bots: live connector presence; users have no comparable state. */
+  isOnline?: boolean | null;
   /** Bots: whether the agent accepts audio prompts (unknown → false, fail-safe). */
   canReceiveAudio?: boolean;
 }
@@ -868,6 +870,7 @@ function MessageComposerImpl({
     const names = Array.from(
       new Set(survivors.filter((p) => p.type === "group").map((p) => p.id))
     );
+    const draft = { text, attachments, picked, transcribedIds };
     setSending(true);
     setText("");
     setPicked([]);
@@ -877,6 +880,19 @@ function MessageComposerImpl({
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     try {
       await onSend(content, ids, fileIds, names);
+    } catch {
+      // The parent surfaces the send error. Restore the exact draft so an
+      // offline bot or transient network failure never discards user input.
+      setText(draft.text);
+      setAttachments(draft.attachments);
+      setPicked(draft.picked);
+      setTranscribedIds(draft.transcribedIds);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+      });
     } finally {
       setSending(false);
       textareaRef.current?.focus();
@@ -974,11 +990,13 @@ function MessageComposerImpl({
                 "flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
                 i === picker.index
                   ? "bg-indigo-600/30 text-zinc-100"
-                  : "text-zinc-300 hover:bg-zinc-800"
+                  : c.type === "bot" && c.isOnline === false
+                    ? "text-zinc-500 hover:bg-zinc-800"
+                    : "text-zinc-300 hover:bg-zinc-800"
               )}
             >
               {c.type === "bot" ? (
-                <Bot className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                <Bot className={cn("w-4 h-4 flex-shrink-0", c.isOnline === false ? "text-zinc-500" : "text-indigo-400")} />
               ) : (
                 <User className="w-4 h-4 text-zinc-400 flex-shrink-0" />
               )}
@@ -988,7 +1006,7 @@ function MessageComposerImpl({
               )}
               {c.type === "bot" && (
                 <span className="ml-auto text-[10px] px-1 py-0.5 rounded bg-indigo-900/60 text-indigo-300">
-                  BOT
+                  {c.isOnline === false ? "OFFLINE" : "BOT"}
                 </span>
               )}
             </button>

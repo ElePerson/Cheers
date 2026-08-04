@@ -61,7 +61,6 @@ struct MessageBubbleView: View {
     let message: MessageDto
     let isOwn: Bool
     let showAvatar: Bool
-    let isLastInGroup: Bool
     /// Preformatted when the channel's presentation model changes, not while
     /// the bubble is being laid out during scrolling.
     var formattedTime: String = ""
@@ -75,7 +74,10 @@ struct MessageBubbleView: View {
     var onBlock: (() -> Void)? = nil
     var onStop: (() -> Void)? = nil
     var body: some View {
-        VStack(alignment: isOwn ? .trailing : .leading, spacing: Theme.space2) {
+        // Sender, content and the optional trace are one message unit. Keep
+        // this relationship compact; ChatTimelineRow supplies the larger gap
+        // after the whole unit instead of stacking padding around each part.
+        VStack(alignment: isOwn ? .trailing : .leading, spacing: Theme.space1) {
             if !isOwn, showAvatar {
                 senderHeader
             }
@@ -108,7 +110,6 @@ struct MessageBubbleView: View {
         }
         .padding(.horizontal, Theme.space5)
         .padding(.top, showAvatar ? Theme.space3 : Theme.space1)
-        .padding(.bottom, isLastInGroup ? Theme.space3 : Theme.space1)
     }
 
     private var senderHeader: some View {
