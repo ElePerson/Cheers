@@ -1,6 +1,6 @@
 [package]
 name = "cheers-desktop"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "Cheers desktop shell for macOS: hosts the web frontend and manages local connector daemons."
 
