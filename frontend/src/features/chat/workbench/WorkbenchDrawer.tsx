@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Clock, Eye, Maximize2, Minimize2, Package, Pin, X } from "lucide-react";
+import { Clock, Eye, Folder, LayoutGrid, Maximize2, Minimize2, Package, Pin, X } from "lucide-react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useLaneWindow } from "@/hooks/useLaneWindow";
 import { ResizeGrip } from "@/components/ui/resize-grip";
@@ -11,6 +11,7 @@ import type { WorkbenchContext } from "./context";
 import { getBuiltinEnvironments, WORKBENCH_CONFIG_PATH } from "./environmentRegistry";
 import { seedManifest, validateManifest, type TemplateManifest } from "./manifest";
 import { FilePanel } from "./panels/FilePanel";
+import { SceneWorkbench } from "./SceneWorkbench";
 import { listGlobalTemplates } from "./templatesApi";
 import { listPlugins, parsePluginHtml, MAX_PLUGIN_BUNDLE_BYTES, type PluginMeta } from "./sandbox/api";
 import { listPersonalPlugins } from "@/lib/desktop";
@@ -37,7 +38,14 @@ interface Props {
   onCompose?: (text: string) => void;
 }
 
-interface WbConfig {
+export interface WorkbenchSceneState {
+  version: 1;
+  order: string[];
+  titles: Record<string, string>;
+  items: Record<string, string[]>;
+}
+
+export interface WbConfig {
   /** Self-documenting field (regenerated on every write) — for humans/AI reading the file. */
   _doc?: string;
   environment?: string | null;
@@ -46,6 +54,9 @@ interface WbConfig {
   bindings?: Record<string, string>;
   /** path -> lens config (e.g. table columns); written create-only by scenario activation. */
   configs?: Record<string, unknown>;
+  /** Shared navigation index for native multi-scene clients. Renderer selection remains
+   * file-bound through bindings; this does not resurrect template-owned renderers. */
+  scene_state?: WorkbenchSceneState;
 }
 
 // Regenerated into `.workbench.json._doc` on every write, so anyone (human or AI) opening
@@ -53,17 +64,18 @@ interface WbConfig {
 // rewrites this file, so only fields (like this one) survive; see docs/arch/WORKBENCH.md.
 const WB_DOC =
   "Workbench config (per-channel, maintained by the workbench UI, hand-editable). " +
-  "The workbench is file-centric: pick a file, Preview renders it, Raw edits it. " +
+  "The workbench is content-first: scene_state indexes scene tabs while Raw exposes the complete file tree. " +
   "bindings = file path → renderer id Preview uses (unbound: best content match, else raw); " +
   "configs = file path → lens config (e.g. table columns), written by scenario activation; " +
   "pinned = files injected into every bot prompt. " +
+  "scene_state = enabled scenario order/titles and their file-path navigation indexes; " +
   "Files themselves are pure content — how a file renders is decided by this config, never written into the file.";
 
 // Known-keys parse + one-time migration: the retired `views` tab list carried each
 // scenario view's renderer/config — collapse those into bindings/configs (create-only,
 // an explicit binding wins) so pre-refactor channels keep their table/kanban previews.
 // The migrated result persists on the next write; the `views` key itself retires.
-function parseCfg(content: string): WbConfig {
+export function parseCfg(content: string): WbConfig {
   const raw = JSON.parse(content) as WbConfig & {
     views?: { path?: string; renderer?: string; config?: unknown }[];
   };
@@ -73,6 +85,7 @@ function parseCfg(content: string): WbConfig {
     pinned: raw.pinned,
     bindings: raw.bindings,
     configs: raw.configs,
+    scene_state: raw.scene_state,
   };
   if (raw.views?.length) {
     const b = { ...(cfg.bindings ?? {}) };
@@ -88,7 +101,8 @@ function parseCfg(content: string): WbConfig {
   return cfg;
 }
 
-// Right-side per-channel workbench: a scenario picker over ONE file browser (no tabs).
+// Right-side per-channel workbench: scenes contain native content tabs; Raw is the
+// explicit escape hatch to the complete file browser.
 // Scenarios come from three places:
 //  - GLOBAL templates (DATA, admin-installed, lens-rendered) — shared by every channel
 //  - SESSION templates (DATA, temporarily uploaded here, this browser session only)
@@ -110,6 +124,7 @@ function WorkbenchDrawerImpl({ open, onClose, channelId, sendResourceReq, openFi
   const [dragOver, setDragOver] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [pinMenu, setPinMenu] = useState(false);
+  const [rawMode, setRawMode] = useState(false);
   /** Focus request for the browser: a Desk-ref deep link (openFilePath) or the last
    *  activated scenario's first file — whichever happened most recently wins. */
   const [focus, setFocus] = useState<string | null>(null);
@@ -226,7 +241,19 @@ function WorkbenchDrawerImpl({ open, onClose, channelId, sendResourceReq, openFi
           if (!nextBindings[v.file]) nextBindings[v.file] = `builtin:${v.lens}`;
           if (v.config !== undefined && nextConfigs[v.file] === undefined) nextConfigs[v.file] = v.config;
         }
-        const next: WbConfig = { ...base, environment: manifest.id, bindings: nextBindings, configs: nextConfigs };
+        const sceneState: WorkbenchSceneState = {
+          version: 1,
+          order: [...(base.scene_state?.order ?? []).filter((id) => id !== manifest.id), manifest.id],
+          titles: { ...(base.scene_state?.titles ?? {}), [manifest.id]: manifest.title },
+          items: { ...(base.scene_state?.items ?? {}), [manifest.id]: manifest.views.map((view) => view.file) },
+        };
+        const next: WbConfig = {
+          ...base,
+          environment: manifest.id,
+          bindings: nextBindings,
+          configs: nextConfigs,
+          scene_state: sceneState,
+        };
         if (manifest.pin?.length) next.pinned = [...new Set([...(base.pinned ?? []), ...manifest.pin])];
         await writeCfg(next);
         setFocus(manifest.views[0]?.file ?? null);
@@ -395,7 +422,6 @@ function WorkbenchDrawerImpl({ open, onClose, channelId, sendResourceReq, openFi
       if (!byId.has(e.id)) byId.set(e.id, e);
     return [...byId.values()];
   }, [sessionTemplates, globalTemplates]);
-  const sessionIds = useMemo(() => new Set(sessionTemplates.map((t) => t.id)), [sessionTemplates]);
 
   // Session plugins first: a temporary upload shadows a same-id installed plugin for
   // this session. Dedup at the PluginMeta level — renderer ids are composite
@@ -411,31 +437,6 @@ function WorkbenchDrawerImpl({ open, onClose, channelId, sendResourceReq, openFi
   }, [sessionPlugins, personalPlugins, serverPlugins]);
 
   const selectedId = cfg.environment ?? null;
-
-  const switchScenario = useCallback(
-    async (id: string | null) => {
-      const manifest = allEnvs.find((e) => e.id === id);
-      if (manifest) {
-        await activate(manifest);
-        return;
-      }
-      setBusy(true);
-      try {
-        // back to General: keep bindings/pins — merged against the freshest persisted
-        // config (same reasoning as activate), not the render-time snapshot
-        let base = cfg;
-        try {
-          base = parseCfg((await fs.read(WORKBENCH_CONFIG_PATH)).content);
-        } catch {
-          /* no config file yet */
-        }
-        await writeCfg({ ...base, environment: id });
-      } finally {
-        setBusy(false);
-      }
-    },
-    [allEnvs, activate, cfg, fs, writeCfg]
-  );
 
   // Desktop: the same rounded card, laid out in the channel's work area (real
   // layout space, no drag/float). Minimized = just the title bar (a compact
@@ -549,21 +550,21 @@ function WorkbenchDrawerImpl({ open, onClose, channelId, sendResourceReq, openFi
           )}
           {!minimized && (
           <>
-          <select
-            value={selectedId ?? ""}
-            onChange={(e) => void switchScenario(e.target.value || null)}
-            disabled={busy}
-            title="Scenario / template"
-            className="bg-zinc-800 text-zinc-300 text-xs rounded px-1 py-0.5 outline-none max-w-[160px] disabled:opacity-50"
+          <button
+            type="button"
+            onClick={() => setRawMode((current) => !current)}
+            aria-pressed={rawMode}
+            title={rawMode ? "Return to scene tabs" : "Browse every workspace file"}
+            className={cn(
+              "flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
+              rawMode
+                ? "bg-indigo-500/15 text-indigo-200"
+                : "bg-zinc-800/70 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+            )}
           >
-            <option value="">General</option>
-            {allEnvs.map((e) => (
-              <option key={e.id} value={e.id}>
-                {sessionIds.has(e.id) ? "⏱ " : ""}
-                {e.title}
-              </option>
-            ))}
-          </select>
+            {rawMode ? <LayoutGrid className="h-3.5 w-3.5" /> : <Folder className="h-3.5 w-3.5" />}
+            {rawMode ? "Scenes" : "Raw"}
+          </button>
           <button
             onClick={() => fileRef.current?.click()}
             disabled={busy}
@@ -696,10 +697,20 @@ function WorkbenchDrawerImpl({ open, onClose, channelId, sendResourceReq, openFi
             </GlanceRow>
           </div>
         )}
-        {/* the body IS the file browser: select a file → pin / preview / raw.
-            Kept mounted while minimized (hidden) so tree/selection state survives. */}
+        {/* Content-first by default: scene → item tabs → renderer. Raw is an explicit
+            mode that mounts the complete file tree and editor. */}
         <div className={minimized ? "hidden" : "flex-1 min-h-0 overflow-hidden"}>
-          {open && <FilePanel ctx={ctx} />}
+          {open && (rawMode ? (
+            <FilePanel ctx={ctx} />
+          ) : (
+            <SceneWorkbench
+              ctx={ctx}
+              sceneState={cfg.scene_state}
+              legacyEnvironment={cfg.environment}
+              templates={allEnvs}
+              onAddScene={activate}
+            />
+          ))}
         </div>
         {float && !minimized && <ResizeGrip resizeProps={drag.resizeProps} />}
       </aside>

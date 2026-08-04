@@ -92,11 +92,12 @@ scenario catalog needs them):
 
 | widget | shape | status |
 |---|---|---|
-| `chart` | `{series: [{name, points: [[x,y],…]}]}` | exists on web (`builtin:chart`, view-only); iOS follow-up |
-| `graph` | nodes + edges (codemap / server-map boards) | **spec'd, not designed** — the richest data model; the declarative successor to `codemap.plugin.html`. Last in build order. |
+| `chart` | `{series: [{name, points: [[x,y],…]}]}` | native Swift Charts editor on iOS; built-in chart on web |
+| `codemap` | `{codemap: 1, nodes: {}, edges: []}` | native pan/zoom node graph and summary/status editing on iOS; HTML plugin remains available on web |
 
-Build order stays: the three interactive widgets prove the model; `chart` is a port;
-`graph` is designed only after the rest ships.
+The generic declarative `graph` widget remains future work. Codemap is intentionally a
+compiled native lens first because its hierarchy, focus state, locators, and agent-maintained
+schema carry product semantics beyond a generic nodes-and-edges board.
 
 ### 3.3 Official scenarios (seeded, `origin='system'`)
 
@@ -110,7 +111,7 @@ only** (CI-enforced), so they render on web today and on iOS via `fs.read.data`:
 | id | family | boards |
 |---|---|---|
 | `cheers-task-board` | tasks | kanban (Todo/Doing/Done) + backlog table (priority/status enums) |
-| `cheers-code-project` | code dev | plan kanban · issues table (severity + `ref` locator column) · progress chart · todo checklist · `codemap/map.yaml` seed (graph follow-up) |
+| `cheers-code-project` | code dev | plan kanban · issues table (severity + `ref` locator column) · progress chart · todo checklist · native Codemap tab backed by `codemap/map.yaml` |
 | `cheers-research-lab` | research | experiments table · metrics chart · submissions tracker (venue/status/deadline) |
 | `cheers-team-ops` | team mgmt | server inventory table · assets/renewals table · on-call kanban |
 

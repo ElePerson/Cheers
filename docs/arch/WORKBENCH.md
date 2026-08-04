@@ -15,6 +15,12 @@
 > 折叠换取整幅预览画布）；② 场景 view 的 `title`（如 "Literature"）暂不在 UI 出现，仅作
 > manifest 文档；③ 「一键在场景各视图间切换」由文件树点选替代。
 
+> **2026-08-04 iOS 更新：内容优先的原生多场景导航。** 文件仍是唯一存储和渲染绑定
+> 单元，但 iOS 默认不暴露文件树：能被编译进 App 的 Swift renderer 认领的文件显示为
+> 场景 item，未认领文件只在用户主动打开 **Raw** 文件树后出现。这里的 item 是导航索引，
+> 不是 renderer 所有权或新的数据层；renderer 仍按 `bindings`/内容独立认领一个文件。
+> 官方代码、科研、任务、运维场景使用 SwiftUI/Charts 原生页面，不执行 HTML 插件。
+
 Workbench 是频道右侧的工作台:一个频道一个,浏览/编辑 bot 工作区文件,并承载「场景」(看板、提示词等)。
 
 ## 三层模型
@@ -30,7 +36,7 @@ Workbench 是频道右侧的工作台:一个频道一个,浏览/编辑 bot 工�
 
 - **底座**:`context_files`(per-channel 文件树),读写经 resource `fs.*`(channel-role 鉴权)。**没有独立 memory 概念**,见 [[context-and-environment]] 顶部「CURRENT MODEL」。激活任一场景都把 seed 文件落进**当前频道**的 `context_files`(create-only,不覆盖已有)——场景定义可以是全局/临时的,但数据始终是 per-channel 的。
 - **pin(semantic 层)**:把某文件 pin 进 `.workbench.json` → 派发时其内容前置进每次 prompt(受控 push,人写的约定,非自动记忆)。
-- **`.workbench.json`(per-channel 工作台配置)**:一个普通 `context_files` 文件,存:`bindings`(`path → 渲染器 id`,Preview 用哪个渲染器打开该文件;未绑定则按内容取最优匹配,再不行 Raw)· `configs`(`path → lens 配置`,如表格列,场景激活时 create-only 写入)· `pinned` · `environment` · `_doc`(每次回写**重新生成**的自文档字段,让人/AI 读得懂 schema)。~~`views`(顶部 tab)~~ **已废除(2026-07-07)**——没有 tab 层,模板的 `views[{file,lens,config}]` 激活时坍缩成 `bindings`+`configs`。因 UI 会机器回写本文件,自由注释会丢——故用 `_doc` 字段(真字段,回写保留)而非注释。后端只读 `pinned`,对未知字段宽容;前端读时丢弃遗留字段。
+- **`.workbench.json`(per-channel 工作台配置)**:一个普通 `context_files` 文件,存:`bindings`(`path → 渲染器 id`,Preview 用哪个渲染器打开该文件;未绑定则按内容取最优匹配,再不行 Raw)· `configs`(`path → lens 配置`,如表格列,场景激活时 create-only 写入)· `pinned` · `environment` · `scene_state` · `_doc`。`scene_state={version,order,titles,items}` 只记录已启用场景的顺序和 `scene → file paths` 导航索引；当前场景/当前 item 是设备本地 UI 偏好。~~`views`(模板直控顶部 tab)~~ 仍已废除——场景 item 不携带 renderer，实际渲染继续由 `bindings` 与内容匹配决定。因 UI 会机器回写本文件,自由注释会丢——故用 `_doc` 字段。后端只读 `pinned`,对未知字段宽容；所有客户端回写时必须保留 `scene_state`。
 
 ---
 

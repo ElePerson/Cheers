@@ -143,7 +143,7 @@
 >
 > | 读（频道成员即可） | 写（channel role ∈ owner/admin/member；`fs.rm`/`fs.mv` 用户路径需 owner/admin） |
 > |---|---|
-> | `channel.info` `channel.members` `channel.messages` `channel.files` `channel.files.read` `channel.context` `channel.activity.read` `channel.messages.index` `channel.messages.by-seq` `fs.ls` `fs.read` | `channel.messages.create` `channel.files.create` `channel.files.stage` `channel.files.realize` `fs.write` `fs.edit` `fs.append` `fs.rm` `fs.mv` |
+> | `channel.info` `channel.members` `channel.messages` `channel.files` `channel.files.read` `channel.context` `channel.activity.read` `channel.messages.index` `channel.messages.by-seq` `fs.ls` `fs.read` | `channel.messages.create` `channel.files.create` `channel.files.stage` `channel.files.realize` `fs.write` `fs.patch` `fs.edit` `fs.append` `fs.rm` `fs.mv` |
 >
 > 已移除/从未实现的动词：`channel.memory` / `channel.memory.update`（`memory_entries` 表已 DROP）、
 > `provider.config.get` / `provider.config.update`（§4.11–4.12 为提案，代码中无对应 dispatch 分支）。
@@ -154,7 +154,7 @@ resource 分**读 / 写**两类，授权强度不同（早期表，保留作历�
 | 类别 | resource | 权限检查 | 失败码 |
 |------|----------|---------|--------|
 | **读** | `channel.info` / `members` / `messages` / `files` / `files.read` / `context` / `activity.read` / `messages.index` / `messages.by-seq` / `fs.ls` / `fs.read` | `authorize_channel_read`（查 channel 成员 role） | `NOT_MEMBER` |
-| **写** | `channel.messages.create` / `channel.files.create` / `channel.files.stage` / `channel.files.realize` / `fs.write` / `fs.edit` / `fs.append` / `fs.rm` / `fs.mv` | 频道成员 **且** `role_can_write`（owner/admin/member） | `NOT_MEMBER` / `PERMISSION_DENIED` |
+| **写** | `channel.messages.create` / `channel.files.create` / `channel.files.stage` / `channel.files.realize` / `fs.write` / `fs.patch` / `fs.edit` / `fs.append` / `fs.rm` / `fs.mv` | 频道成员 **且** `role_can_write`（owner/admin/member） | `NOT_MEMBER` / `PERMISSION_DENIED` |
 
 **写操作的 Grant 映射**（详见 [BOT_PERMISSION §5.3 / §7](./BOT_PERMISSION.md)）：
 

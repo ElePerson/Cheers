@@ -7,6 +7,7 @@
 use serde_json::{json, Value};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
+use yamlpath::{Component as YamlComponent, Document as YamlDocument, FeatureKind, Route};
 
 use crate::domain::channel_seq;
 
@@ -143,6 +144,535 @@ fn slice_lines(content: &str, start: Option<i64>, end: Option<i64>) -> Option<(S
 }
 
 // ── Writes ───────────────────────────────────────────────────────────────────
+
+const MAX_PATCH_OPS: usize = 100;
+const MAX_PATCH_DEPTH: usize = 32;
+
+#[derive(Clone, Debug, PartialEq)]
+enum PatchComponent {
+    Key(String),
+    Index(usize),
+}
+
+fn patch_error(message: impl Into<String>) -> (String, String) {
+    super::resource_error("INVALID_PATCH", message)
+}
+
+fn patch_path(value: Option<&Value>) -> Result<Vec<PatchComponent>, (String, String)> {
+    let values = value
+        .and_then(Value::as_array)
+        .ok_or_else(|| patch_error("op.path must be an array"))?;
+    if values.len() > MAX_PATCH_DEPTH {
+        return Err(patch_error("op.path is too deep"));
+    }
+    values
+        .iter()
+        .map(|part| {
+            if let Some(key) = part.as_str() {
+                if key.is_empty() {
+                    Err(patch_error("path keys must not be empty"))
+                } else {
+                    Ok(PatchComponent::Key(key.to_string()))
+                }
+            } else if let Some(index) = part.as_u64().and_then(|n| usize::try_from(n).ok()) {
+                Ok(PatchComponent::Index(index))
+            } else {
+                Err(patch_error(
+                    "path components must be strings or non-negative integers",
+                ))
+            }
+        })
+        .collect()
+}
+
+fn yaml_route(path: &[PatchComponent]) -> Route<'static> {
+    Route::from(
+        path.iter()
+            .map(|part| match part {
+                PatchComponent::Key(key) => YamlComponent::from(key.clone()),
+                PatchComponent::Index(index) => YamlComponent::from(*index),
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn yaml_fragment(value: &Value) -> Result<String, (String, String)> {
+    serde_yaml::to_string(value)
+        .map(|text| text.trim_end_matches('\n').to_string())
+        .map_err(|error| patch_error(format!("value cannot be encoded as YAML: {error}")))
+}
+
+fn indent_fragment(fragment: &str, indent: usize) -> String {
+    let padding = " ".repeat(indent);
+    fragment
+        .split('\n')
+        .enumerate()
+        .map(|(index, line)| {
+            if index == 0 {
+                line.to_string()
+            } else {
+                format!("{padding}{line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn yaml_sequence_item(value: &Value, indent: usize) -> Result<String, (String, String)> {
+    let fragment = yaml_fragment(value)?;
+    let mut lines = fragment.lines();
+    let first = lines.next().unwrap_or("null");
+    let padding = " ".repeat(indent);
+    let continuation = " ".repeat(indent + 2);
+    let mut result = format!("{padding}- {first}\n");
+    for line in lines {
+        result.push_str(&continuation);
+        result.push_str(line);
+        result.push('\n');
+    }
+    Ok(result)
+}
+
+fn line_indent(source: &str, byte: usize) -> usize {
+    let start = source[..byte].rfind('\n').map_or(0, |index| index + 1);
+    source[start..byte]
+        .chars()
+        .take_while(|ch| *ch == ' ')
+        .count()
+}
+
+fn yaml_insert_raw(
+    source: &mut String,
+    path: &[PatchComponent],
+    index: usize,
+    raw_item: Option<String>,
+    value: Option<&Value>,
+) -> Result<(), (String, String)> {
+    let doc = YamlDocument::new(source.clone()).map_err(|error| patch_error(error.to_string()))?;
+    if doc.has_anchors() {
+        return Err(patch_error(
+            "YAML anchors and aliases cannot be patched safely",
+        ));
+    }
+    let route = yaml_route(path);
+    let feature = doc
+        .query_exact(&route)
+        .map_err(|error| patch_error(error.to_string()))?
+        .ok_or_else(|| patch_error("sequence path has no value"))?;
+    let parsed = parse_structured("value.yaml", source)
+        .ok_or_else(|| patch_error("file is not valid YAML"))?;
+    let sequence = value_at_path(&parsed, path)?
+        .as_array()
+        .ok_or_else(|| patch_error("insert target must be a sequence"))?;
+    if index > sequence.len() {
+        return Err(patch_error("insert index exceeds sequence length"));
+    }
+
+    match feature.kind() {
+        FeatureKind::BlockSequence if !sequence.is_empty() => {
+            let (offset, indent) = if index < sequence.len() {
+                let child = yaml_route(&[path, &[PatchComponent::Index(index)]].concat());
+                let child_indent = doc
+                    .query_exact(&child)
+                    .map_err(|error| patch_error(error.to_string()))?
+                    .map(|item| item.location.point_span.0 .1.saturating_sub(2))
+                    .ok_or_else(|| patch_error("sequence item has no value"))?;
+                let span = doc
+                    .removal_span(&child)
+                    .map_err(|error| patch_error(error.to_string()))?;
+                (span.start, child_indent)
+            } else {
+                let child =
+                    yaml_route(&[path, &[PatchComponent::Index(sequence.len() - 1)]].concat());
+                let child_indent = doc
+                    .query_exact(&child)
+                    .map_err(|error| patch_error(error.to_string()))?
+                    .map(|item| item.location.point_span.0 .1.saturating_sub(2))
+                    .ok_or_else(|| patch_error("sequence item has no value"))?;
+                let span = doc
+                    .removal_span(&child)
+                    .map_err(|error| patch_error(error.to_string()))?;
+                (span.end, child_indent)
+            };
+            let item = match raw_item {
+                Some(item) => item,
+                None => yaml_sequence_item(
+                    value.ok_or_else(|| patch_error("insert value is required"))?,
+                    indent,
+                )?,
+            };
+            source.insert_str(offset, &item);
+            Ok(())
+        }
+        FeatureKind::FlowSequence if sequence.is_empty() => {
+            let indent = if path.is_empty() {
+                0
+            } else {
+                line_indent(source, feature.location.byte_span.0) + 2
+            };
+            let item = match raw_item {
+                Some(item) => item,
+                None => yaml_sequence_item(
+                    value.ok_or_else(|| patch_error("insert value is required"))?,
+                    indent,
+                )?,
+            };
+            let replacement = if path.is_empty() {
+                item
+            } else {
+                format!("\n{item}")
+            };
+            source.replace_range(
+                feature.location.byte_span.0..feature.location.byte_span.1,
+                replacement.trim_end_matches('\n'),
+            );
+            Ok(())
+        }
+        FeatureKind::FlowSequence => Err(patch_error(
+            "inserting into a flow-style YAML sequence is unsupported",
+        )),
+        _ => Err(patch_error("insert target must be a sequence")),
+    }
+}
+
+fn value_at_path<'a>(
+    root: &'a Value,
+    path: &[PatchComponent],
+) -> Result<&'a Value, (String, String)> {
+    let mut cursor = root;
+    for part in path {
+        cursor = match part {
+            PatchComponent::Key(key) => cursor
+                .as_object()
+                .and_then(|map| map.get(key))
+                .ok_or_else(|| patch_error(format!("missing mapping key `{key}`")))?,
+            PatchComponent::Index(index) => cursor
+                .as_array()
+                .and_then(|items| items.get(*index))
+                .ok_or_else(|| {
+                patch_error(format!("sequence index {index} is out of bounds"))
+            })?,
+        };
+    }
+    Ok(cursor)
+}
+
+fn value_at_path_mut<'a>(
+    root: &'a mut Value,
+    path: &[PatchComponent],
+) -> Result<&'a mut Value, (String, String)> {
+    let mut cursor = root;
+    for part in path {
+        cursor = match part {
+            PatchComponent::Key(key) => cursor
+                .as_object_mut()
+                .and_then(|map| map.get_mut(key))
+                .ok_or_else(|| patch_error(format!("missing mapping key `{key}`")))?,
+            PatchComponent::Index(index) => cursor
+                .as_array_mut()
+                .and_then(|items| items.get_mut(*index))
+                .ok_or_else(|| patch_error(format!("sequence index {index} is out of bounds")))?,
+        };
+    }
+    Ok(cursor)
+}
+
+fn apply_value_op(root: &mut Value, op: &Value) -> Result<(), (String, String)> {
+    let kind = op
+        .get("op")
+        .and_then(Value::as_str)
+        .ok_or_else(|| patch_error("op.op is required"))?;
+    let path = patch_path(op.get("path"))?;
+    match kind {
+        "set" => {
+            let next = op
+                .get("value")
+                .cloned()
+                .ok_or_else(|| patch_error("set.value is required"))?;
+            if path.is_empty() {
+                *root = next;
+            } else {
+                let (parent_path, last) = path.split_at(path.len() - 1);
+                let parent = value_at_path_mut(root, parent_path)?;
+                match &last[0] {
+                    PatchComponent::Key(key) => {
+                        parent
+                            .as_object_mut()
+                            .ok_or_else(|| patch_error("set parent must be a mapping"))?
+                            .insert(key.clone(), next);
+                    }
+                    PatchComponent::Index(index) => {
+                        let items = parent
+                            .as_array_mut()
+                            .ok_or_else(|| patch_error("set parent must be a sequence"))?;
+                        let slot = items
+                            .get_mut(*index)
+                            .ok_or_else(|| patch_error("set index is out of bounds"))?;
+                        *slot = next;
+                    }
+                }
+            }
+        }
+        "insert" => {
+            let index = op
+                .get("index")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| patch_error("insert.index is required"))?;
+            let next = op
+                .get("value")
+                .cloned()
+                .ok_or_else(|| patch_error("insert.value is required"))?;
+            let items = value_at_path_mut(root, &path)?
+                .as_array_mut()
+                .ok_or_else(|| patch_error("insert target must be a sequence"))?;
+            if index > items.len() {
+                return Err(patch_error("insert index exceeds sequence length"));
+            }
+            items.insert(index, next);
+        }
+        "remove" => {
+            if path.is_empty() {
+                return Err(patch_error("cannot remove the document root"));
+            }
+            let (parent_path, last) = path.split_at(path.len() - 1);
+            let parent = value_at_path_mut(root, parent_path)?;
+            match &last[0] {
+                PatchComponent::Key(key) => {
+                    if parent
+                        .as_object_mut()
+                        .and_then(|map| map.remove(key))
+                        .is_none()
+                    {
+                        return Err(patch_error("remove key does not exist"));
+                    }
+                }
+                PatchComponent::Index(index) => {
+                    let items = parent
+                        .as_array_mut()
+                        .ok_or_else(|| patch_error("remove parent must be a sequence"))?;
+                    if *index >= items.len() {
+                        return Err(patch_error("remove index is out of bounds"));
+                    }
+                    items.remove(*index);
+                }
+            }
+        }
+        "move" => {
+            let from = op
+                .get("from")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| patch_error("move.from is required"))?;
+            let to = op
+                .get("to")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| patch_error("move.to is required"))?;
+            let items = value_at_path_mut(root, &path)?
+                .as_array_mut()
+                .ok_or_else(|| patch_error("move target must be a sequence"))?;
+            if from >= items.len() || to >= items.len() {
+                return Err(patch_error("move index is out of bounds"));
+            }
+            if from != to {
+                let item = items.remove(from);
+                items.insert(to, item);
+            }
+        }
+        _ => return Err(patch_error(format!("unsupported patch op `{kind}`"))),
+    }
+    Ok(())
+}
+
+fn apply_yaml_op(source: &mut String, op: &Value) -> Result<(), (String, String)> {
+    let kind = op
+        .get("op")
+        .and_then(Value::as_str)
+        .ok_or_else(|| patch_error("op.op is required"))?;
+    let path = patch_path(op.get("path"))?;
+    let doc = YamlDocument::new(source.clone()).map_err(|error| patch_error(error.to_string()))?;
+    if doc.has_anchors() {
+        return Err(patch_error(
+            "YAML anchors and aliases cannot be patched safely",
+        ));
+    }
+    match kind {
+        "set" => {
+            let next = op
+                .get("value")
+                .ok_or_else(|| patch_error("set.value is required"))?;
+            let route = yaml_route(&path);
+            match doc.query_exact(&route) {
+                Ok(Some(feature)) => {
+                    let replacement =
+                        indent_fragment(&yaml_fragment(next)?, feature.location.point_span.0 .1);
+                    source.replace_range(
+                        feature.location.byte_span.0..feature.location.byte_span.1,
+                        &replacement,
+                    );
+                }
+                Ok(None) | Err(_) => {
+                    let Some(PatchComponent::Key(key)) = path.last() else {
+                        return Err(patch_error("set target does not exist"));
+                    };
+                    let parent_path = &path[..path.len() - 1];
+                    let parent = doc
+                        .query_exact(&yaml_route(parent_path))
+                        .map_err(|error| patch_error(error.to_string()))?
+                        .ok_or_else(|| patch_error("set parent has no value"))?;
+                    if parent.kind() != FeatureKind::BlockMapping {
+                        return Err(patch_error("new keys require a block-style mapping"));
+                    }
+                    let mut mapping = serde_json::Map::new();
+                    mapping.insert(key.clone(), next.clone());
+                    let indent = parent.location.point_span.0 .1;
+                    let addition =
+                        indent_fragment(&yaml_fragment(&Value::Object(mapping))?, indent);
+                    let offset = parent.location.byte_span.1;
+                    let prefix = if source[..offset].ends_with('\n') {
+                        ""
+                    } else {
+                        "\n"
+                    };
+                    source.insert_str(offset, &format!("{prefix}{addition}"));
+                }
+            }
+        }
+        "insert" => {
+            let index = op
+                .get("index")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| patch_error("insert.index is required"))?;
+            yaml_insert_raw(source, &path, index, None, op.get("value"))?;
+        }
+        "remove" => {
+            let span = doc
+                .removal_span(&yaml_route(&path))
+                .map_err(|error| patch_error(error.to_string()))?;
+            source.replace_range(span, "");
+        }
+        "move" => {
+            let from = op
+                .get("from")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| patch_error("move.from is required"))?;
+            let to = op
+                .get("to")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| patch_error("move.to is required"))?;
+            let parsed = parse_structured("value.yaml", source)
+                .ok_or_else(|| patch_error("file is not valid YAML"))?;
+            let length = value_at_path(&parsed, &path)?
+                .as_array()
+                .ok_or_else(|| patch_error("move target must be a sequence"))?
+                .len();
+            if from >= length || to >= length {
+                return Err(patch_error("move index is out of bounds"));
+            }
+            if from != to {
+                let item_path = [path.as_slice(), &[PatchComponent::Index(from)]].concat();
+                let span = doc
+                    .removal_span(&yaml_route(&item_path))
+                    .map_err(|error| patch_error(error.to_string()))?;
+                let raw = source[span.clone()].to_string();
+                source.replace_range(span, "");
+                yaml_insert_raw(source, &path, to, Some(raw), None)?;
+            }
+        }
+        _ => return Err(patch_error(format!("unsupported patch op `{kind}`"))),
+    }
+    Ok(())
+}
+
+fn apply_structured_ops(
+    path: &str,
+    content: &str,
+    ops: &[Value],
+) -> Result<String, (String, String)> {
+    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "json" => {
+            let mut value: Value = serde_json::from_str(content)
+                .map_err(|error| patch_error(format!("invalid JSON: {error}")))?;
+            for op in ops {
+                apply_value_op(&mut value, op)?;
+            }
+            serde_json::to_string_pretty(&value)
+                .map(|mut text| {
+                    text.push('\n');
+                    text
+                })
+                .map_err(|error| patch_error(error.to_string()))
+        }
+        "yaml" | "yml" => {
+            let mut text = content.to_string();
+            for op in ops {
+                apply_yaml_op(&mut text, op)?;
+            }
+            serde_yaml::from_str::<Value>(&text)
+                .map_err(|error| patch_error(format!("patch produced invalid YAML: {error}")))?;
+            Ok(text)
+        }
+        _ => Err(patch_error(
+            "fs.patch supports only .json, .yaml, and .yml files",
+        )),
+    }
+}
+
+/// `fs.patch` — atomically apply structured edits while preserving YAML formatting.
+pub async fn handle_patch(db: &PgPool, principal: &Principal, params: &Value) -> ResourceResult {
+    let (channel_id, path) = extract_channel_path(params, false)?;
+    check_fs_write(db, principal, channel_id).await?;
+    let expected = params
+        .get("if_version")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| patch_error("if_version is required"))?;
+    let ops = params
+        .get("ops")
+        .and_then(Value::as_array)
+        .ok_or_else(|| patch_error("ops must be an array"))?;
+    if ops.is_empty() || ops.len() > MAX_PATCH_OPS {
+        return Err(patch_error("ops must contain 1..=100 operations"));
+    }
+
+    let mut tx = db
+        .begin()
+        .await
+        .map_err(super::db_err("fs.patch: begin tx"))?;
+    let row = sqlx::query("SELECT content, version, is_dir FROM context_files WHERE channel_id = $1 AND path = $2 FOR UPDATE")
+        .bind(channel_id.to_string()).bind(&path).fetch_optional(&mut *tx).await
+        .map_err(super::db_err("fs.patch: select file"))?.ok_or_else(|| super::not_found("file"))?;
+    if row.try_get::<bool, _>("is_dir").unwrap_or(false) {
+        return Err(patch_error("path is a directory"));
+    }
+    let current = row.try_get::<i64, _>("version").unwrap_or(0);
+    if current != expected {
+        return Err(version_conflict(current));
+    }
+    let content = row.try_get::<String, _>("content").unwrap_or_default();
+    let next = apply_structured_ops(&path, &content, ops)?;
+    enforce_file_size(&next)?;
+    let version = sqlx::query("UPDATE context_files SET content = $3, version = version + 1, updated_at = NOW() WHERE channel_id = $1 AND path = $2 RETURNING version")
+        .bind(channel_id.to_string()).bind(&path).bind(next).fetch_one(&mut *tx).await
+        .map_err(super::db_err("fs.patch: update file"))?.try_get::<i64, _>("version").unwrap_or(current + 1);
+    let seq = insert_operation(
+        &mut tx,
+        channel_id,
+        "fs.patch",
+        principal,
+        &path,
+        json!({"path": path, "version": version, "ops": ops}),
+    )
+    .await?;
+    tx.commit()
+        .await
+        .map_err(super::db_err("fs.patch: commit tx"))?;
+    Ok(json!({"channel_id": channel_id, "path": path, "version": version, "channel_seq": seq}))
+}
 
 /// `fs.write` — create or overwrite a file. `if_version=0` means create-only.
 pub async fn handle_write(db: &PgPool, principal: &Principal, params: &Value) -> ResourceResult {
@@ -777,7 +1307,8 @@ fn version_conflict(current: i64) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_structured, slice_lines};
+    use super::{apply_structured_ops, parse_structured, slice_lines};
+    use serde_json::json;
 
     #[test]
     fn no_range_returns_none() {
@@ -839,5 +1370,72 @@ mod tests {
         assert!(parse_structured("notes.md", "# hi").is_none());
         assert!(parse_structured("bad.yaml", "a: [unclosed").is_none());
         assert!(parse_structured("noext", "k: 1").is_none());
+    }
+
+    #[test]
+    fn json_patch_supports_all_operations() {
+        let input = r#"{"rows":[{"name":"a","done":false},{"name":"b","done":false}]}"#;
+        let output = apply_structured_ops(
+            "board.json",
+            input,
+            &[
+                json!({"op":"set","path":["rows",0,"done"],"value":true}),
+                json!({"op":"insert","path":["rows"],"index":1,"value":{"name":"x","done":false}}),
+                json!({"op":"move","path":["rows"],"from":2,"to":0}),
+                json!({"op":"remove","path":["rows",1]}),
+            ],
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value["rows"],
+            json!([
+                {"name":"b","done":false},
+                {"name":"x","done":false}
+            ])
+        );
+    }
+
+    #[test]
+    fn yaml_patch_preserves_comments_and_format() {
+        let input = "# board\nrows:\n  - name: a # keep\n    done: false\n  - name: b\n    done: false\nfooter: yes # untouched\n";
+        let ops = [
+            json!({"op":"set","path":["rows",0,"done"],"value":true}),
+            json!({"op":"insert","path":["rows"],"index":1,"value":{"name":"x","done":false}}),
+            json!({"op":"move","path":["rows"],"from":2,"to":0}),
+            json!({"op":"remove","path":["rows",1]}),
+        ];
+        let mut output = input.to_string();
+        for op in ops {
+            output = apply_structured_ops("board.yaml", &output, &[op.clone()])
+                .unwrap_or_else(|error| panic!("op {op} failed against:\n{output}\n{error:?}"));
+        }
+        assert!(output.contains("# board"));
+        assert!(output.contains("footer: yes # untouched"));
+        let value: serde_json::Value = serde_yaml::from_str(&output).unwrap();
+        assert_eq!(
+            value["rows"],
+            json!([
+                {"name":"b","done":false},
+                {"name":"x","done":false}
+            ])
+        );
+    }
+
+    #[test]
+    fn yaml_patch_rejects_aliases_and_invalid_paths() {
+        let aliased = "base: &base\n  done: false\ncopy: *base\n";
+        assert!(apply_structured_ops(
+            "board.yaml",
+            aliased,
+            &[json!({"op":"set","path":["base","done"],"value":true})],
+        )
+        .is_err());
+        assert!(apply_structured_ops(
+            "board.yaml",
+            "rows: []\n",
+            &[json!({"op":"remove","path":["rows",0]})],
+        )
+        .is_err());
     }
 }

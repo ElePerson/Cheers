@@ -2,7 +2,7 @@
 
 > **Language**: English | 中文镜像待补
 >
-> **Status**: Accepted · **Date**: 2026-07-19 · **Owner**: haowei
+> **Status**: Implemented · **Date**: 2026-07-19 · **Implemented**: 2026-08-04 · **Owner**: haowei
 >
 > Settles §6 of [WORKBENCH_LENS_SPEC.md](WORKBENCH_LENS_SPEC.md).
 
@@ -196,14 +196,12 @@ tests.
 
 1. ~~Spike the Rust comment-preserving YAML editor~~ — **done 2026-07-19, `yamlpath` 1.27**
    (see above). No longer blocking.
-2. Specify `fs.patch` and the `data` field of `fs.read` in
-   [WIRE_PROTOCOL.md](WIRE_PROTOCOL.md) and the resource verb table.
-3. Implement in the gateway, porting the spike's fixtures as tests: `fs.patch` (4 ops) and
-   `fs.read`'s parsed `data`. `fs.write` stays untouched.
-4. Build the **editor fallback** on iOS (`fs.write` only — no YAML, no patching). This
-   unblocks the human half of the loop immediately and proves the write path end to end.
-5. Then the three interactive widgets (`table` / `list` / `form`) on `fs.patch` + `data` —
-   web and iOS from the same wire contract.
+2. ~~Specify `fs.patch` and the `data` field of `fs.read` in
+   [WIRE_PROTOCOL.md](WIRE_PROTOCOL.md) and the resource verb table.~~
+3. ~~Implement in the gateway, porting the spike's fixtures as tests: `fs.patch` (4 ops) and
+   `fs.read`'s parsed `data`. `fs.write` stays untouched.~~
+4. ~~Build the **editor fallback** on iOS (`fs.write` only — no YAML, no patching).~~
+5. ~~Build native iOS table/list/chart editors on `fs.patch` + `data`.~~
 6. Retire `yamlDoc.ts`'s diff-based path in favour of `fs.patch`, or the two will disagree
    about what survives an edit (see the spike note).
 
