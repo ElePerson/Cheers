@@ -58,3 +58,7 @@ Every client applies the same rules:
 
 This makes a live terminal delta and a later REST replay render as one identical
 operation on iOS, Web, and the macOS desktop shell.
+
+Tool events may include the additive `data.presentation` descriptor documented
+in [TOOL_PRESENTATION.md](TOOL_PRESENTATION.md). It is the shared UI routing
+contract for specialized file, shell, web-search, and Git renderers.

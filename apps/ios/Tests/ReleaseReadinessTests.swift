@@ -265,6 +265,75 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(events.map(\.id), ["finished-1"])
     }
 
+    func testToolPresentationAcceptsOnlyGatewayV2EventTypes() throws {
+        let event = try traceEvent("""
+        {
+          "msg_id":"message-1",
+          "phase":"tool_call_update",
+          "status":"completed",
+          "data":{
+            "presentation":{
+              "v":2,
+              "event_type":"git_status",
+              "family":"git",
+              "operation":"status",
+              "command":"git status --short --branch",
+              "cwd":"/repo/Cheers"
+            }
+          }
+        }
+        """)
+
+        XCTAssertEqual(event.toolPresentation?.eventType, .gitStatus)
+        XCTAssertEqual(event.toolPresentation?.command, "git status --short --branch")
+        XCTAssertEqual(event.toolPresentation?.cwd, "/repo/Cheers")
+    }
+
+    func testToolPresentationRejectsLegacyAndUnknownEventTypes() throws {
+        let legacy = try JSONDecoder().decode(JSONValue.self, from: Data("""
+        {"v":1,"renderer":"git_status","family":"git","operation":"status"}
+        """.utf8))
+        let unknown = try JSONDecoder().decode(JSONValue.self, from: Data("""
+        {"v":2,"event_type":"mystery_tool","family":"git","operation":"status"}
+        """.utf8))
+
+        XCTAssertNil(ToolPresentation.parse(legacy))
+        XCTAssertNil(ToolPresentation.parse(unknown))
+    }
+
+    func testGitStatusResultUsesStructuredGatewayPayload() throws {
+        let event = try traceEvent("""
+        {
+          "msg_id":"message-1",
+          "phase":"tool_call_update",
+          "status":"completed",
+          "data":{
+            "presentation":{
+              "v":2,
+              "event_type":"git_status",
+              "family":"git",
+              "operation":"status",
+              "result":{
+                "kind":"git_status",
+                "branch":"feature/tool-presentation",
+                "clean":false,
+                "counts":{"staged":1,"unstaged":2,"untracked":1,"conflicted":0},
+                "files":[
+                  {"path":"apps/ios/Sources/Views/BotTracePanelView.swift","index":" ","worktree":"M","state":"unstaged"}
+                ],
+                "truncated":false
+              }
+            }
+          }
+        }
+        """)
+
+        let result = try XCTUnwrap(GitStatusResult.parse(event.toolPresentation))
+        XCTAssertEqual(result.branch, "feature/tool-presentation")
+        XCTAssertEqual(result.counts.unstaged, 2)
+        XCTAssertEqual(result.files.first?.state, .unstaged)
+    }
+
     private func permissionRequest(_ json: String) throws -> PermissionRequest {
         let value = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
         return try XCTUnwrap(PermissionRequest(contentData: value))

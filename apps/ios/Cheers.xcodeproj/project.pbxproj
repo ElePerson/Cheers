@@ -62,6 +62,7 @@
 		CE0000000000000000000440 /* AuthRequiredCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000441 /* AuthRequiredCardView.swift */; };
 		CE0000000000000000000450 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000451 /* Localizable.xcstrings */; };
 		CE0000000000000000000452 /* BotTracePanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000453 /* BotTracePanelView.swift */; };
+		CE0000000000000000000455 /* ToolPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000454 /* ToolPresentation.swift */; };
 		CE1000000000000000000001 /* ServerIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000011 /* ServerIdentity.swift */; };
 		CE1000000000000000000002 /* ReleaseReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000012 /* ReleaseReadinessTests.swift */; };
 		CE1000000000000000000003 /* AuthenticationAccessibilityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1000000000000000000013 /* AuthenticationAccessibilityUITests.swift */; };
@@ -142,6 +143,7 @@
 		CE0000000000000000000441 /* AuthRequiredCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthRequiredCardView.swift; sourceTree = "<group>"; };
 		CE0000000000000000000451 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		CE0000000000000000000453 /* BotTracePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotTracePanelView.swift; sourceTree = "<group>"; };
+		CE0000000000000000000454 /* ToolPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolPresentation.swift; sourceTree = "<group>"; };
 		CE1000000000000000000011 /* ServerIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerIdentity.swift; sourceTree = "<group>"; };
 		CE1000000000000000000012 /* ReleaseReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseReadinessTests.swift; sourceTree = "<group>"; };
 		CE1000000000000000000013 /* AuthenticationAccessibilityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationAccessibilityUITests.swift; sourceTree = "<group>"; };
@@ -230,6 +232,7 @@
 			isa = PBXGroup;
 			children = (
 				CE0000000000000000000104 /* DTOs.swift */,
+				CE0000000000000000000454 /* ToolPresentation.swift */,
 				CE0000000000000000000115 /* Approval.swift */,
 			);
 			path = Models;
@@ -458,6 +461,7 @@
 				CE1000000000000000000001 /* ServerIdentity.swift in Sources */,
 				CE0000000000000000000203 /* KeychainStore.swift in Sources */,
 				CE0000000000000000000204 /* DTOs.swift in Sources */,
+				CE0000000000000000000455 /* ToolPresentation.swift in Sources */,
 				CE0000000000000000000205 /* APIClient.swift in Sources */,
 				CE0000000000000000000206 /* ChatSocket.swift in Sources */,
 				CE0000000000000000000207 /* AppModel.swift in Sources */,

@@ -22,11 +22,21 @@ struct RootView: View {
 
     var body: some View {
         Group {
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-ui-testing-git-trace") {
+                GitTraceFixtureView()
+            } else if app.session == nil {
+                LoginView()
+            } else {
+                AppShellView()
+            }
+#else
             if app.session == nil {
                 LoginView()
             } else {
                 AppShellView()
             }
+#endif
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: app.session == nil)
         .task(id: app.session?.userId) {
