@@ -37,7 +37,14 @@ interface Props {
   onCompose?: (text: string) => void;
 }
 
-interface WbConfig {
+export interface WorkbenchSceneState {
+  version: 1;
+  order: string[];
+  titles: Record<string, string>;
+  items: Record<string, string[]>;
+}
+
+export interface WbConfig {
   /** Self-documenting field (regenerated on every write) — for humans/AI reading the file. */
   _doc?: string;
   environment?: string | null;
@@ -46,6 +53,9 @@ interface WbConfig {
   bindings?: Record<string, string>;
   /** path -> lens config (e.g. table columns); written create-only by scenario activation. */
   configs?: Record<string, unknown>;
+  /** Shared navigation index for native multi-scene clients. Renderer selection remains
+   * file-bound through bindings; this does not resurrect template-owned renderers. */
+  scene_state?: WorkbenchSceneState;
 }
 
 // Regenerated into `.workbench.json._doc` on every write, so anyone (human or AI) opening
@@ -57,13 +67,14 @@ const WB_DOC =
   "bindings = file path → renderer id Preview uses (unbound: best content match, else raw); " +
   "configs = file path → lens config (e.g. table columns), written by scenario activation; " +
   "pinned = files injected into every bot prompt. " +
+  "scene_state = enabled scenario order/titles and their file-path navigation indexes; " +
   "Files themselves are pure content — how a file renders is decided by this config, never written into the file.";
 
 // Known-keys parse + one-time migration: the retired `views` tab list carried each
 // scenario view's renderer/config — collapse those into bindings/configs (create-only,
 // an explicit binding wins) so pre-refactor channels keep their table/kanban previews.
 // The migrated result persists on the next write; the `views` key itself retires.
-function parseCfg(content: string): WbConfig {
+export function parseCfg(content: string): WbConfig {
   const raw = JSON.parse(content) as WbConfig & {
     views?: { path?: string; renderer?: string; config?: unknown }[];
   };
@@ -73,6 +84,7 @@ function parseCfg(content: string): WbConfig {
     pinned: raw.pinned,
     bindings: raw.bindings,
     configs: raw.configs,
+    scene_state: raw.scene_state,
   };
   if (raw.views?.length) {
     const b = { ...(cfg.bindings ?? {}) };
@@ -226,7 +238,19 @@ function WorkbenchDrawerImpl({ open, onClose, channelId, sendResourceReq, openFi
           if (!nextBindings[v.file]) nextBindings[v.file] = `builtin:${v.lens}`;
           if (v.config !== undefined && nextConfigs[v.file] === undefined) nextConfigs[v.file] = v.config;
         }
-        const next: WbConfig = { ...base, environment: manifest.id, bindings: nextBindings, configs: nextConfigs };
+        const sceneState: WorkbenchSceneState = {
+          version: 1,
+          order: [...(base.scene_state?.order ?? []).filter((id) => id !== manifest.id), manifest.id],
+          titles: { ...(base.scene_state?.titles ?? {}), [manifest.id]: manifest.title },
+          items: { ...(base.scene_state?.items ?? {}), [manifest.id]: manifest.views.map((view) => view.file) },
+        };
+        const next: WbConfig = {
+          ...base,
+          environment: manifest.id,
+          bindings: nextBindings,
+          configs: nextConfigs,
+          scene_state: sceneState,
+        };
         if (manifest.pin?.length) next.pinned = [...new Set([...(base.pinned ?? []), ...manifest.pin])];
         await writeCfg(next);
         setFocus(manifest.views[0]?.file ?? null);

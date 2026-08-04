@@ -121,6 +121,7 @@ pub async fn dispatch(db: &PgPool, principal: Principal, frame: &Value) -> Value
 
         // ── mesh step 6：新增写操作（fs.*）───────────────────────────────
         "fs.write" => fs::handle_write(db, &principal, &params).await,
+        "fs.patch" => fs::handle_patch(db, &principal, &params).await,
         "fs.edit" => fs::handle_edit(db, &principal, &params).await,
         "fs.append" => fs::handle_append(db, &principal, &params).await,
         "fs.rm" => fs::handle_rm(db, &principal, &params).await,
