@@ -160,6 +160,13 @@ pub fn normalize_event_payload(mut value: Value) -> Value {
             object.insert(field.to_string(), json!(nested));
         }
     }
+    if let Some(data) = object.get_mut("data") {
+        if let Some(presentation) = crate::domain::tool_presentation::classify(data) {
+            if let Some(data_object) = data.as_object_mut() {
+                data_object.insert("presentation".to_string(), presentation);
+            }
+        }
+    }
     value
 }
 
@@ -342,6 +349,25 @@ mod contract_tests {
         assert_eq!(event["is_terminal"], true);
         assert!(event.get("trace_seq").is_some());
         assert!(event.get("created_at").is_some());
+    }
+
+    #[test]
+    fn enriches_tool_data_with_shared_presentation() {
+        let event = normalize_event_payload(json!({
+            "msg_id": "message-1",
+            "phase": "tool_call",
+            "status": "in_progress",
+            "data": {
+                "tool_call_id": "call-1",
+                "tool_name": "Bash",
+                "input": {"command": "git status --short", "cwd": "/work"}
+            }
+        }));
+
+        assert_eq!(event["data"]["presentation"]["family"], "git");
+        assert_eq!(event["data"]["presentation"]["operation"], "status");
+        assert_eq!(event["data"]["presentation"]["renderer"], "git_status");
+        assert_eq!(event["data"]["presentation"]["cwd"], "/work");
     }
 
     #[test]

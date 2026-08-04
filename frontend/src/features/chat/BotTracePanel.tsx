@@ -11,6 +11,13 @@ import {
   Clock,
   Zap,
   Loader2,
+  FileSearch,
+  Pencil,
+  FilePlus2,
+  Terminal,
+  Search,
+  GitBranch,
+  GitCommit,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -19,6 +26,11 @@ import { PopoverPanel, usePopoverDismiss } from "@/components/ui/popover";
 import type { TraceEvent } from "@/types";
 import { DiffView } from "./DiffView";
 import { coalesceTraceEvents } from "./traceEvent";
+import {
+  parseGitStatusResult,
+  toolPresentationFromTrace,
+  type ToolPresentation,
+} from "./toolPresentation";
 
 interface Props {
   channelId: string;
@@ -48,6 +60,27 @@ function eventMeta(e: TraceEvent): { Icon: LucideIcon; tone: string; label: stri
       return { Icon: Check, tone: "text-zinc-500", label: "Auto-allowed" };
     }
     return { Icon: ShieldCheck, tone: "text-amber-400/70", label: "Approval" };
+  }
+  const presentation = toolPresentationFromTrace(e);
+  if (presentation) {
+    if (presentation.family === "git") {
+      return {
+        Icon: presentation.operation === "commit" ? GitCommit : GitBranch,
+        tone: "text-zinc-500",
+        label: `Git ${presentation.operation}`,
+      };
+    }
+    if (presentation.family === "file") {
+      if (presentation.operation === "read") return { Icon: FileSearch, tone: "text-zinc-500", label: "Read" };
+      if (presentation.operation === "edit") return { Icon: Pencil, tone: "text-zinc-500", label: "Edit" };
+      if (presentation.operation === "write") return { Icon: FilePlus2, tone: "text-zinc-500", label: "Write" };
+    }
+    if (presentation.family === "web" || presentation.family === "search") {
+      return { Icon: Search, tone: "text-zinc-500", label: presentation.family === "web" ? "Web search" : "Search" };
+    }
+    if (presentation.family === "shell") {
+      return { Icon: Terminal, tone: "text-zinc-500", label: "Run" };
+    }
   }
   switch (e.phase) {
     case "tool_call":
@@ -85,6 +118,48 @@ function statusLabel(status: string): string {
 }
 
 type JsonRecord = Record<string, unknown>;
+
+function GitStatusInspector({ presentation }: { presentation: ToolPresentation }) {
+  const result = parseGitStatusResult(presentation);
+  if (!result) return null;
+  const countItems = [
+    ["staged", result.counts.staged],
+    ["unstaged", result.counts.unstaged],
+    ["untracked", result.counts.untracked],
+    ["conflicted", result.counts.conflicted],
+  ].filter((item): item is [string, number] => typeof item[1] === "number" && item[1] > 0);
+
+  return (
+    <div className="rounded-lg bg-zinc-950/45 px-3 py-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-5 gap-y-2">
+        <span className="font-mono text-[11px] text-zinc-400">{result.branch ?? "Working tree"}</span>
+        {result.clean === true && <span className="text-emerald-400/80">Clean</span>}
+        {countItems.length > 0 && (
+          <span className="text-[10px] text-zinc-500">
+            {countItems.map(([name, count]) => `${count} ${name}`).join(" · ")}
+          </span>
+        )}
+      </div>
+      {result.files.length > 0 && (
+        <div className="mt-3 max-h-64 space-y-0.5 overflow-auto">
+          {result.files.map((file, index) => {
+            const marker = file.state === "untracked" ? "A" : file.index.trim() || file.worktree.trim() || "M";
+            return (
+              <div key={`${file.path}-${index}`} className="flex min-w-0 items-center gap-3 rounded-md px-1 py-2 hover:bg-zinc-900/60">
+                <span className={cn(
+                  "w-4 shrink-0 font-mono text-[10px]",
+                  file.state === "conflicted" ? "text-red-300/80" : file.state === "untracked" ? "text-emerald-400/80" : "text-zinc-500",
+                )}>{marker}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" title={file.path}>{file.path}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {result.truncated && <div className="mt-2 text-zinc-500">More files omitted.</div>}
+    </div>
+  );
+}
 
 function asRecord(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -236,6 +311,15 @@ function FileEditInspector({ diffs }: { diffs: FileDiff[] }) {
 }
 
 function eventPreview(event: TraceEvent): string | null {
+  const presentation = toolPresentationFromTrace(event);
+  if (presentation) {
+    if (presentation.family === "git") {
+      return presentation.target && presentation.target !== presentation.operation
+        ? `${presentation.operation} ${presentation.target}`
+        : presentation.operation;
+    }
+    return presentation.target ?? presentation.path ?? presentation.query ?? presentation.command ?? null;
+  }
   const data = asRecord(event.data);
   const input = asRecord(data?.input);
   const command = stringField(input, "command") ?? stringField(data, "command");
@@ -260,6 +344,17 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
   const diffs = fileDiffs(data);
   const planEntries = Array.isArray(data?.entries) ? data.entries : null;
   const output = data?.output;
+  const presentation = toolPresentationFromTrace(event);
+  const outputText = typeof output === "string"
+    ? output
+    : typeof asRecord(output)?.text === "string"
+      ? asRecord(output)?.text as string
+      : null;
+  const outputDiff = presentation && ["diff", "git_show"].includes(presentation.renderer)
+    && outputText?.includes("diff --git ")
+    ? outputText
+    : null;
+  const hasGitStatus = asRecord(presentation?.result)?.kind === "git_status";
   const metadata = {
     phase: event.phase,
     kind: event.kind,
@@ -271,7 +366,34 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
 
   return (
     <div className="space-y-3 p-3 text-[11px] text-zinc-400">
+      {presentation && (
+        <div className="rounded-lg bg-zinc-950/45 px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium capitalize text-zinc-200">
+              {presentation.family === "git" ? `Git ${presentation.operation}` : presentation.operation}
+            </span>
+            {presentation.risk && (
+              <span className="text-[10px] text-zinc-500">
+                {presentation.risk.replace(/_/g, " ")}
+              </span>
+            )}
+            {presentation.compound && (
+              <span className="text-[10px] text-amber-300/80">
+                compound shell command
+              </span>
+            )}
+          </div>
+          {presentation.command && (
+            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-zinc-300">{presentation.command}</pre>
+          )}
+          {!presentation.command && presentation.target && (
+            <div className="mt-2 break-all font-mono text-zinc-300">{presentation.target}</div>
+          )}
+        </div>
+      )}
       {diffs.length > 0 && <FileEditInspector diffs={diffs} />}
+      {outputDiff && <DiffView diff={outputDiff} className="max-h-80 rounded-lg bg-zinc-950" />}
+      {presentation && hasGitStatus && <GitStatusInspector presentation={presentation} />}
       {planEntries && (
         <div className="space-y-1.5">
           <div className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">Plan</div>
@@ -314,7 +436,7 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
           <div className="mt-1 font-mono text-zinc-200">{filePath}</div>
         </div>
       )}
-      {output != null && (
+      {output != null && !outputDiff && !hasGitStatus && (
         <div>
           <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-400">Output</div>
           <div className="max-h-56 overflow-auto rounded-lg bg-zinc-950 px-2.5 py-2 text-zinc-300"><DetailValue value={output} /></div>
@@ -337,6 +459,13 @@ function TraceItem({
   const rootRef = useRef<HTMLDivElement>(null);
   const { Icon, tone, label } = eventMeta(event);
   const preview = eventPreview(event);
+  const presentation = toolPresentationFromTrace(event);
+  const displayTitle = presentation ? label : event.title || label;
+  const statusTone = event.status === "failed"
+    ? "text-red-400/80"
+    : presentation?.family === "git" && event.status === "completed"
+      ? "text-emerald-400/80"
+      : "text-zinc-400";
   const close = useCallback(() => {
     if (active) onToggle();
   }, [active, onToggle]);
@@ -348,15 +477,15 @@ function TraceItem({
         type="button"
         onClick={onToggle}
         aria-expanded={active}
-        aria-label={`${active ? "Hide" : "Show"} details for ${event.title || label}`}
+        aria-label={`${active ? "Hide" : "Show"} details for ${displayTitle}`}
         className={cn(
           "flex h-7 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-zinc-900/70",
-          active && "bg-indigo-600/15",
+          active && "bg-zinc-900/70",
         )}
       >
         <Icon className={cn("h-3.5 w-3.5 shrink-0", tone)} />
         <span className="min-w-0 max-w-[45%] shrink truncate text-[11px] font-medium text-zinc-200">
-          {event.title || label}
+          {displayTitle}
         </span>
         {preview && (
           <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-400" title={preview}>
@@ -364,14 +493,14 @@ function TraceItem({
           </span>
         )}
         {event.status && (
-          <span className="shrink-0 text-[10px] text-zinc-400">
+          <span className={cn("shrink-0 text-[10px]", statusTone)}>
             {statusLabel(event.status)}
           </span>
         )}
         <ChevronRight
           className={cn(
             "h-3 w-3 shrink-0 text-zinc-500 transition-transform",
-            active && "rotate-90 text-indigo-400",
+            active && "rotate-90 text-zinc-300",
           )}
         />
       </button>
