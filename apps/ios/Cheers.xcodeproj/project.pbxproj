@@ -38,6 +38,7 @@
 		CE000000000000000000021D /* ApprovalSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000011E /* ApprovalSheetView.swift */; };
 		CE000000000000000000021E /* PushRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE000000000000000000011F /* PushRouter.swift */; };
 		CE000000000000000000021F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000120 /* Assets.xcassets */; };
+		CE0000000000000000000461 /* PushApprovalLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000460 /* PushApprovalLoader.swift */; };
 		CE0000000000000000000220 /* MembersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000121 /* MembersSheet.swift */; };
 		CE0000000000000000000221 /* ChannelSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000122 /* ChannelSettingsSheet.swift */; };
 		CE0000000000000000000222 /* ViewBoards.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000123 /* ViewBoards.swift */; };
@@ -118,6 +119,7 @@
 		CE000000000000000000011E /* ApprovalSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalSheetView.swift; sourceTree = "<group>"; };
 		CE000000000000000000011F /* PushRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRouter.swift; sourceTree = "<group>"; };
 		CE0000000000000000000120 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		CE0000000000000000000460 /* PushApprovalLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushApprovalLoader.swift; sourceTree = "<group>"; };
 		CE0000000000000000000121 /* MembersSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MembersSheet.swift; sourceTree = "<group>"; };
 		CE0000000000000000000122 /* ChannelSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelSettingsSheet.swift; sourceTree = "<group>"; };
 		CE0000000000000000000123 /* ViewBoards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewBoards.swift; sourceTree = "<group>"; };
@@ -296,6 +298,7 @@
 				CE0000000000000000000453 /* BotTracePanelView.swift */,
 				CE0000000000000000000441 /* AuthRequiredCardView.swift */,
 				CE000000000000000000011E /* ApprovalSheetView.swift */,
+				CE0000000000000000000460 /* PushApprovalLoader.swift */,
 				CE0000000000000000000413 /* VoiceMeetingStrip.swift */,
 				CE0000000000000000000415 /* TaskClaimConfirmationFooter.swift */,
 			);
@@ -506,6 +509,7 @@
 				CE0000000000000000000440 /* AuthRequiredCardView.swift in Sources */,
 				CE000000000000000000021D /* ApprovalSheetView.swift in Sources */,
 				CE000000000000000000021E /* PushRouter.swift in Sources */,
+				CE0000000000000000000461 /* PushApprovalLoader.swift in Sources */,
 				CE0000000000000000000410 /* VoiceRoomModel.swift in Sources */,
 				CE0000000000000000000412 /* VoiceMeetingStrip.swift in Sources */,
 				CE0000000000000000000414 /* TaskClaimConfirmationFooter.swift in Sources */,
