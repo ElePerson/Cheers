@@ -39,6 +39,9 @@ pub struct StreamEntry {
     pub channel_id: Uuid,
     /// task id
     pub task_id: Uuid,
+    /// 触发本轮的消息 id（用户/@bot 消息，或 bot@bot 上一跳）。用于 turn-complete
+    /// BotReply APNs；`handle_done` 会 remove entry，调用方须在 done 前 peek。
+    pub trigger_msg_id: Uuid,
     /// 任务 session（CheersSession.id）——用于会话生命周期更新
     pub session_id: Option<Uuid>,
     /// 是否已 finalize（R4 守卫：finalize 后拒绝迟到 delta）
@@ -111,6 +114,12 @@ impl StreamRegistry {
     pub fn remove(&self, msg_id: Uuid) {
         self.entries.remove(&msg_id);
         self.seq_counters.remove(&msg_id);
+    }
+
+    /// Peek the trigger message id for an active stream. Call **before**
+    /// `handle_done` (which removes the entry) when wiring turn-complete pushes.
+    pub fn trigger_msg_id(&self, msg_id: Uuid) -> Option<Uuid> {
+        self.entries.get(&msg_id).map(|e| e.trigger_msg_id)
     }
 
     /// 是否存在该 msg_id 的存活流（孤儿回收器据此跳过正在流式的占位）。
@@ -931,6 +940,7 @@ mod tests {
             bot_id: Uuid::new_v4(),
             channel_id: Uuid::new_v4(),
             task_id: Uuid::new_v4(),
+            trigger_msg_id: Uuid::new_v4(),
             session_id: None,
             finalized: false,
             last_touched_ms: Default::default(),

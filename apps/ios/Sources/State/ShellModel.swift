@@ -67,6 +67,13 @@ enum ChatsRoute: Hashable {
     case settings
 }
 
+/// Deep link from an OS push into a specific pending ACP approval.
+struct PushApprovalDeepLink: Identifiable, Hashable {
+    let channelId: String
+    let requestId: String
+    var id: String { "\(channelId):\(requestId)" }
+}
+
 /// Drawer-first navigation state: the open/closed drawer, the selected workspace
 /// filter, the navigation stack, and the workspace list shown in the drawer strip.
 /// The main conversation list stays flat across all workspaces; `selectedWorkspaceId`
@@ -76,6 +83,8 @@ enum ChatsRoute: Hashable {
 final class ShellModel {
     var selectedSection: AppSection = .chats
     var chatsPath: [ChatsRoute] = []
+    /// Set by PushRouter when a permission push is tapped or Approve/Deny fails.
+    var pushApproval: PushApprovalDeepLink?
 
     /// nil = "All" (drawer shows every workspace's channels). Otherwise scopes to one.
     var selectedWorkspaceId: String? {
