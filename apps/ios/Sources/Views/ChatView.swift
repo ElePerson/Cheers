@@ -318,7 +318,11 @@ struct ChatView: View {
                 switch panel {
                 case .members:   MembersSheet(channel: model.channel)
                 case .viewboard: ViewBoardSheet(channelId: model.channel.channelId)
-                case .workbench: WorkbenchSheet(channelId: model.channel.channelId)
+                case .workbench:
+                    WorkbenchSheet(
+                        channelId: model.channel.channelId,
+                        onAddContext: { model.addContext($0) }
+                    )
                 case .remoteWorkspace:
                     RemoteWorkspaceSheet(
                         channelId: model.channel.channelId,

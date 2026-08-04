@@ -53,6 +53,7 @@ struct WorkbenchSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let channelId: String
+    var onAddContext: (ResourceContextItem) -> Void = { _ in }
 
     @State private var entries: [FsEntry] = []
     @State private var root: [TreeNode] = []
@@ -181,53 +182,41 @@ struct WorkbenchSheet: View {
 
     private var compactLayout: some View {
         VStack(spacing: 0) {
-            sceneStrip
-            sceneHeader
+            scenePickerBar
             itemStrip
             documentContent
         }
     }
 
     private var regularLayout: some View {
-        HStack(spacing: 0) {
-            List(sceneIds, id: \.self, selection: Binding(
-                get: { activeScene },
-                set: { if let value = $0 { activeScene = value } }
-            )) { id in
-                let style = WorkbenchSceneStyle.resolve(id)
-                Label(sceneTitle(id), systemImage: style.icon).tag(id)
-            }
-            .frame(width: 230)
-            .listStyle(.sidebar)
-            Divider()
-            VStack(spacing: 0) {
-                sceneHeader
-                itemStrip
-                documentContent
-            }
+        VStack(spacing: 0) {
+            scenePickerBar
+            itemStrip
+            documentContent
         }
     }
 
-    private var sceneStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+    private var scenePickerBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: WorkbenchSceneStyle.resolve(activeScene).icon)
+                .foregroundStyle(WorkbenchSceneStyle.resolve(activeScene).tint)
+                .frame(width: 28)
+            Picker("Scene", selection: Binding(
+                get: { activeScene },
+                set: { activeScene = $0 }
+            )) {
                 ForEach(sceneIds, id: \.self) { id in
-                    let selected = id == activeScene
-                    let style = WorkbenchSceneStyle.resolve(id)
-                    Button { activeScene = id } label: {
-                        Label(sceneTitle(id), systemImage: style.icon)
-                            .font(.subheadline.weight(selected ? .semibold : .regular))
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 44)
-                            .background(selected ? style.tint.opacity(0.16) : Color.clear, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(selected ? style.tint : .secondary)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    Text(sceneTitle(id)).tag(id)
                 }
             }
-            .padding(.horizontal, 12)
+            .pickerStyle(.menu)
+            .font(.headline)
+            .accessibilityLabel("Select workbench scene")
+            Spacer(minLength: 0)
         }
+        .frame(minHeight: 48)
+        .padding(.horizontal, 12)
+        .background(Theme.bgRaised)
         .overlay(alignment: .bottom) { Divider() }
     }
 
@@ -269,6 +258,13 @@ struct WorkbenchSheet: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityAddTraits(selected ? .isSelected : [])
+                            .contextMenu {
+                                Button {
+                                    onAddContext(workbenchContext(path))
+                                } label: {
+                                    Label("Add to context", systemImage: "link.badge.plus")
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 12)
@@ -351,6 +347,16 @@ struct WorkbenchSheet: View {
 
     private func lensIcon(_ lens: String) -> String {
         switch lens { case "markdown": return "doc.richtext"; case "table": return "tablecells"; case "kanban": return "rectangle.3.group"; case "chart": return "chart.xyaxis.line"; case "codemap": return "point.3.connected.trianglepath.dotted"; default: return "doc.text" }
+    }
+
+    private func workbenchContext(_ path: String) -> ResourceContextItem {
+        ResourceContextItem(
+            id: "fs:(channelId):(path)",
+            verb: "fs.read",
+            params: ["channel_id": .string(channelId), "path": .string(path)],
+            label: "(itemTitle(path)) (Workbench)",
+            kind: "file"
+        )
     }
 
     private func select(_ path: String) {
