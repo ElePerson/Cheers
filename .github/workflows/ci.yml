@@ -8,10 +8,11 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # A merge into develop and its develop → main promotion PR reference the
-  # same head SHA. Group by that SHA so they do not spend two macOS runners
-  # performing the identical iOS validation.
-  group: ci-${{ github.event.pull_request.head.sha || github.sha }}
+  # Cancel only older runs from the *same trigger stream*. A develop push and
+  # its develop → main promotion PR are both required by branch protection;
+  # grouping them together turns one required run into "cancelled", which
+  # GitHub correctly refuses to merge.
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: true
 
 jobs:
