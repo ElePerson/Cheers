@@ -155,6 +155,7 @@ fn spawn_created_message_effects(state: &AppState, author_bot_id: Uuid, created:
     let db = state.db.clone();
     let bot_locator = state.bot_locator.clone();
     let web_push = state.web_push.clone();
+    let state_for_apns = state.clone();
     tokio::spawn(async move {
         let started = std::time::Instant::now();
         let _ = broadcast_and_trigger_created_message(
@@ -174,7 +175,7 @@ fn spawn_created_message_effects(state: &AppState, author_bot_id: Uuid, created:
         // Out-of-app nudge to the @mentioned humans (kind=mention) — bots
         // mention people via post_message, and those people may be away from
         // the tab: user-scoped WS frame (desktop shell; works without VAPID)
-        // plus Web Push when configured. Already off the critical path here.
+        // plus Web Push when configured, plus APNs for native clients.
         let human_mentions: Vec<String> = created
             .get("mentions")
             .and_then(Value::as_array)
@@ -209,7 +210,8 @@ fn spawn_created_message_effects(state: &AppState, author_bot_id: Uuid, created:
                 "sender_name": sender_name,
                 "body": body,
             });
-            for user_id in human_mentions {
+            let mut mentioned_users = Vec::new();
+            for user_id in &human_mentions {
                 if let Ok(uid) = user_id.parse::<uuid::Uuid>() {
                     fanout
                         .broadcast_user(
@@ -220,11 +222,24 @@ fn spawn_created_message_effects(state: &AppState, author_bot_id: Uuid, created:
                             ),
                         )
                         .await;
+                    mentioned_users.push(uid);
                 }
                 if let Some(sender) = web_push.as_ref() {
-                    crate::infra::web_push::push_to_user(&db, sender, &user_id, payload.clone())
+                    crate::infra::web_push::push_to_user(&db, sender, user_id, payload.clone())
                         .await;
                 }
+            }
+            if let Some(cid) = created
+                .get("channel_id")
+                .and_then(Value::as_str)
+                .and_then(|s| s.parse::<uuid::Uuid>().ok())
+            {
+                crate::notify::push_bot_mentions_apns(
+                    &state_for_apns,
+                    cid,
+                    author_bot_id,
+                    mentioned_users,
+                );
             }
         }
     });

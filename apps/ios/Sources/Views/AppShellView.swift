@@ -11,21 +11,30 @@ struct AppShellView: View {
     @State private var activity = ActivityModel()
 
     var body: some View {
+        @Bindable var shell = shell
         adaptiveTabs
             .task {
                 convo.attach(app)
                 shell.attach(app)
                 activity.attach(app, shell: shell)
                 PushRouter.shared.configure(app: app)
-                PushRouter.shared.openChannel = { channelId in
-                    guard let row = convo.rows.first(where: { $0.channel.channelId == channelId }) else { return }
-                    shell.openChat(row.channel)
+                PushRouter.shared.onNavigate = { destination in
+                    Task { await handlePushDestination(destination) }
                 }
                 await shell.loadWorkspacesIfNeeded()
                 await convo.loadIfNeeded()
                 shell.restoreCurrentChannel(from: convo.rows)
                 activity.seed(from: convo.rows)
                 await activity.loadInvites()
+            }
+            .sheet(item: $shell.pushApproval) { link in
+                PushApprovalLoader(
+                    channelId: link.channelId,
+                    requestId: link.requestId,
+                    activity: activity
+                )
+                .presentationDetents([PresentationDetent.medium, .large])
+                .presentationDragIndicator(.visible)
             }
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else { return }
@@ -112,6 +121,32 @@ struct AppShellView: View {
             return shell.currentChannel
         }
         return convo.rows.first { $0.channel.channelId == channelId }?.channel
+    }
+
+    private func handlePushDestination(_ destination: PushDestination) async {
+        switch destination {
+        case .channel(let channelId):
+            await openChannelFromPush(channelId)
+        case .approval(let channelId, let requestId):
+            await openChannelFromPush(channelId)
+            shell.pushApproval = PushApprovalDeepLink(channelId: channelId, requestId: requestId)
+        }
+    }
+
+    private func openChannelFromPush(_ channelId: String) async {
+        if let row = convo.rows.first(where: { $0.channel.channelId == channelId }) {
+            shell.openChat(row.channel)
+            return
+        }
+        await convo.loadIfNeeded()
+        if let row = convo.rows.first(where: { $0.channel.channelId == channelId }) {
+            shell.openChat(row.channel)
+            return
+        }
+        guard let api = app.api,
+              let channel = try? await api.getChannel(channelId: channelId)
+        else { return }
+        shell.openChat(channel)
     }
 
     private func refreshDurableState() async {

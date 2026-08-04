@@ -2,38 +2,78 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
+/// Where a notification tap (or failed background action) should land.
+enum PushDestination: Equatable {
+    case channel(String)
+    case approval(channelId: String, requestId: String)
+}
+
 /// OS push bridge (docs/arch/MOBILE_APP_DESIGN.md §5.4), following the HIG:
 /// - authorization is requested IN CONTEXT — after login, when the main shell
 ///   appears — never cold at first launch;
+/// - categories + the notification-center delegate are registered at process
+///   launch so lock-screen Approve/Deny and cold-start taps work;
 /// - the ACP_APPROVAL category keeps direct Approve / Deny actions for urgent
-///   requests. Approval requires device authentication and action labels make
-///   the external-agent impact explicit; tapping the notification opens details;
+///   requests. Approval requires device authentication; tapping the banner
+///   opens the channel (and the approval sheet for permission pushes);
 /// - a foregrounded app suppresses banners (its live WS already shows the
-///   event — design §5.3 "client-side suppression");
-/// - tapping a banner deep-links to the channel.
+///   event — design §5.3 "client-side suppression").
 @MainActor
 final class PushRouter: NSObject {
     static let shared = PushRouter()
 
-    weak var app: AppModel?
-    /// Set by the shell: routes a channel id from a notification tap.
-    var openChannel: ((String) -> Void)?
-
-    private var configured = false
+    static let approvalCategoryId = "ACP_APPROVAL"
     private static let tokenKey = "push_token"
+    /// Must match `AppModel` Keychain / UserDefaults keys.
+    private static let accessTokenKey = "access_token"
+    private static let serverURLKey = "server_url"
 
-    /// Idempotent; call once the user is signed in (contextual permission ask).
-    func configure(app: AppModel) {
-        self.app = app
-        guard !configured else { return }
-        configured = true
+    weak var app: AppModel?
+    /// Set by the shell once navigation is ready. Flushes any pending destination.
+    var onNavigate: ((PushDestination) -> Void)? {
+        didSet { flushPendingNavigation() }
+    }
+
+    private var configuredAuth = false
+    private var bootstrapped = false
+    private var pendingDestination: PushDestination?
+
+    /// Call from `application(_:didFinishLaunchingWithOptions:)` before return —
+    /// categories and the delegate must be live before the system delivers a
+    /// cold-start notification response.
+    func bootstrap() {
+        guard !bootstrapped else { return }
+        bootstrapped = true
 
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        registerCategories(on: center)
+    }
 
+    /// Idempotent; call once the user is signed in (contextual permission ask).
+    func configure(app: AppModel) {
+        bootstrap()
+        self.app = app
+        flushCachedTokenIfNeeded()
+        guard !configuredAuth else { return }
+        configuredAuth = true
+
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            guard granted else { return }
+            Task { @MainActor in
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
+    }
+
+    private func registerCategories(on center: UNUserNotificationCenter) {
+        // Titles are fixed at category registration (iOS cannot vary them per
+        // push). ACP's default allow option is allow_once — label matches that;
+        // the payload's approve_option_id carries the real option id.
         let approve = UNNotificationAction(
             identifier: "APPROVE",
-            title: "Approve remote action",
+            title: "Approve once",
             options: [.authenticationRequired]
         )
         let deny = UNNotificationAction(
@@ -43,26 +83,27 @@ final class PushRouter: NSObject {
         )
         center.setNotificationCategories([
             UNNotificationCategory(
-                identifier: "ACP_APPROVAL",
+                identifier: Self.approvalCategoryId,
                 actions: [approve, deny],
                 intentIdentifiers: [],
                 options: []
             ),
         ])
-
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            guard granted else { return }
-            Task { @MainActor in
-                UIApplication.shared.registerForRemoteNotifications()
-            }
-        }
     }
 
-    /// APNs granted us a device token — upload it (design §5.2).
+    /// APNs granted us a device token — persist locally, then upload when API is ready.
     func uploadDeviceToken(_ tokenData: Data) {
         let token = tokenData.map { String(format: "%02x", $0) }.joined()
         UserDefaults.standard.set(token, forKey: Self.tokenKey)
-        guard let api = app?.api else { return }
+        flushCachedTokenIfNeeded()
+    }
+
+    /// Upload a previously cached token once `app.api` is available. Safe to call
+    /// repeatedly — register is idempotent server-side.
+    private func flushCachedTokenIfNeeded() {
+        guard let api = app?.api ?? Self.backgroundAPIClient(),
+              let token = UserDefaults.standard.string(forKey: Self.tokenKey)
+        else { return }
         Task {
             try? await api.registerDevice(token: token, name: UIDevice.current.name)
         }
@@ -82,6 +123,68 @@ final class PushRouter: NSObject {
         guard let token = UserDefaults.standard.string(forKey: tokenKey) else { return }
         try? await api.registerDevice(token: token, name: UIDevice.current.name)
     }
+
+    // MARK: Navigation
+
+    func navigate(_ destination: PushDestination) {
+        if let onNavigate {
+            onNavigate(destination)
+        } else {
+            pendingDestination = destination
+        }
+    }
+
+    private func flushPendingNavigation() {
+        guard let onNavigate, let pending = pendingDestination else { return }
+        pendingDestination = nil
+        onNavigate(pending)
+    }
+
+    /// Build an API client from Keychain without waiting for AppShell — needed
+    /// for lock-screen Approve/Deny when the UI is not yet wired.
+    static func backgroundAPIClient() -> APIClient? {
+        guard let token = KeychainStore.get(accessTokenKey), !token.isEmpty else { return nil }
+        let server = UserDefaults.standard.string(forKey: serverURLKey)
+            ?? AppModel.defaultServerURL
+        guard let base = APIClient.normalizeBaseURL(server) else { return nil }
+        return APIClient(baseURL: base, token: token)
+    }
+
+    // MARK: Payload parsing
+
+    /// APNs delivers custom keys as property-list types; `null` becomes NSNull
+    /// and UUID-looking values are usually String — normalize carefully.
+    static func cheersPayload(from userInfo: [AnyHashable: Any]) -> [String: Any] {
+        if let cheers = userInfo["cheers"] as? [String: Any] {
+            return cheers
+        }
+        // Tolerate a flattened custom dictionary (older / misrouted payloads).
+        return userInfo.reduce(into: [String: Any]()) { out, pair in
+            guard let key = pair.key as? String, key != "aps" else { return }
+            out[key] = pair.value
+        }
+    }
+
+    static func stringValue(_ raw: Any?) -> String? {
+        switch raw {
+        case let s as String:
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        case let n as NSNumber:
+            return n.stringValue
+        default:
+            return nil
+        }
+    }
+
+    static func destination(from cheers: [String: Any]) -> PushDestination? {
+        guard let channelId = stringValue(cheers["channel_id"]) else { return nil }
+        let type = stringValue(cheers["type"])
+        if type == "permission_request", let requestId = stringValue(cheers["request_id"]) {
+            return .approval(channelId: channelId, requestId: requestId)
+        }
+        return .channel(channelId)
+    }
 }
 
 extension PushRouter: UNUserNotificationCenterDelegate {
@@ -99,38 +202,78 @@ extension PushRouter: UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse
     ) async {
         let info = response.notification.request.content.userInfo
-        let cheers = info["cheers"] as? [String: Any]
-        let channelId = cheers?["channel_id"] as? String
+        let cheers = await MainActor.run { PushRouter.cheersPayload(from: info) }
         let action = response.actionIdentifier
         await MainActor.run {
-            switch action {
-            case "APPROVE", "DENY":
-                guard let api = PushRouter.shared.app?.api,
-                      let channelId,
-                      let requestId = cheers?["request_id"] as? String,
-                      let optionId = cheers?[action == "APPROVE" ? "approve_option_id" : "reject_option_id"] as? String
-                else { return }
-                // iOS has already required device authentication for these
-                // actions. The server still performs the owner/approver and
-                // pending-request checks before relaying the decision.
-                Task {
-                    _ = try? await api.resolvePermission(
-                        channelId: channelId,
-                        requestId: requestId,
-                        optionId: optionId
-                    )
-                }
-            default:
-                if let channelId {
-                    PushRouter.shared.openChannel?(channelId)
-                }
+            handleResponse(action: action, cheers: cheers)
+        }
+    }
+
+    private func handleResponse(action: String, cheers: [String: Any]) {
+        switch action {
+        case "APPROVE", "DENY":
+            handleApprovalAction(action: action, cheers: cheers)
+        default:
+            // Default tap / dismiss-open — deep-link into the app.
+            if let destination = Self.destination(from: cheers) {
+                navigate(destination)
+            }
+        }
+    }
+
+    private func handleApprovalAction(action: String, cheers: [String: Any]) {
+        guard let channelId = Self.stringValue(cheers["channel_id"]),
+              let requestId = Self.stringValue(cheers["request_id"])
+        else {
+            if let destination = Self.destination(from: cheers) {
+                navigate(destination)
+            }
+            return
+        }
+        let optionKey = action == "APPROVE" ? "approve_option_id" : "reject_option_id"
+        guard let optionId = Self.stringValue(cheers[optionKey]) else {
+            // Payload missing option ids — open the approval sheet so the user
+            // can still decide (design §5.4 fallback).
+            navigate(.approval(channelId: channelId, requestId: requestId))
+            return
+        }
+
+        let api = app?.api ?? Self.backgroundAPIClient()
+        guard let api else {
+            navigate(.approval(channelId: channelId, requestId: requestId))
+            return
+        }
+
+        Task {
+            do {
+                _ = try await api.resolvePermission(
+                    channelId: channelId,
+                    requestId: requestId,
+                    optionId: optionId
+                )
+            } catch {
+                // Expired token / already resolved / network — land on the sheet.
+                navigate(.approval(channelId: channelId, requestId: requestId))
             }
         }
     }
 }
 
-/// UIKit delegate adaptor: receives the APNs registration callbacks.
+/// UIKit delegate adaptor: receives the APNs registration callbacks and
+/// bootstraps notification categories before the first frame.
 final class PushAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        // Must run synchronously on the main thread before returning — an async
+        // Task can lose the cold-start notification response / hide actions.
+        MainActor.assumeIsolated {
+            PushRouter.shared.bootstrap()
+        }
+        return true
+    }
+
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
