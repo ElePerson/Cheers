@@ -130,7 +130,7 @@ mod tests {
             for v in m["views"].as_array().unwrap() {
                 let lens = v["lens"].as_str().expect("view has a lens id");
                 assert!(
-                    ["table", "kanban", "markdown", "chart"].contains(&lens),
+                    ["table", "kanban", "markdown", "chart", "codemap"].contains(&lens),
                     "official template references non-builtin lens `{lens}`"
                 );
             }
