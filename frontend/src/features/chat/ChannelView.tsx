@@ -1419,15 +1419,16 @@ export function ChannelView({
         ...(replyTo ? { reply_to_msg_id: replyTo.msg_id } : {}),
         ...(bundle ? { context_bundle: bundle } : {}),
       };
-      setReplyTo(null);
       try {
         const { content: body, ...opts } = sendParams;
         await sendMessage(channel.channel_id, body, opts);
+        setReplyTo(null);
         useContextPickStore.getState().clear(channel.channel_id);
       } catch (error) {
         // Rejections such as an offline @bot are intentionally not persisted.
         // Keep the draft in the composer and surface the server's reason instead.
         toast.error(error instanceof Error ? error.message : "Couldn't send message");
+        throw error;
       }
     },
     [channel, selectedSessionId, replyTo, user],

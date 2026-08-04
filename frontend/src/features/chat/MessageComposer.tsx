@@ -870,6 +870,7 @@ function MessageComposerImpl({
     const names = Array.from(
       new Set(survivors.filter((p) => p.type === "group").map((p) => p.id))
     );
+    const draft = { text, attachments, picked, transcribedIds };
     setSending(true);
     setText("");
     setPicked([]);
@@ -879,6 +880,19 @@ function MessageComposerImpl({
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     try {
       await onSend(content, ids, fileIds, names);
+    } catch {
+      // The parent surfaces the send error. Restore the exact draft so an
+      // offline bot or transient network failure never discards user input.
+      setText(draft.text);
+      setAttachments(draft.attachments);
+      setPicked(draft.picked);
+      setTranscribedIds(draft.transcribedIds);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+      });
     } finally {
       setSending(false);
       textareaRef.current?.focus();
