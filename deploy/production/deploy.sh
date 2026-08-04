@@ -58,6 +58,8 @@ sync_auth_environment() {
     APPLE_PRIVATE_KEY_P8
     APPLE_WEB_CLIENT_ID
     APPLE_WEB_REDIRECT_URI
+    GATEWAY_IMAGE
+    FRONTEND_IMAGE
     OAUTH_WEB_RETURN_URL
   )
 
@@ -79,6 +81,8 @@ sync_auth_environment() {
         APPLE_PRIVATE_KEY_P8 | \
         APPLE_WEB_CLIENT_ID | \
         APPLE_WEB_REDIRECT_URI | \
+        GATEWAY_IMAGE | \
+        FRONTEND_IMAGE | \
         GOOGLE_WEB_CLIENT_ID | \
         GOOGLE_WEB_CLIENT_SECRET | \
         GOOGLE_WEB_REDIRECT_URI | \
@@ -118,6 +122,10 @@ sync_auth_environment() {
   [[ "${values[APPLE_WEB_REDIRECT_URI]}" == \
     "https://www.tocheers.com/api/v1/auth/oauth/apple/callback" ]] ||
     fail "APPLE_WEB_REDIRECT_URI is not the production callback"
+  [[ "${values[GATEWAY_IMAGE]}" =~ ^ghcr\.io/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$ ]] ||
+    fail "GATEWAY_IMAGE has an invalid format"
+  [[ "${values[FRONTEND_IMAGE]}" =~ ^ghcr\.io/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$ ]] ||
+    fail "FRONTEND_IMAGE has an invalid format"
   [[ "${values[OAUTH_WEB_RETURN_URL]}" == \
     "https://www.tocheers.com/auth/callback" ]] ||
     fail "OAUTH_WEB_RETURN_URL is not the production callback"
@@ -153,6 +161,8 @@ sync_auth_environment() {
     printf "APPLE_PRIVATE_KEY_P8='%s'\n" "${values[APPLE_PRIVATE_KEY_P8]}"
     printf "APPLE_WEB_CLIENT_ID='%s'\n" "${values[APPLE_WEB_CLIENT_ID]}"
     printf "APPLE_WEB_REDIRECT_URI='%s'\n" "${values[APPLE_WEB_REDIRECT_URI]}"
+    printf "GATEWAY_IMAGE='%s'\n" "${values[GATEWAY_IMAGE]}"
+    printf "FRONTEND_IMAGE='%s'\n" "${values[FRONTEND_IMAGE]}"
     if [[ "$google_count" -eq 3 ]]; then
       printf "GOOGLE_WEB_CLIENT_ID='%s'\n" "${values[GOOGLE_WEB_CLIENT_ID]}"
       printf "GOOGLE_WEB_CLIENT_SECRET='%s'\n" "${values[GOOGLE_WEB_CLIENT_SECRET]}"
