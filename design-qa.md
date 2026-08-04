@@ -63,3 +63,34 @@ The implementation preserves the source hierarchy—navigation title, outcome su
 No P0, P1, or P2 visual issues remain in the tested state. File rows scan cleanly, status is distinguished by color plus the Git status letter, and the screen contains no custom cards or separators.
 
 final result: passed
+
+---
+
+# Web Workbench Design QA
+
+## Target
+
+- Source visual: `/Users/haowei/.codex/generated_images/019fcbb5-7c0d-7733-abe7-1a405c90e286/exec-5f15d5cc-3f4a-47da-9e1e-526352fe0f64.png`
+- Implementation: `frontend/dev/workbench-preview.html`
+- Captured implementation: `/Users/haowei/.codex/visualizations/2026/08/04/019fcbb5-7c0d-7733-abe7-1a405c90e286/web-workbench-implementation-final.png`
+- Combined comparison: `/Users/haowei/.codex/visualizations/2026/08/04/019fcbb5-7c0d-7733-abe7-1a405c90e286/web-workbench-comparison-final.png`
+- Comparison frame: 1280 × 720 CSS pixels, standard density, Code project / Codemap / Gateway fs.patch selected.
+
+## Evidence reviewed
+
+- Full Workbench frame: existing outer drawer header and controls remain intact.
+- Focused interior: scene navigation, item tabs, Codemap canvas, selected-node inspector, status legend, and graph controls.
+- Narrow state: horizontal scene navigation and dismissible inspector overlay.
+- Interaction checks: scene switch, item switch, node selection, and graph zoom.
+- Browser console: no warnings or errors in a fresh preview tab.
+
+## Findings and resolution
+
+1. **P1 — Wide Codemap incorrectly opened a modal-like bottom inspector.** The resize observer mounted before asynchronous content created its target. Fixed by observing again when the parsed document becomes available; wide panels now use the persistent right inspector.
+2. **P2 — Redundant scene title row reduced canvas height and diverged from the selected layout.** Removed; content tabs now align directly above the renderer canvas.
+3. **P2 — Codemap nodes collapsed into one vertical column because layout was based on dotted identifier depth.** Replaced with deterministic graph-depth layers derived from edges, producing meaningful branches and convergence.
+4. **P3 — Preview emitted a duplicate React root warning after hot updates.** The preview now reuses its root.
+
+## Result
+
+passed

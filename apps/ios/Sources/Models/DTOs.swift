@@ -1884,24 +1884,34 @@ struct FsEntry: Decodable, Hashable {
 struct FsFile: Decodable {
     let path: String
     let content: String
+    /// Gateway-parsed JSON/YAML representation. Native clients never parse YAML.
+    let data: JSONValue?
     /// Optimistic-lock token. Unused while the workbench is read-only; `fs.write`
     /// will send it back as `if_version`.
     let version: Int
+    let isDir: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case path, content, version
+        case path, content, data, version
+        case isDir = "is_dir"
     }
+}
+
+struct FsWriteResponse: Decodable {
+    let path: String
+    let version: Int
 }
 
 struct WorkbenchTemplateRow: Decodable, Identifiable {
     let tplId: String
     let title: String
     let manifest: WorkbenchTemplateManifest
+    let origin: String?
     var id: String { tplId }
 
     enum CodingKeys: String, CodingKey {
         case tplId = "tpl_id"
-        case title, manifest
+        case title, manifest, origin
     }
 }
 

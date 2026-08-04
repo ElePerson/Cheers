@@ -139,6 +139,11 @@ describe("yaml as a structured format", () => {
     expect(idsOf("m.yaml", "other: 1\n", [])).not.toContain("builtin:chart");
   });
 
+  it("offers the native codemap renderer only for codemap schema v1", () => {
+    expect(idsOf("codemap/map.yaml", "codemap: 1\nnodes: {}\nedges: []\n", [])).toContain("builtin:codemap");
+    expect(idsOf("graph.yaml", "nodes: {}\nedges: []\n", [])).not.toContain("builtin:codemap");
+  });
+
   it("jsonHas stays frozen to JSON — it never matches YAML", () => {
     const p: PluginMeta = {
       plugin_id: "jh",

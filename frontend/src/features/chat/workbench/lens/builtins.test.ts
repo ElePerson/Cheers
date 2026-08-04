@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferColumns, updateRowCell } from "./builtins";
+import { inferColumns, parseCodemap, updateRowCell } from "./builtins";
 
 // The registry only OFFERS the table for arrays of plain objects, but the lens can
 // still receive anything (template bindings, files edited after binding) — these are
@@ -30,5 +30,34 @@ describe("table lens row guards", () => {
     expect(updateRowCell([null], 0, "a", "x")).toBeNull();
     expect(updateRowCell([["x"]], 0, "a", "x")).toBeNull();
     expect(updateRowCell([{ a: 1 }], 5, "a", "x")).toBeNull(); // out of range
+  });
+});
+
+describe("codemap lens parser", () => {
+  it("normalizes nodes, edges, focus, and status metadata", () => {
+    const parsed = parseCodemap({
+      codemap: 1,
+      repo: "ElePerson/Cheers",
+      focus: ["gateway.fs"],
+      nodes: {
+        "gateway.fs": {
+          kind: "module",
+          label: "Filesystem resources",
+          summary: "Reads and patches Workbench files",
+          status: "explored",
+          tags: ["gateway", "fs"],
+        },
+      },
+      edges: [{ from: "gateway.fs", to: "web", kind: "data", label: "fs.patch" }],
+    });
+
+    expect(parsed?.repo).toBe("ElePerson/Cheers");
+    expect(parsed?.focus).toEqual(new Set(["gateway.fs"]));
+    expect(parsed?.nodes[0]).toMatchObject({ id: "gateway.fs", status: "explored" });
+    expect(parsed?.edges[0]).toEqual({ from: "gateway.fs", to: "web", kind: "data", label: "fs.patch" });
+  });
+
+  it("rejects non-codemap documents", () => {
+    expect(parseCodemap({ nodes: {} })).toBeNull();
   });
 });

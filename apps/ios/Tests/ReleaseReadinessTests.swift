@@ -2,6 +2,77 @@ import XCTest
 @testable import Cheers
 
 final class ReleaseReadinessTests: XCTestCase {
+    func testWorkbenchSceneStateDecodesSharedNavigationIndex() {
+        let value = JSONValue.object([
+            "version": .number(1),
+            "order": .array([.string("code"), .string("research")]),
+            "titles": .object(["code": .string("Code")]),
+            "items": .object(["code": .array([.string("dev/plan.yaml")])]),
+        ])
+
+        let state = WorkbenchSceneState(value)
+
+        XCTAssertEqual(state.order, ["code", "research"])
+        XCTAssertEqual(state.titles["code"], "Code")
+        XCTAssertEqual(state.items["code"], ["dev/plan.yaml"])
+    }
+
+    func testWorkbenchNativeRendererMatchingUsesParsedData() {
+        XCTAssertEqual(inferNativeLens(path: "notes.md", data: nil), "markdown")
+        XCTAssertEqual(inferNativeLens(path: "rows.yaml", data: .array([
+            .object(["name": .string("A")]),
+        ])), "table")
+        XCTAssertEqual(inferNativeLens(path: "metrics.yaml", data: .object([
+            "series": .array([]),
+        ])), "chart")
+        XCTAssertEqual(inferNativeLens(path: "codemap/map.yaml", data: .object([
+            "codemap": .number(1),
+            "nodes": .object([:]),
+        ])), "codemap")
+        XCTAssertNil(inferNativeLens(path: "config.toml", data: nil))
+    }
+
+    func testCodemapParserPreservesGraphAndFocusState() throws {
+        let document = try XCTUnwrap(parseCodemap(.object([
+            "codemap": .number(1),
+            "repo": .string("ElePerson/Cheers"),
+            "focus": .array([.string("gateway.fs")]),
+            "nodes": .object([
+                "gateway.fs": .object([
+                    "kind": .string("module"),
+                    "label": .string("Filesystem resources"),
+                    "summary": .string("Reads and patches Workbench files"),
+                    "status": .string("explored"),
+                ]),
+                "ios": .object([
+                    "kind": .string("area"),
+                    "label": .string("iOS"),
+                    "status": .string("partial"),
+                ]),
+            ]),
+            "edges": .array([.object([
+                "from": .string("ios"),
+                "to": .string("gateway.fs"),
+                "kind": .string("calls"),
+            ])]),
+        ])))
+
+        XCTAssertEqual(document.repository, "ElePerson/Cheers")
+        XCTAssertEqual(document.nodes.map(\.id), ["ios", "gateway.fs"])
+        XCTAssertEqual(document.focus, ["gateway.fs"])
+        XCTAssertEqual(document.edges, [CodemapEdge(from: "ios", to: "gateway.fs", kind: "calls", label: nil)])
+    }
+
+    func testWorkbenchOtherSceneHidesUnsupportedAndConfigFiles() {
+        let paths = workbenchOtherPaths(
+            discovered: ["notes.md": "markdown", "tasks.yaml": "table", ".workbench.json": "raw"],
+            claimed: ["tasks.yaml"],
+            existing: ["notes.md", "tasks.yaml", ".workbench.json", "secret.bin"]
+        )
+
+        XCTAssertEqual(paths, ["notes.md"])
+    }
+
     func testProductionServerIdentity() {
         let identity = ServerIdentity.resolve("https://www.tocheers.com/api/v1")
 
