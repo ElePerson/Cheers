@@ -1,15 +1,33 @@
 import type { TraceEvent } from "@/types";
 
-export const TOOL_PRESENTATION_VERSION = 1;
+export const TOOL_PRESENTATION_VERSION = 2;
 
 export type ToolFamily = "file" | "shell" | "web" | "search" | "git";
 export type ToolRisk = "read" | "write" | "network_read" | "network_write";
+export type ToolEventType =
+  | "file_read"
+  | "file_edit"
+  | "file_write"
+  | "file_delete"
+  | "file_move"
+  | "file_access"
+  | "shell_command"
+  | "web_search"
+  | "web_fetch"
+  | "search_results"
+  | "git_status"
+  | "git_diff"
+  | "git_show"
+  | "git_log"
+  | "git_commit"
+  | "git_remote"
+  | "git_command";
 
 export interface ToolPresentation extends Record<string, unknown> {
   v: typeof TOOL_PRESENTATION_VERSION;
+  event_type: ToolEventType;
   family: ToolFamily;
   operation: string;
-  renderer: string;
   confidence: "explicit" | "pattern";
   matched_by: string;
   target?: string;
@@ -53,6 +71,11 @@ export interface GitStatusResult {
 
 const FAMILIES = new Set<ToolFamily>(["file", "shell", "web", "search", "git"]);
 const RISKS = new Set<ToolRisk>(["read", "write", "network_read", "network_write"]);
+const EVENT_TYPES = new Set<ToolEventType>([
+  "file_read", "file_edit", "file_write", "file_delete", "file_move", "file_access",
+  "shell_command", "web_search", "web_fetch", "search_results", "git_status",
+  "git_diff", "git_show", "git_log", "git_commit", "git_remote", "git_command",
+]);
 const GIT_FILE_STATES = new Set<GitFileState>([
   "staged",
   "unstaged",
@@ -77,15 +100,16 @@ function optionalString(value: unknown): string | undefined {
  */
 export function parseToolPresentation(value: unknown): ToolPresentation | null {
   const raw = asRecord(value);
+  const eventType = optionalString(raw?.event_type) as ToolEventType | undefined;
   const family = optionalString(raw?.family) as ToolFamily | undefined;
   const operation = optionalString(raw?.operation);
-  const renderer = optionalString(raw?.renderer);
   if (
     raw?.v !== TOOL_PRESENTATION_VERSION ||
+    !eventType ||
+    !EVENT_TYPES.has(eventType) ||
     !family ||
     !FAMILIES.has(family) ||
-    !operation ||
-    !renderer
+    !operation
   ) return null;
 
   const confidence = raw.confidence === "explicit" ? "explicit" : "pattern";
@@ -93,9 +117,9 @@ export function parseToolPresentation(value: unknown): ToolPresentation | null {
   const parsed: ToolPresentation = {
     ...raw,
     v: TOOL_PRESENTATION_VERSION,
+    event_type: eventType,
     family,
     operation,
-    renderer,
     confidence,
     matched_by: optionalString(raw.matched_by) ?? "producer",
   };
@@ -120,7 +144,7 @@ export function toolPresentationFromTrace(
 export function parseGitStatusResult(
   presentation: ToolPresentation | null,
 ): GitStatusResult | null {
-  if (presentation?.family !== "git" || presentation.renderer !== "git_status") {
+  if (presentation?.event_type !== "git_status") {
     return null;
   }
   const raw = asRecord(presentation.result);

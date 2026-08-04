@@ -29,6 +29,7 @@ import { coalesceTraceEvents } from "./traceEvent";
 import {
   parseGitStatusResult,
   toolPresentationFromTrace,
+  type ToolEventType,
   type ToolPresentation,
 } from "./toolPresentation";
 
@@ -38,13 +39,41 @@ interface Props {
   liveEvents?: TraceEvent[];
 }
 
+type EventVisual = { Icon: LucideIcon; tone: string; label: string };
+
+// The Gateway event type is the only tool-display routing input. Adding a new
+// visual treatment requires a new backend event type and an explicit entry here.
+const TOOL_EVENT_META: Record<ToolEventType, EventVisual> = {
+  file_read: { Icon: FileSearch, tone: "text-zinc-500", label: "Read" },
+  file_edit: { Icon: Pencil, tone: "text-zinc-500", label: "Edit" },
+  file_write: { Icon: FilePlus2, tone: "text-zinc-500", label: "Write" },
+  file_delete: { Icon: XCircle, tone: "text-red-400/70", label: "Delete" },
+  file_move: { Icon: Wrench, tone: "text-zinc-500", label: "Move" },
+  file_access: { Icon: FileSearch, tone: "text-zinc-500", label: "File" },
+  shell_command: { Icon: Terminal, tone: "text-zinc-500", label: "Run" },
+  web_search: { Icon: Search, tone: "text-zinc-500", label: "Web search" },
+  web_fetch: { Icon: Search, tone: "text-zinc-500", label: "Web fetch" },
+  search_results: { Icon: Search, tone: "text-zinc-500", label: "Search" },
+  git_status: { Icon: GitBranch, tone: "text-zinc-500", label: "Git status" },
+  git_diff: { Icon: GitBranch, tone: "text-zinc-500", label: "Git diff" },
+  git_show: { Icon: GitCommit, tone: "text-zinc-500", label: "Git show" },
+  git_log: { Icon: GitCommit, tone: "text-zinc-500", label: "Git log" },
+  git_commit: { Icon: GitCommit, tone: "text-zinc-500", label: "Git commit" },
+  git_remote: { Icon: GitBranch, tone: "text-zinc-500", label: "Git remote" },
+  git_command: { Icon: GitBranch, tone: "text-zinc-500", label: "Git command" },
+};
+
+const GIT_EVENT_TYPES = new Set<ToolEventType>([
+  "git_status", "git_diff", "git_show", "git_log", "git_commit", "git_remote", "git_command",
+]);
+
 /** Icon + tone + short label for a persisted trace row. Approval rows get the
  *  shield/check/x family; agent-progress rows map by phase. */
 // Keep the timeline quiet and monochrome (Codex/Claude style): icons carry the
 // category, but the palette stays muted zinc so steps read as ambient progress
 // rather than a loud status board. Color is reserved for genuine failures (and a
 // soft amber for a still-pending approval).
-function eventMeta(e: TraceEvent): { Icon: LucideIcon; tone: string; label: string } {
+function eventMeta(e: TraceEvent): EventVisual {
   if (e.kind === "approval") {
     const ak = e.approval_kind ?? "";
     if (ak === "resolved") {
@@ -62,26 +91,7 @@ function eventMeta(e: TraceEvent): { Icon: LucideIcon; tone: string; label: stri
     return { Icon: ShieldCheck, tone: "text-amber-400/70", label: "Approval" };
   }
   const presentation = toolPresentationFromTrace(e);
-  if (presentation) {
-    if (presentation.family === "git") {
-      return {
-        Icon: presentation.operation === "commit" ? GitCommit : GitBranch,
-        tone: "text-zinc-500",
-        label: `Git ${presentation.operation}`,
-      };
-    }
-    if (presentation.family === "file") {
-      if (presentation.operation === "read") return { Icon: FileSearch, tone: "text-zinc-500", label: "Read" };
-      if (presentation.operation === "edit") return { Icon: Pencil, tone: "text-zinc-500", label: "Edit" };
-      if (presentation.operation === "write") return { Icon: FilePlus2, tone: "text-zinc-500", label: "Write" };
-    }
-    if (presentation.family === "web" || presentation.family === "search") {
-      return { Icon: Search, tone: "text-zinc-500", label: presentation.family === "web" ? "Web search" : "Search" };
-    }
-    if (presentation.family === "shell") {
-      return { Icon: Terminal, tone: "text-zinc-500", label: "Run" };
-    }
-  }
+  if (presentation) return TOOL_EVENT_META[presentation.event_type];
   switch (e.phase) {
     case "tool_call":
     case "tool_call_update":
@@ -313,11 +323,6 @@ function FileEditInspector({ diffs }: { diffs: FileDiff[] }) {
 function eventPreview(event: TraceEvent): string | null {
   const presentation = toolPresentationFromTrace(event);
   if (presentation) {
-    if (presentation.family === "git") {
-      return presentation.target && presentation.target !== presentation.operation
-        ? `${presentation.operation} ${presentation.target}`
-        : presentation.operation;
-    }
     return presentation.target ?? presentation.path ?? presentation.query ?? presentation.command ?? null;
   }
   const data = asRecord(event.data);
@@ -350,11 +355,12 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
     : typeof asRecord(output)?.text === "string"
       ? asRecord(output)?.text as string
       : null;
-  const outputDiff = presentation && ["diff", "git_show"].includes(presentation.renderer)
+  const outputDiff = presentation && ["file_edit", "git_diff", "git_show"].includes(presentation.event_type)
     && outputText?.includes("diff --git ")
     ? outputText
     : null;
-  const hasGitStatus = asRecord(presentation?.result)?.kind === "git_status";
+  const hasGitStatus = presentation?.event_type === "git_status"
+    && asRecord(presentation.result)?.kind === "git_status";
   const metadata = {
     phase: event.phase,
     kind: event.kind,
@@ -369,8 +375,8 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
       {presentation && (
         <div className="rounded-lg bg-zinc-950/45 px-3 py-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium capitalize text-zinc-200">
-              {presentation.family === "git" ? `Git ${presentation.operation}` : presentation.operation}
+            <span className="font-medium text-zinc-200">
+              {TOOL_EVENT_META[presentation.event_type].label}
             </span>
             {presentation.risk && (
               <span className="text-[10px] text-zinc-500">
@@ -463,7 +469,7 @@ function TraceItem({
   const displayTitle = presentation ? label : event.title || label;
   const statusTone = event.status === "failed"
     ? "text-red-400/80"
-    : presentation?.family === "git" && event.status === "completed"
+    : presentation && GIT_EVENT_TYPES.has(presentation.event_type) && event.status === "completed"
       ? "text-emerald-400/80"
       : "text-zinc-400";
   const close = useCallback(() => {

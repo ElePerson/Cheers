@@ -366,7 +366,8 @@ mod contract_tests {
 
         assert_eq!(event["data"]["presentation"]["family"], "git");
         assert_eq!(event["data"]["presentation"]["operation"], "status");
-        assert_eq!(event["data"]["presentation"]["renderer"], "git_status");
+        assert_eq!(event["data"]["presentation"]["v"], 2);
+        assert_eq!(event["data"]["presentation"]["event_type"], "git_status");
         assert_eq!(event["data"]["presentation"]["cwd"], "/work");
     }
 

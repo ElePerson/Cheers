@@ -8,10 +8,10 @@ import {
 describe("ToolPresentation v1", () => {
   it("parses one canonical file descriptor", () => {
     expect(parseToolPresentation({
-      v: 1,
+      v: 2,
+      event_type: "file_read",
       family: "file",
       operation: "read",
-      renderer: "file_read",
       confidence: "explicit",
       matched_by: "tool_name",
       path: "/repo/README.md",
@@ -23,25 +23,26 @@ describe("ToolPresentation v1", () => {
   });
 
   it("rejects unknown versions and families", () => {
-    expect(parseToolPresentation({ v: 2, family: "git", operation: "status", renderer: "git_status" })).toBeNull();
-    expect(parseToolPresentation({ v: 1, family: "calendar", operation: "list", renderer: "list" })).toBeNull();
+    expect(parseToolPresentation({ v: 1, event_type: "git_status", family: "git", operation: "status" })).toBeNull();
+    expect(parseToolPresentation({ v: 2, event_type: "mystery", family: "git", operation: "status" })).toBeNull();
+    expect(parseToolPresentation({ v: 2, event_type: "search_results", family: "calendar", operation: "list" })).toBeNull();
   });
 
   it("drops malformed optional routing hints", () => {
     expect(parseToolPresentation({
-      v: 1,
+      v: 2,
+      event_type: "git_remote",
       family: "git",
       operation: "push",
-      renderer: "git_remote",
       risk: "delete_everything",
       compound: "yes",
       command: "   ",
     })).not.toHaveProperty("risk");
     expect(parseToolPresentation({
-      v: 1,
+      v: 2,
+      event_type: "git_remote",
       family: "git",
       operation: "push",
-      renderer: "git_remote",
       risk: "delete_everything",
       compound: "yes",
       command: "   ",
@@ -52,10 +53,10 @@ describe("ToolPresentation v1", () => {
     expect(toolPresentationFromTrace({
       data: {
         presentation: {
-          v: 1,
+          v: 2,
+          event_type: "shell_command",
           family: "shell",
           operation: "run",
-          renderer: "terminal",
         },
       },
     })).toMatchObject({ family: "shell", operation: "run" });
@@ -63,10 +64,10 @@ describe("ToolPresentation v1", () => {
 
   it("normalizes a git status result for every web surface", () => {
     const presentation = parseToolPresentation({
-      v: 1,
+      v: 2,
+      event_type: "git_status",
       family: "git",
       operation: "status",
-      renderer: "git_status",
       result: {
         kind: "git_status",
         branch: "feature/tool-presentation",

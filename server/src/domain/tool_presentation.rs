@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
 
-pub const PRESENTATION_SCHEMA_VERSION: u8 = 1;
+pub const PRESENTATION_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -31,14 +31,85 @@ pub enum ToolRisk {
     NetworkWrite,
 }
 
+/// Server-authoritative event type. Clients switch on this value directly and
+/// never combine family, operation, title, or raw command text to choose a UI.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolEventType {
+    FileRead,
+    FileEdit,
+    FileWrite,
+    FileDelete,
+    FileMove,
+    FileAccess,
+    ShellCommand,
+    WebSearch,
+    WebFetch,
+    SearchResults,
+    GitStatus,
+    GitDiff,
+    GitShow,
+    GitLog,
+    GitCommit,
+    GitRemote,
+    GitCommand,
+}
+
+impl ToolEventType {
+    fn wire_name(self) -> &'static str {
+        match self {
+            Self::FileRead => "file_read",
+            Self::FileEdit => "file_edit",
+            Self::FileWrite => "file_write",
+            Self::FileDelete => "file_delete",
+            Self::FileMove => "file_move",
+            Self::FileAccess => "file_access",
+            Self::ShellCommand => "shell_command",
+            Self::WebSearch => "web_search",
+            Self::WebFetch => "web_fetch",
+            Self::SearchResults => "search_results",
+            Self::GitStatus => "git_status",
+            Self::GitDiff => "git_diff",
+            Self::GitShow => "git_show",
+            Self::GitLog => "git_log",
+            Self::GitCommit => "git_commit",
+            Self::GitRemote => "git_remote",
+            Self::GitCommand => "git_command",
+        }
+    }
+
+    fn from_wire_name(value: &str) -> Option<Self> {
+        Some(match value {
+            "file_read" => Self::FileRead,
+            "file_edit" => Self::FileEdit,
+            "file_write" => Self::FileWrite,
+            "file_delete" => Self::FileDelete,
+            "file_move" => Self::FileMove,
+            "file_access" => Self::FileAccess,
+            "shell_command" => Self::ShellCommand,
+            "web_search" => Self::WebSearch,
+            "web_fetch" => Self::WebFetch,
+            "search_results" => Self::SearchResults,
+            "git_status" => Self::GitStatus,
+            "git_diff" => Self::GitDiff,
+            "git_show" => Self::GitShow,
+            "git_log" => Self::GitLog,
+            "git_commit" => Self::GitCommit,
+            "git_remote" => Self::GitRemote,
+            "git_command" => Self::GitCommand,
+            _ => return None,
+        })
+    }
+}
+
 /// One versioned, cross-client display contract. The raw ACP payload remains
 /// authoritative for execution and authorization; this type is display-only.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ToolPresentation {
     pub v: u8,
+    pub event_type: ToolEventType,
     pub family: ToolFamily,
     pub operation: String,
-    pub renderer: String,
     pub confidence: String,
     pub matched_by: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,15 +136,15 @@ impl ToolPresentation {
     fn new(
         family: ToolFamily,
         operation: impl Into<String>,
-        renderer: impl Into<String>,
+        event_type: ToolEventType,
         confidence: &str,
         matched_by: &str,
     ) -> Self {
         Self {
             v: PRESENTATION_SCHEMA_VERSION,
+            event_type,
             family,
             operation: operation.into(),
-            renderer: renderer.into(),
             confidence: confidence.to_string(),
             matched_by: matched_by.to_string(),
             target: None,
@@ -313,14 +384,19 @@ fn git_presentation(
         .name("args")
         .map(|value| value.as_str().trim())
         .unwrap_or("");
-    let renderer = match verb {
-        "status" => "git_status",
-        "diff" => "diff",
-        "show" => "git_show",
-        "log" => "git_log",
-        "commit" => "git_commit",
-        "push" | "pull" | "fetch" => "git_remote",
-        _ => "git_command",
+    let compound = shell_meta_regex().is_match(command);
+    let event_type = if compound {
+        ToolEventType::GitCommand
+    } else {
+        match verb {
+            "status" => ToolEventType::GitStatus,
+            "diff" => ToolEventType::GitDiff,
+            "show" => ToolEventType::GitShow,
+            "log" => ToolEventType::GitLog,
+            "commit" => ToolEventType::GitCommit,
+            "push" | "pull" | "fetch" => ToolEventType::GitRemote,
+            _ => ToolEventType::GitCommand,
+        }
     };
     let risk = match verb {
         "status" | "diff" | "show" | "log" | "branch" | "rev-parse" | "remote" => ToolRisk::Read,
@@ -328,19 +404,25 @@ fn git_presentation(
         "push" => ToolRisk::NetworkWrite,
         _ => ToolRisk::Write,
     };
-    let mut presentation =
-        ToolPresentation::new(ToolFamily::Git, verb, renderer, "pattern", "command.git");
+    let operation = if compound { "command" } else { verb };
+    let mut presentation = ToolPresentation::new(
+        ToolFamily::Git,
+        operation,
+        event_type,
+        "pattern",
+        "command.git",
+    );
     presentation.command = Some(command.to_string());
     presentation.target = Some(if args.is_empty() { verb } else { args }.to_string());
     presentation.risk = Some(risk);
-    presentation.compound = Some(shell_meta_regex().is_match(command));
+    presentation.compound = Some(compound);
     if !args.is_empty() {
         presentation.args = Some(args.to_string());
     }
     if let Some(cwd) = cwd_from(data) {
         presentation.cwd = Some(cwd.to_string());
     }
-    if verb == "status" {
+    if event_type == ToolEventType::GitStatus {
         presentation.result = git_status_result(data);
     }
     presentation
@@ -351,13 +433,6 @@ fn git_presentation(
 /// `data.presentation`; it is more authoritative than gateway inference.
 pub fn classify_typed(data: &Value) -> Option<ToolPresentation> {
     let data = Value::Object(data.as_object()?.clone());
-    if data
-        .get("presentation")
-        .is_some_and(|value| value.is_object())
-    {
-        return None;
-    }
-
     let command = command_from(&data);
     if let Some(command) = command {
         if let Some(captures) = git_regex().captures(command) {
@@ -372,39 +447,80 @@ pub fn classify_typed(data: &Value) -> Option<ToolPresentation> {
         .and_then(|captures| captures.name("op"))
         .map(|value| value.as_str().to_ascii_lowercase());
 
-    let (family, operation, renderer, matched_by) = match alias_op.as_deref() {
-        Some("read") | Some("read_file") => (ToolFamily::File, "read", "file_read", "tool_name"),
-        Some("edit") | Some("edit_file") | Some("apply_patch") => {
-            (ToolFamily::File, "edit", "diff", "tool_name")
-        }
-        Some("write") | Some("write_file") | Some("create_file") => {
-            (ToolFamily::File, "write", "file_write", "tool_name")
-        }
-        Some("delete") | Some("delete_file") | Some("remove_file") => {
-            (ToolFamily::File, "delete", "file", "tool_name")
-        }
-        Some("move") | Some("move_file") | Some("rename_file") => {
-            (ToolFamily::File, "move", "file", "tool_name")
-        }
-        Some("web_search") | Some("websearch") | Some("search_web") => {
-            (ToolFamily::Web, "search", "web_search", "tool_name")
-        }
-        Some("web_fetch") | Some("fetch_url") => {
-            (ToolFamily::Web, "fetch", "web_fetch", "tool_name")
-        }
+    let (family, operation, event_type, matched_by) = match alias_op.as_deref() {
+        Some("read") | Some("read_file") => (
+            ToolFamily::File,
+            "read",
+            ToolEventType::FileRead,
+            "tool_name",
+        ),
+        Some("edit") | Some("edit_file") | Some("apply_patch") => (
+            ToolFamily::File,
+            "edit",
+            ToolEventType::FileEdit,
+            "tool_name",
+        ),
+        Some("write") | Some("write_file") | Some("create_file") => (
+            ToolFamily::File,
+            "write",
+            ToolEventType::FileWrite,
+            "tool_name",
+        ),
+        Some("delete") | Some("delete_file") | Some("remove_file") => (
+            ToolFamily::File,
+            "delete",
+            ToolEventType::FileDelete,
+            "tool_name",
+        ),
+        Some("move") | Some("move_file") | Some("rename_file") => (
+            ToolFamily::File,
+            "move",
+            ToolEventType::FileMove,
+            "tool_name",
+        ),
+        Some("web_search") | Some("websearch") | Some("search_web") => (
+            ToolFamily::Web,
+            "search",
+            ToolEventType::WebSearch,
+            "tool_name",
+        ),
+        Some("web_fetch") | Some("fetch_url") => (
+            ToolFamily::Web,
+            "fetch",
+            ToolEventType::WebFetch,
+            "tool_name",
+        ),
         Some("grep") | Some("glob") | Some("find_files") | Some("search") => (
             ToolFamily::Search,
             alias_op.as_deref().unwrap_or("search"),
-            "search_results",
+            ToolEventType::SearchResults,
             "tool_name",
         ),
         Some("bash") | Some("shell") | Some("terminal") | Some("exec") | Some("execute")
-        | Some("run_command") => (ToolFamily::Shell, "run", "terminal", "tool_name"),
-        _ if path_from(&data).is_some() => (ToolFamily::File, "access", "file", "input.path"),
-        _ if query_from(&data).is_some() => {
-            (ToolFamily::Web, "search", "web_search", "input.query")
-        }
-        _ if command.is_some() => (ToolFamily::Shell, "run", "terminal", "input.command"),
+        | Some("run_command") => (
+            ToolFamily::Shell,
+            "run",
+            ToolEventType::ShellCommand,
+            "tool_name",
+        ),
+        _ if path_from(&data).is_some() => (
+            ToolFamily::File,
+            "access",
+            ToolEventType::FileAccess,
+            "input.path",
+        ),
+        _ if query_from(&data).is_some() => (
+            ToolFamily::Web,
+            "search",
+            ToolEventType::WebSearch,
+            "input.query",
+        ),
+        _ if command.is_some() => (
+            ToolFamily::Shell,
+            "run",
+            ToolEventType::ShellCommand,
+            "input.command",
+        ),
         _ => return None,
     };
     let confidence = if explicit.is_some() && alias_op.is_some() {
@@ -413,14 +529,60 @@ pub fn classify_typed(data: &Value) -> Option<ToolPresentation> {
         "pattern"
     };
     Some(add_context(
-        ToolPresentation::new(family, operation, renderer, confidence, matched_by),
+        ToolPresentation::new(family, operation, event_type, confidence, matched_by),
         &data,
     ))
+}
+
+fn legacy_event_type(presentation: &serde_json::Map<String, Value>) -> Option<ToolEventType> {
+    let renderer = presentation.get("renderer")?.as_str()?;
+    let family = presentation.get("family").and_then(Value::as_str);
+    let operation = presentation.get("operation").and_then(Value::as_str);
+    ToolEventType::from_wire_name(renderer).or_else(|| match (renderer, family, operation) {
+        ("diff", Some("file"), _) => Some(ToolEventType::FileEdit),
+        ("diff", Some("git"), _) => Some(ToolEventType::GitDiff),
+        ("terminal", _, _) => Some(ToolEventType::ShellCommand),
+        ("file", _, Some("delete")) => Some(ToolEventType::FileDelete),
+        ("file", _, Some("move")) => Some(ToolEventType::FileMove),
+        ("file", _, _) => Some(ToolEventType::FileAccess),
+        _ => None,
+    })
+}
+
+fn normalize_existing_presentation(value: &Value) -> Option<Value> {
+    let mut presentation = value.as_object()?.clone();
+    let version = presentation.get("v").and_then(Value::as_u64);
+    let event_type = if version == Some(PRESENTATION_SCHEMA_VERSION.into()) {
+        presentation
+            .get("event_type")
+            .and_then(Value::as_str)
+            .and_then(ToolEventType::from_wire_name)?
+    } else if version == Some(1) {
+        legacy_event_type(&presentation)?
+    } else {
+        return None;
+    };
+    presentation.insert("v".to_string(), json!(PRESENTATION_SCHEMA_VERSION));
+    presentation.insert("event_type".to_string(), json!(event_type.wire_name()));
+    presentation.remove("renderer");
+    Some(Value::Object(presentation))
 }
 
 /// JSON wrapper used by the trace wire normalizer. Keeping serialization here
 /// guarantees every client sees exactly the same versioned shape.
 pub fn classify(data: &Value) -> Option<Value> {
+    if let Some(existing) = data.get("presentation") {
+        // v1 used coarse renderer names such as `terminal`, so it cannot be the
+        // authoritative source for the finer v2 event taxonomy. Reclassify the
+        // original server payload first; this also repairs durable events that
+        // were persisted before v2 existed.
+        if existing.get("v").and_then(Value::as_u64) == Some(1) {
+            if let Some(presentation) = classify_typed(data) {
+                return serde_json::to_value(presentation).ok();
+            }
+        }
+        return normalize_existing_presentation(existing);
+    }
     classify_typed(data).and_then(|presentation| serde_json::to_value(presentation).ok())
 }
 
@@ -437,7 +599,8 @@ mod tests {
         .unwrap();
         assert_eq!(result["family"], "file");
         assert_eq!(result["operation"], "read");
-        assert_eq!(result["renderer"], "file_read");
+        assert_eq!(result["v"], PRESENTATION_SCHEMA_VERSION);
+        assert_eq!(result["event_type"], "file_read");
         assert_eq!(result["target"], "/work/Sources/App.swift");
         assert_eq!(result["confidence"], "explicit");
     }
@@ -481,7 +644,7 @@ mod tests {
         .unwrap();
         assert_eq!(result["family"], "git");
         assert_eq!(result["operation"], "commit");
-        assert_eq!(result["renderer"], "git_commit");
+        assert_eq!(result["event_type"], "git_commit");
         assert_eq!(result["risk"], "write");
         assert_eq!(result["compound"], false);
         assert_eq!(result["cwd"], "/work");
@@ -493,15 +656,83 @@ mod tests {
             "input": {"command": "git status --short && git diff --stat"}
         }))
         .unwrap();
-        assert_eq!(result["operation"], "status");
+        assert_eq!(result["family"], "git");
+        assert_eq!(result["operation"], "command");
+        assert_eq!(result["event_type"], "git_command");
         assert_eq!(result["compound"], true);
         assert_eq!(result["command"], "git status --short && git diff --stat");
     }
 
     #[test]
-    fn producer_presentation_is_never_overwritten() {
+    fn reclassifies_legacy_terminal_presentation_with_compound_git_input() {
+        let result = classify(&json!({
+            "presentation": {
+                "v": 1,
+                "family": "shell",
+                "operation": "run",
+                "renderer": "terminal"
+            },
+            "tool_name": "execute",
+            "input": {
+                "command": "git status --short --branch && git log -1 --oneline --decorate",
+                "cwd": "/Users/haowei/Projects/Cheers"
+            },
+            "output": {
+                "exit_code": 0,
+                "formatted_output": "8725b5f (HEAD -> codex/release-desktop-v0-1-7) chore(desktop): release v0.1.7"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(result["v"], 2);
+        assert_eq!(result["family"], "git");
+        assert_eq!(result["event_type"], "git_command");
+        assert_eq!(result["compound"], true);
+        assert_eq!(result["cwd"], "/Users/haowei/Projects/Cheers");
+    }
+
+    #[test]
+    fn producer_v2_presentation_keeps_additive_fields() {
+        let result = classify(&json!({
+            "presentation": {
+                "v": 2,
+                "event_type": "git_status",
+                "family": "git",
+                "operation": "status",
+                "producer_hint": "keep-me"
+            },
+            "input": {"command": "git diff"}
+        }))
+        .unwrap();
+        assert_eq!(result["event_type"], "git_status");
+        assert_eq!(result["producer_hint"], "keep-me");
+    }
+
+    #[test]
+    fn upgrades_known_v1_renderer_at_the_gateway_boundary() {
+        let result = classify(&json!({
+            "presentation": {
+                "v": 1,
+                "family": "file",
+                "operation": "edit",
+                "renderer": "diff"
+            }
+        }))
+        .unwrap();
+        assert_eq!(result["v"], 2);
+        assert_eq!(result["event_type"], "file_edit");
+        assert!(result.get("renderer").is_none());
+    }
+
+    #[test]
+    fn rejects_unknown_producer_event_types_instead_of_guessing() {
         assert!(classify(&json!({
-            "presentation": {"v": 1, "family": "custom"},
+            "presentation": {
+                "v": 2,
+                "event_type": "mystery_tool",
+                "family": "git",
+                "operation": "status"
+            },
             "input": {"command": "git status"}
         }))
         .is_none());
