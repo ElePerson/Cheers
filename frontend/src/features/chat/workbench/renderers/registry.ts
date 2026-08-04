@@ -140,6 +140,19 @@ const BUILTINS: RendererDesc[] = [
     lensId: "chart",
     match: { format: ["json", "yaml"], dataHas: ["series"] },
   },
+  {
+    id: "builtin:codemap",
+    title: "Codemap",
+    format: ["json", "yaml"],
+    source: "builtin",
+    lensId: "codemap",
+    match: { format: ["json", "yaml"], dataHas: ["codemap", "nodes"] },
+    acceptsData: (data) => {
+      if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+      const root = data as Record<string, unknown>;
+      return root.codemap === 1 && !!root.nodes && typeof root.nodes === "object";
+    },
+  },
 ];
 
 export function pluginRenderers(plugins: PluginMeta[]): RendererDesc[] {

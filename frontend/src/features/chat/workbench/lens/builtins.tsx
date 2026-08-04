@@ -1,5 +1,21 @@
-import { useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Box,
+  Boxes,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  CircleDotDashed,
+  FileCode2,
+  Maximize2,
+  Minus,
+  Plus,
+  RotateCcw,
+  Server,
+  TriangleAlert,
+  Trash2,
+  X,
+} from "lucide-react";
 import { registerLens, type LensProps } from "./registry";
 import { isComposing } from "@/lib/ime";
 
@@ -422,7 +438,308 @@ function ChartLens({ data }: LensProps) {
   );
 }
 
+// ── codemap: { codemap: 1, nodes: { id: {...} }, edges: [...] } ─────────────
+// Agent-authored repository knowledge. The graph is view-only in this generic lens:
+// edits remain agent-maintained (or Raw) until LensPanel can submit fs.patch ops without
+// rewriting YAML comments. Selection, pan and zoom are presentation-only local state.
+export interface CodemapNode {
+  id: string;
+  kind: "area" | "module" | "file" | "symbol" | string;
+  label: string;
+  loc?: string;
+  summary: string;
+  status: "explored" | "partial" | "stale" | string;
+  tags: string[];
+}
+
+export interface CodemapEdge {
+  from: string;
+  to: string;
+  kind: string;
+  label?: string;
+}
+
+export interface CodemapData {
+  repo?: string;
+  updated?: string;
+  focus: Set<string>;
+  nodes: CodemapNode[];
+  edges: CodemapEdge[];
+}
+
+export function parseCodemap(data: unknown): CodemapData | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const root = data as Record<string, unknown>;
+  if (root.codemap !== 1) return null;
+  const rawNodes =
+    root.nodes && typeof root.nodes === "object" && !Array.isArray(root.nodes)
+      ? (root.nodes as Record<string, unknown>)
+      : {};
+  const nodes = Object.entries(rawNodes)
+    .map(([id, raw]): CodemapNode => {
+      const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+      return {
+        id,
+        kind: typeof value.kind === "string" ? value.kind : "module",
+        label: typeof value.label === "string" && value.label ? value.label : id.split(".").pop() || id,
+        loc: typeof value.loc === "string" ? value.loc : undefined,
+        summary: typeof value.summary === "string" ? value.summary : "",
+        status: typeof value.status === "string" ? value.status : "partial",
+        tags: Array.isArray(value.tags) ? value.tags.filter((tag): tag is string => typeof tag === "string") : [],
+      };
+    })
+    .sort((a, b) => {
+      const depth = a.id.split(".").length - b.id.split(".").length;
+      return depth || a.id.localeCompare(b.id);
+    });
+  const edges = Array.isArray(root.edges)
+    ? root.edges.flatMap((raw): CodemapEdge[] => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+        const value = raw as Record<string, unknown>;
+        if (typeof value.from !== "string" || typeof value.to !== "string") return [];
+        return [{
+          from: value.from,
+          to: value.to,
+          kind: typeof value.kind === "string" ? value.kind : "calls",
+          label: typeof value.label === "string" ? value.label : undefined,
+        }];
+      })
+    : [];
+  return {
+    repo: typeof root.repo === "string" ? root.repo : undefined,
+    updated: typeof root.updated === "string" ? root.updated : undefined,
+    focus: new Set(Array.isArray(root.focus) ? root.focus.filter((id): id is string => typeof id === "string") : []),
+    nodes,
+    edges,
+  };
+}
+
+function codemapLayout(nodes: CodemapNode[], edges: CodemapEdge[]) {
+  const ids = new Set(nodes.map((node) => node.id));
+  const outgoing = new Map<string, string[]>();
+  const indegree = new Map(nodes.map((node) => [node.id, 0]));
+  for (const edge of edges) {
+    if (!ids.has(edge.from) || !ids.has(edge.to) || edge.from === edge.to) continue;
+    outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge.to]);
+    indegree.set(edge.to, (indegree.get(edge.to) ?? 0) + 1);
+  }
+  const depths = new Map(nodes.map((node) => [node.id, 0]));
+  const queue = nodes.filter((node) => indegree.get(node.id) === 0).map((node) => node.id);
+  const visited = new Set<string>();
+  while (queue.length) {
+    const id = queue.shift()!;
+    visited.add(id);
+    for (const next of outgoing.get(id) ?? []) {
+      depths.set(next, Math.max(depths.get(next) ?? 0, (depths.get(id) ?? 0) + 1));
+      indegree.set(next, (indegree.get(next) ?? 1) - 1);
+      if (indegree.get(next) === 0) queue.push(next);
+    }
+  }
+  const lastDepth = Math.max(...depths.values(), 0);
+  for (const node of nodes) if (!visited.has(node.id)) depths.set(node.id, lastDepth + 1);
+
+  const groups = new Map<number, CodemapNode[]>();
+  for (const node of nodes) {
+    const depth = depths.get(node.id) ?? 0;
+    groups.set(depth, [...(groups.get(depth) ?? []), node]);
+  }
+  const positions = new Map<string, { x: number; y: number }>();
+  const widest = Math.max(1, ...[...groups.values()].map((row) => row.length));
+  for (const [depth, row] of [...groups.entries()].sort(([a], [b]) => a - b)) {
+    row.sort((a, b) => a.id.localeCompare(b.id));
+    const inset = ((widest - row.length) * 190) / 2;
+    row.forEach((node, index) => positions.set(node.id, { x: 46 + inset + index * 190, y: 44 + depth * 112 }));
+  }
+  return {
+    positions,
+    width: Math.max(520, widest * 190 + 80),
+    height: Math.max(420, (Math.max(...groups.keys(), 0) + 1) * 112 + 70),
+  };
+}
+
+function CodemapStatus({ status }: { status: string }) {
+  if (status === "explored") return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />;
+  if (status === "stale") return <TriangleAlert className="h-3.5 w-3.5 text-orange-400" />;
+  return <CircleDotDashed className="h-3.5 w-3.5 text-amber-400" />;
+}
+
+function CodemapKindIcon({ kind }: { kind: string }) {
+  if (kind === "file" || kind === "symbol") return <FileCode2 className="h-4 w-4" />;
+  if (kind === "area") return <Server className="h-4 w-4" />;
+  return <Box className="h-4 w-4" />;
+}
+
+function CodemapInspector({ node, onClose }: { node: CodemapNode; onClose?: () => void }) {
+  return (
+    <aside className="h-full w-full overflow-y-auto bg-zinc-900/95 p-4 text-xs">
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-300">
+          <CodemapKindIcon kind={node.kind} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold text-zinc-100">{node.label}</h3>
+          <p className="mt-0.5 text-[11px] capitalize text-zinc-500">{node.kind}</p>
+        </div>
+        {onClose && (
+          <button type="button" onClick={onClose} aria-label="Close node details" className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+      <dl className="mt-5 space-y-5">
+        <div>
+          <dt className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Summary</dt>
+          <dd className="mt-2 whitespace-pre-wrap leading-5 text-zinc-300">{node.summary || "No summary yet."}</dd>
+        </div>
+        <div className="border-t border-zinc-800 pt-4">
+          <dt className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Status</dt>
+          <dd className="mt-2 flex items-center gap-2 capitalize text-zinc-200"><CodemapStatus status={node.status} />{node.status}</dd>
+        </div>
+        {node.tags.length > 0 && (
+          <div className="border-t border-zinc-800 pt-4">
+            <dt className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Tags</dt>
+            <dd className="mt-2 flex flex-wrap gap-1.5">
+              {node.tags.map((tag) => <span key={tag} className="rounded-md bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300">{tag}</span>)}
+            </dd>
+          </div>
+        )}
+        {node.loc && (
+          <div className="border-t border-zinc-800 pt-4">
+            <dt className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Source locator</dt>
+            <dd className="mt-2 break-all rounded-lg bg-zinc-950 px-3 py-2 font-mono text-[11px] leading-4 text-zinc-300">{node.loc}</dd>
+          </div>
+        )}
+      </dl>
+    </aside>
+  );
+}
+
+function CodemapLens({ data }: LensProps) {
+  const document = parseCodemap(data);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const drag = useRef<{ pointer: number; x: number; y: number; ox: number; oy: number } | null>(null);
+
+  useEffect(() => {
+    const element = rootRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => setWide((entry?.contentRect.width ?? 0) >= 760));
+    observer.observe(element);
+    setWide(element.getBoundingClientRect().width >= 760);
+    return () => observer.disconnect();
+  }, [document]);
+
+  useEffect(() => {
+    if (!document?.nodes.length) {
+      setSelectedId(null);
+      return;
+    }
+    if (selectedId && document.nodes.some((node) => node.id === selectedId)) return;
+    setSelectedId(document.nodes.find((node) => document.focus.has(node.id))?.id ?? document.nodes[0].id);
+  }, [document, selectedId]);
+
+  if (!document || document.nodes.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+        <Boxes className="h-7 w-7 text-zinc-600" />
+        <div className="text-sm font-medium text-zinc-200">Codemap is empty</div>
+        <p className="max-w-md text-xs leading-5 text-zinc-400">Ask the agent to explore the repository and maintain codemap/map.yaml. Modules will appear here automatically.</p>
+      </div>
+    );
+  }
+
+  const layout = codemapLayout(document.nodes, document.edges);
+  const selected = document.nodes.find((node) => node.id === selectedId) ?? null;
+  const zoom = (factor: number) => setScale((current) => Math.min(2.2, Math.max(0.55, current * factor)));
+
+  return (
+    <div ref={rootRef} className="relative flex h-full min-h-0 bg-zinc-950">
+      <div
+        className="relative min-w-0 flex-1 overflow-hidden touch-none"
+        onPointerDown={(event) => {
+          if ((event.target as HTMLElement).closest("button")) return;
+          drag.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          if (!drag.current || drag.current.pointer !== event.pointerId) return;
+          setOffset({ x: drag.current.ox + event.clientX - drag.current.x, y: drag.current.oy + event.clientY - drag.current.y });
+        }}
+        onPointerUp={() => { drag.current = null; }}
+        onPointerCancel={() => { drag.current = null; }}
+      >
+        <div
+          className="absolute left-0 top-0 origin-top-left transition-transform duration-150 motion-reduce:transition-none"
+          style={{ width: layout.width, height: layout.height, transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+        >
+          <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
+            {document.edges.map((edge, index) => {
+              const from = layout.positions.get(edge.from);
+              const to = layout.positions.get(edge.to);
+              if (!from || !to) return null;
+              const x1 = from.x + 72;
+              const y1 = from.y + 56;
+              const x2 = to.x + 72;
+              const y2 = to.y;
+              return (
+                <g key={`${edge.from}:${edge.to}:${index}`}>
+                  <path d={`M ${x1} ${y1} C ${x1} ${y1 + 36}, ${x2} ${y2 - 36}, ${x2} ${y2}`} fill="none" stroke="#52525b" strokeWidth="1.25" strokeDasharray={edge.kind === "data" ? "4 4" : undefined} />
+                  {edge.label && <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 6} textAnchor="middle" fontSize="10" fill="#71717a">{edge.label}</text>}
+                </g>
+              );
+            })}
+          </svg>
+          {document.nodes.map((node) => {
+            const position = layout.positions.get(node.id)!;
+            const focused = document.focus.has(node.id);
+            const selectedNode = selectedId === node.id;
+            return (
+              <button
+                key={node.id}
+                type="button"
+                onClick={() => setSelectedId(node.id)}
+                className={`absolute flex h-14 w-36 items-center gap-2 rounded-lg border bg-zinc-900 px-3 text-left shadow-lg shadow-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${selectedNode ? "border-indigo-500 ring-1 ring-indigo-500/60" : focused ? "border-indigo-500/70" : "border-zinc-700 hover:border-zinc-500"}`}
+                style={{ left: position.x, top: position.y }}
+                aria-label={`${node.label}, ${node.kind}, ${node.status}`}
+              >
+                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-300"><CodemapKindIcon kind={node.kind} /></span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[11px] font-medium text-zinc-100">{node.label}</span>
+                  <span className="mt-1 flex items-center gap-1 text-[10px] capitalize text-zinc-400"><CodemapStatus status={node.status} />{node.status}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="absolute bottom-3 left-3 flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/95 px-3 py-2 text-[10px] text-zinc-400">
+          <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-emerald-400" /> Explored</span>
+          <span className="flex items-center gap-1"><CircleDotDashed className="h-3 w-3 text-amber-400" /> Partial</span>
+          <span className="flex items-center gap-1"><TriangleAlert className="h-3 w-3 text-orange-400" /> Stale</span>
+        </div>
+        <div className="absolute bottom-3 right-3 flex items-center rounded-lg border border-zinc-800 bg-zinc-900/95 p-1">
+          <button type="button" onClick={() => zoom(1 / 1.2)} aria-label="Zoom out" className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><Minus className="h-4 w-4" /></button>
+          <span className="w-12 text-center text-[10px] tabular-nums text-zinc-400">{Math.round(scale * 100)}%</span>
+          <button type="button" onClick={() => zoom(1.2)} aria-label="Zoom in" className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><Plus className="h-4 w-4" /></button>
+          <button type="button" onClick={() => { setScale(1); setOffset({ x: 0, y: 0 }); }} aria-label="Reset graph" className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><RotateCcw className="h-4 w-4" /></button>
+          <button type="button" onClick={() => { setScale(1); setOffset({ x: 20, y: 20 }); }} aria-label="Fit graph" className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><Maximize2 className="h-4 w-4" /></button>
+        </div>
+      </div>
+      {wide && selected && <div className="w-60 flex-shrink-0 border-l border-zinc-800"><CodemapInspector node={selected} /></div>}
+      {!wide && selected && (
+        <div className="absolute inset-x-3 bottom-16 z-20 max-h-[70%] overflow-hidden rounded-xl border border-zinc-700 shadow-2xl shadow-black/60">
+          <CodemapInspector node={selected} onClose={() => setSelectedId(null)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 registerLens({ id: "table", render: (p) => <TableLens {...p} /> });
 registerLens({ id: "kanban", render: (p) => <KanbanLens {...p} /> });
 registerLens({ id: "markdown", render: (p) => <MarkdownLens {...p} /> });
 registerLens({ id: "chart", viewOnly: true, render: (p) => <ChartLens {...p} /> });
+registerLens({ id: "codemap", viewOnly: true, render: (p) => <CodemapLens {...p} /> });

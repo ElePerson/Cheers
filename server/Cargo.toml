@@ -42,6 +42,7 @@ regex      = "1"
 # YAML 1.2 parse for fs.read's parsed `data` (boards are commented YAML; clients get
 # JSON so the format never leaves the gateway — docs/arch/WORKBENCH_WRITEBACK.md).
 serde_yaml = "0.9"
+yamlpath   = "=1.27.0"
 
 # ── 类型 ─────────────────────────────────────────────────────────────────────
 uuid   = { version = "1", features = ["v4", "v5", "serde"] }

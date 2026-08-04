@@ -2,12 +2,606 @@ import SwiftUI
 import Charts
 import QuickLook
 
+// MARK: - Native multi-scene workbench
+
+struct WorkbenchSceneState: Equatable {
+    static let otherId = "__other__"
+    var order: [String] = []
+    var titles: [String: String] = [:]
+    var items: [String: [String]] = [:]
+
+    init() {}
+
+    init(_ value: JSONValue?) {
+        guard let object = value?.objectValue else { return }
+        order = object["order"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        titles = object["titles"]?.objectValue?.compactMapValues(\.stringValue) ?? [:]
+        items = object["items"]?.objectValue?.mapValues { $0.arrayValue?.compactMap(\.stringValue) ?? [] } ?? [:]
+    }
+
+    var jsonValue: JSONValue {
+        .object([
+            "version": .number(1),
+            "order": .array(order.map(JSONValue.string)),
+            "titles": .object(titles.mapValues(JSONValue.string)),
+            "items": .object(items.mapValues { .array($0.map(JSONValue.string)) }),
+        ])
+    }
+}
+
+private struct WorkbenchSceneStyle {
+    let icon: String
+    let subtitle: String
+    let tint: Color
+
+    static func resolve(_ id: String) -> Self {
+        switch id {
+        case "cheers-code-project": return .init(icon: "chevron.left.forwardslash.chevron.right", subtitle: "Plan, fix, and ship", tint: .indigo)
+        case "cheers-research-lab": return .init(icon: "atom", subtitle: "Experiments and submissions", tint: .purple)
+        case "cheers-task-board": return .init(icon: "checklist", subtitle: "Turn intent into progress", tint: .blue)
+        case "cheers-team-ops": return .init(icon: "server.rack", subtitle: "Keep systems and ownership clear", tint: .orange)
+        case WorkbenchSceneState.otherId: return .init(icon: "sparkles.rectangle.stack", subtitle: "Renderable items outside a scene", tint: .teal)
+        default: return .init(icon: "square.grid.2x2", subtitle: "Native workspace", tint: .accentColor)
+        }
+    }
+}
+
+/// The default Workbench surface is content-first. File paths remain the storage and
+/// agent contract, but only files accepted by a compiled native renderer become items.
+struct WorkbenchSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let channelId: String
+
+    @State private var entries: [FsEntry] = []
+    @State private var root: [TreeNode] = []
+    @State private var templates: [WorkbenchTemplateRow] = []
+    @State private var config: [String: JSONValue] = [:]
+    @State private var sceneState = WorkbenchSceneState()
+    @State private var discoveredLenses: [String: String] = [:]
+    @State private var cachedFiles: [String: FsFile] = [:]
+    @State private var activeScene = ""
+    @State private var selectedItems: [String: String] = [:]
+    @State private var errorText: String?
+    @State private var isLoading = true
+    @State private var isRefreshing = false
+    @State private var isApplyingTemplate = false
+    @State private var showRaw = false
+    @State private var showSceneManager = false
+    @State private var listenerId: UUID?
+    @State private var pendingSignal: Task<Void, Never>?
+
+    private var bindings: [String: String] {
+        config["bindings"]?.objectValue?.compactMapValues { value in
+            value.stringValue?.replacingOccurrences(of: "builtin:", with: "")
+        } ?? [:]
+    }
+
+    private var allFilePaths: Set<String> {
+        Set(entries.lazy.filter { !$0.isDir }.map(\.path))
+    }
+
+    private var claimedPaths: Set<String> {
+        Set(sceneState.order.flatMap { sceneState.items[$0] ?? [] })
+    }
+
+    private var otherPaths: [String] {
+        workbenchOtherPaths(discovered: discoveredLenses, claimed: claimedPaths, existing: allFilePaths)
+    }
+
+    private var sceneIds: [String] {
+        sceneState.order + (otherPaths.isEmpty ? [] : [WorkbenchSceneState.otherId])
+    }
+
+    private var activePaths: [String] {
+        let paths = activeScene == WorkbenchSceneState.otherId ? otherPaths : (sceneState.items[activeScene] ?? [])
+        return paths.filter { allFilePaths.contains($0) && discoveredLenses[$0] != nil }
+    }
+
+    private var selectedPath: String? {
+        if let selected = selectedItems[activeScene], activePaths.contains(selected) { return selected }
+        return activePaths.first
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Preparing workbench…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorText, entries.isEmpty {
+                    ContentUnavailableView {
+                        Label("Couldn’t open Workbench", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(errorText)
+                    } actions: {
+                        Button("Retry") { Task { await load() } }
+                    }
+                } else if sceneIds.isEmpty {
+                    ContentUnavailableView {
+                        Label("Choose a scene", systemImage: "square.grid.2x2")
+                    } description: {
+                        Text("Activate a scene to turn workspace data into native pages. Other files remain available in Raw.")
+                    } actions: {
+                        Button("Browse scenes") { showSceneManager = true }
+                    }
+                } else if horizontalSizeClass == .regular {
+                    regularLayout
+                } else {
+                    compactLayout
+                }
+            }
+            .navigationTitle("Workbench")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { showRaw = true } label: {
+                        Label("Raw", systemImage: "folder")
+                    }
+                    .accessibilityHint("Opens every workspace file in a file tree")
+                    Button { showSceneManager = true } label: {
+                        Label("Scenes", systemImage: "square.grid.2x2")
+                    }
+                    Button { Task { await load(showSpinner: false) } } label: {
+                        if isRefreshing { ProgressView() } else { Label("Refresh", systemImage: "arrow.clockwise") }
+                    }
+                    .disabled(isRefreshing)
+                }
+            }
+        }
+        .sheet(isPresented: $showRaw) {
+            WorkbenchRawBrowser(channelId: channelId, root: root) {
+                Task { await load(showSpinner: false) }
+            }
+        }
+        .sheet(isPresented: $showSceneManager) { sceneManager }
+        .task {
+            await load()
+            listenerId = app.addSocketListener { event in
+                if case .boardSignal(let id, let board) = event,
+                   id == channelId, board == "files" {
+                    scheduleSignalRefresh()
+                }
+            }
+        }
+        .onDisappear {
+            if let listenerId { app.removeSocketListener(listenerId) }
+            pendingSignal?.cancel()
+        }
+        .onChange(of: activeScene) { _, scene in
+            guard !scene.isEmpty else { return }
+            UserDefaults.standard.set(scene, forKey: "workbench.activeScene.\(channelId)")
+            normalizeSelection()
+        }
+    }
+
+    private var compactLayout: some View {
+        VStack(spacing: 0) {
+            sceneStrip
+            sceneHeader
+            itemStrip
+            documentContent
+        }
+    }
+
+    private var regularLayout: some View {
+        HStack(spacing: 0) {
+            List(sceneIds, id: \.self, selection: Binding(
+                get: { activeScene },
+                set: { if let value = $0 { activeScene = value } }
+            )) { id in
+                let style = WorkbenchSceneStyle.resolve(id)
+                Label(sceneTitle(id), systemImage: style.icon).tag(id)
+            }
+            .frame(width: 230)
+            .listStyle(.sidebar)
+            Divider()
+            VStack(spacing: 0) {
+                sceneHeader
+                itemStrip
+                documentContent
+            }
+        }
+    }
+
+    private var sceneStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(sceneIds, id: \.self) { id in
+                    let selected = id == activeScene
+                    let style = WorkbenchSceneStyle.resolve(id)
+                    Button { activeScene = id } label: {
+                        Label(sceneTitle(id), systemImage: style.icon)
+                            .font(.subheadline.weight(selected ? .semibold : .regular))
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                            .background(selected ? style.tint.opacity(0.16) : Color.clear, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(selected ? style.tint : .secondary)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 12)
+        }
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var sceneHeader: some View {
+        let style = WorkbenchSceneStyle.resolve(activeScene)
+        return HStack(spacing: 12) {
+            Image(systemName: style.icon)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(style.tint)
+                .frame(width: 44, height: 44)
+                .background(style.tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(sceneTitle(activeScene)).font(.headline)
+                Text(style.subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("\(activePaths.count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("\(activePaths.count) items")
+        }
+        .padding(12)
+    }
+
+    private var itemStrip: some View {
+        Group {
+            if !activePaths.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(activePaths, id: \.self) { path in
+                            let selected = path == selectedPath
+                            Button { select(path) } label: {
+                                Label(itemTitle(path), systemImage: lensIcon(discoveredLenses[path] ?? "raw"))
+                                    .font(.subheadline.weight(selected ? .semibold : .regular))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 12)
+                                    .frame(minHeight: 44)
+                                    .background(selected ? Color.accentColor.opacity(0.14) : Theme.bgRaised, in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(selected ? .isSelected : [])
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                }
+                .padding(.bottom, 8)
+                .overlay(alignment: .bottom) { Divider() }
+            }
+        }
+    }
+
+    @ViewBuilder private var documentContent: some View {
+        if let selectedPath, let entry = entries.first(where: { $0.path == selectedPath }) {
+            let node = TreeNode(name: itemTitle(selectedPath), path: selectedPath, isDir: false, sizeBytes: entry.sizeBytes, children: [])
+            FileContentView(
+                channelId: channelId,
+                node: node,
+                preferredLens: discoveredLenses[selectedPath] ?? bindings[selectedPath],
+                lensConfig: config["configs"]?.objectValue?[selectedPath]
+            )
+            .id("\(selectedPath):\(entry.version)")
+        } else {
+            ContentUnavailableView(
+                "No native items",
+                systemImage: "square.dashed",
+                description: Text("This scene’s unsupported files are still available from Raw.")
+            )
+        }
+    }
+
+    private var sceneManager: some View {
+        NavigationStack {
+            List {
+                if !sceneState.order.isEmpty {
+                    Section("Enabled") {
+                        ForEach(sceneState.order, id: \.self) { id in
+                            Label(sceneTitle(id), systemImage: WorkbenchSceneStyle.resolve(id).icon)
+                        }
+                        .onDelete { offsets in Task { await removeScenes(at: offsets) } }
+                        .onMove { source, destination in Task { await moveScenes(from: source, to: destination) } }
+                    }
+                }
+                Section("Available") {
+                    ForEach(templates.filter { !sceneState.order.contains($0.manifest.id) }) { template in
+                        Button { Task { await apply(template.manifest) } } label: {
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(template.title)
+                                    if template.origin == "system" { Text("Built in").font(.caption).foregroundStyle(.secondary) }
+                                }
+                                Spacer()
+                                Image(systemName: "plus.circle.fill")
+                            }
+                            .frame(minHeight: 44)
+                        }
+                        .disabled(isApplyingTemplate)
+                    }
+                }
+            }
+            .navigationTitle("Scenes")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { showSceneManager = false } }
+                ToolbarItem(placement: .primaryAction) { EditButton() }
+            }
+        }
+    }
+
+    private func sceneTitle(_ id: String) -> String {
+        id == WorkbenchSceneState.otherId ? "Other" : (sceneState.titles[id] ?? templates.first { $0.manifest.id == id }?.title ?? id)
+    }
+
+    private func itemTitle(_ path: String) -> String {
+        if activeScene != WorkbenchSceneState.otherId,
+           let view = templates.first(where: { $0.manifest.id == activeScene })?.manifest.views.first(where: { $0.file == path }) {
+            return view.title
+        }
+        let file = path.split(separator: "/").last.map(String.init) ?? path
+        let stem = file.split(separator: ".").dropLast().joined(separator: ".")
+        return (stem.isEmpty ? file : stem).replacingOccurrences(of: "-", with: " ").capitalized
+    }
+
+    private func lensIcon(_ lens: String) -> String {
+        switch lens { case "markdown": return "doc.richtext"; case "table": return "tablecells"; case "kanban": return "rectangle.3.group"; case "chart": return "chart.xyaxis.line"; case "codemap": return "point.3.connected.trianglepath.dotted"; default: return "doc.text" }
+    }
+
+    private func select(_ path: String) {
+        selectedItems[activeScene] = path
+        UserDefaults.standard.set(path, forKey: "workbench.selected.\(channelId).\(activeScene)")
+    }
+
+    private func normalizeSelection() {
+        if let stored = UserDefaults.standard.string(forKey: "workbench.selected.\(channelId).\(activeScene)"), activePaths.contains(stored) {
+            selectedItems[activeScene] = stored
+        } else if let first = activePaths.first {
+            select(first)
+        } else {
+            selectedItems[activeScene] = nil
+        }
+    }
+
+    private func load(showSpinner: Bool = true) async {
+        if showSpinner { isLoading = true } else { isRefreshing = true }
+        defer { isLoading = false; isRefreshing = false }
+        do {
+            async let listingValue = app.socket.request(resource: "fs.ls", params: ["channel_id": channelId, "path": ""])
+            async let templateValues: [WorkbenchTemplateRow] = app.api?.listWorkbenchTemplates() ?? []
+            let listing = try await listingValue.decode(as: FsListing.self)
+            templates = try await templateValues
+            entries = listing.entries
+            root = TreeNode.build(from: entries)
+            await loadConfiguration()
+            migrateLegacySceneIfNeeded()
+            reconcileBuiltInSceneItems()
+            await discoverRenderers()
+            restoreActiveScene()
+            errorText = nil
+        } catch {
+            errorText = (error as? ResourceError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func loadConfiguration() async {
+        do {
+            let raw = try await app.socket.request(resource: "fs.read", params: ["channel_id": channelId, "path": ".workbench.json"])
+            let file = try raw.decode(as: FsFile.self)
+            config = (try? JSONDecoder().decode([String: JSONValue].self, from: Data(file.content.utf8))) ?? [:]
+            sceneState = WorkbenchSceneState(config["scene_state"])
+        } catch {
+            config = [:]
+            sceneState = WorkbenchSceneState()
+        }
+    }
+
+    private func migrateLegacySceneIfNeeded() {
+        guard sceneState.order.isEmpty,
+              let environment = config["environment"]?.stringValue,
+              let manifest = templates.first(where: { $0.manifest.id == environment })?.manifest else { return }
+        sceneState.order = [manifest.id]
+        sceneState.titles[manifest.id] = manifest.title
+        sceneState.items[manifest.id] = manifest.views.map(\.file)
+    }
+
+    /// System scenes can gain new native items without replacing a channel's shared
+    /// ordering or removing user-managed items. The reconciled state stays in memory
+    /// until the next normal Workbench configuration write, matching legacy migration.
+    private func reconcileBuiltInSceneItems() {
+        for template in templates where template.origin == "system" && sceneState.order.contains(template.manifest.id) {
+            var items = sceneState.items[template.manifest.id] ?? []
+            for view in template.manifest.views where !items.contains(view.file) {
+                items.append(view.file)
+            }
+            sceneState.items[template.manifest.id] = items
+        }
+    }
+
+    private func discoverRenderers() async {
+        var found: [String: String] = [:]
+        let files = entries.filter { !$0.isDir && $0.path != ".workbench.json" }
+        var needsInspection: [FsEntry] = []
+        for entry in files {
+            if let bound = bindings[entry.path], ["markdown", "table", "kanban", "chart", "codemap"].contains(bound) {
+                found[entry.path] = bound
+            } else if ["md", "markdown"].contains(entry.path.split(separator: ".").last.map(String.init)?.lowercased() ?? "") {
+                found[entry.path] = "markdown"
+            } else if ["json", "yaml", "yml"].contains(entry.path.split(separator: ".").last.map(String.init)?.lowercased() ?? "") {
+                needsInspection.append(entry)
+            }
+        }
+        discoveredLenses = found
+
+        let priority = needsInspection.filter { claimedPaths.contains($0.path) }
+        await inspectRenderers(priority)
+        let background = needsInspection.filter { !claimedPaths.contains($0.path) }
+        if !background.isEmpty {
+            Task { await inspectRenderers(background) }
+        }
+    }
+
+    private func inspectRenderers(_ candidates: [FsEntry]) async {
+        for batchStart in stride(from: 0, to: candidates.count, by: 4) {
+            let batch = Array(candidates[batchStart..<min(batchStart + 4, candidates.count)])
+            await withTaskGroup(of: (String, FsFile?, String?).self) { group in
+                for entry in batch {
+                    if let cached = cachedFiles[entry.path], cached.version == entry.version {
+                        if let lens = inferNativeLens(path: entry.path, data: cached.data) { discoveredLenses[entry.path] = lens }
+                        continue
+                    }
+                    group.addTask {
+                        do {
+                            let value = try await app.socket.request(resource: "fs.read", params: ["channel_id": channelId, "path": entry.path])
+                            let file = try value.decode(as: FsFile.self)
+                            return (entry.path, file, inferNativeLens(path: entry.path, data: file.data))
+                        } catch { return (entry.path, nil, nil) }
+                    }
+                }
+                for await (path, file, lens) in group {
+                    if let file { cachedFiles[path] = file }
+                    if let lens { discoveredLenses[path] = lens }
+                }
+            }
+        }
+    }
+
+    private func restoreActiveScene() {
+        let stored = UserDefaults.standard.string(forKey: "workbench.activeScene.\(channelId)")
+        if let stored, sceneIds.contains(stored) { activeScene = stored }
+        else { activeScene = sceneIds.first ?? "" }
+        normalizeSelection()
+    }
+
+    private func scheduleSignalRefresh() {
+        guard pendingSignal == nil else { return }
+        pendingSignal = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            pendingSignal = nil
+            guard !Task.isCancelled else { return }
+            await load(showSpinner: false)
+        }
+    }
+
+    private func apply(_ manifest: WorkbenchTemplateManifest) async {
+        isApplyingTemplate = true
+        defer { isApplyingTemplate = false }
+        do {
+            for (path, value) in manifest.seed ?? [:] {
+                let content: String
+                if let text = value.stringValue { content = text }
+                else { content = String(decoding: try JSONEncoder.workbench.encode(value), as: UTF8.self) }
+                do {
+                    _ = try await app.socket.request(resource: "fs.write", params: ["channel_id": channelId, "path": path, "content": content, "if_version": 0])
+                } catch ResourceError.server(let code, _) where code == "VERSION_CONFLICT" {}
+            }
+            try await updateConfiguration { next in
+                var nextBindings = next["bindings"]?.objectValue ?? [:]
+                var nextConfigs = next["configs"]?.objectValue ?? [:]
+                for view in manifest.views {
+                    if nextBindings[view.file] == nil { nextBindings[view.file] = .string("builtin:\(view.lens)") }
+                    if nextConfigs[view.file] == nil, let value = view.config { nextConfigs[view.file] = value }
+                }
+                var state = WorkbenchSceneState(next["scene_state"])
+                state.order.removeAll { $0 == manifest.id }
+                state.order.append(manifest.id)
+                state.titles[manifest.id] = manifest.title
+                state.items[manifest.id] = manifest.views.map(\.file)
+                let pins = Set((next["pinned"]?.arrayValue?.compactMap(\.stringValue) ?? []) + (manifest.pin ?? []))
+                next["environment"] = .string(manifest.id)
+                next["bindings"] = .object(nextBindings)
+                next["configs"] = .object(nextConfigs)
+                next["pinned"] = .array(pins.sorted().map(JSONValue.string))
+                next["scene_state"] = state.jsonValue
+            }
+            showSceneManager = false
+            await load(showSpinner: false)
+            activeScene = manifest.id
+        } catch {
+            errorText = (error as? ResourceError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func removeScenes(at offsets: IndexSet) async {
+        let ids = offsets.compactMap { sceneState.order.indices.contains($0) ? sceneState.order[$0] : nil }
+        do {
+            try await updateConfiguration { next in
+                var state = WorkbenchSceneState(next["scene_state"])
+                for id in ids { state.order.removeAll { $0 == id }; state.titles[id] = nil; state.items[id] = nil }
+                next["scene_state"] = state.jsonValue
+            }
+            await load(showSpinner: false)
+        } catch { errorText = error.localizedDescription }
+    }
+
+    private func moveScenes(from source: IndexSet, to destination: Int) async {
+        var order = sceneState.order
+        order.move(fromOffsets: source, toOffset: destination)
+        do {
+            try await updateConfiguration { next in
+                var state = WorkbenchSceneState(next["scene_state"])
+                state.order = order
+                next["scene_state"] = state.jsonValue
+            }
+            sceneState.order = order
+        } catch { errorText = error.localizedDescription }
+    }
+
+    private func updateConfiguration(_ mutate: (inout [String: JSONValue]) -> Void) async throws {
+        for attempt in 0..<2 {
+            var latest: [String: JSONValue] = [:]
+            var version = 0
+            if let raw = try? await app.socket.request(resource: "fs.read", params: ["channel_id": channelId, "path": ".workbench.json"]),
+               let file = try? raw.decode(as: FsFile.self) {
+                latest = (try? JSONDecoder().decode([String: JSONValue].self, from: Data(file.content.utf8))) ?? [:]
+                version = file.version
+            }
+            mutate(&latest)
+            latest["_doc"] = .string("Workbench config. scene_state indexes enabled native scenes and their file items; bindings choose renderers; pinned files are injected into agent prompts.")
+            let text = String(decoding: try JSONEncoder.workbench.encode(latest), as: UTF8.self)
+            do {
+                _ = try await app.socket.request(resource: "fs.write", params: ["channel_id": channelId, "path": ".workbench.json", "content": text, "if_version": version])
+                config = latest
+                sceneState = WorkbenchSceneState(latest["scene_state"])
+                return
+            } catch ResourceError.server(let code, _) where code == "VERSION_CONFLICT" && attempt == 0 {
+                continue
+            }
+        }
+        throw ResourceError.server(code: "VERSION_CONFLICT", message: "Workbench configuration changed again; please retry.")
+    }
+}
+
+func workbenchOtherPaths(discovered: [String: String], claimed: Set<String>, existing: Set<String>) -> [String] {
+    discovered.keys
+        .filter { !claimed.contains($0) && existing.contains($0) && $0 != ".workbench.json" }
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+}
+
+func inferNativeLens(path: String, data: JSONValue?) -> String? {
+    let ext = path.split(separator: ".").last.map(String.init)?.lowercased()
+    if ext == "md" || ext == "markdown" { return "markdown" }
+    guard let data else { return nil }
+    if data["codemap"]?.numberValue == 1,
+       data["nodes"]?.objectValue != nil || data["nodes"]?.arrayValue?.isEmpty == true { return "codemap" }
+    if data["series"]?.arrayValue != nil { return "chart" }
+    if let columns = data["columns"]?.arrayValue,
+       columns.allSatisfy({ $0.objectValue != nil && $0["items"]?.arrayValue != nil }) { return "kanban" }
+    if let rows = data.arrayValue, !rows.isEmpty, rows.allSatisfy({ $0.objectValue != nil }) { return "table" }
+    return nil
+}
+
 /// Workbench — the channel's file workspace with native, inert renderers.
 ///
 /// The web workbench is file-centric: browse the tree, open a file, and it renders
 /// through a bound *renderer* (a built-in lens or a sandboxed HTML plugin), falling
 /// back to "Raw" when nothing is bound. iOS never executes HTML plugin bundles;
-/// Markdown, table, kanban and chart are rendered with native SwiftUI views.
+/// Markdown, table, kanban, chart and codemap are rendered with native SwiftUI views.
 ///
 /// **`fs.ls` returns a FLAT, recursive list of full paths** — `draft/paper.md`, not a
 /// `draft` directory containing `paper.md` — and in practice emits no `is_dir` rows at
@@ -18,7 +612,7 @@ import QuickLook
 ///
 /// Everything here is agent-authored and untrusted — like ViewBoards, it renders as
 /// inert `Text`, never as markup and never as tappable links.
-struct WorkbenchSheet: View {
+private struct LegacyWorkbenchSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let channelId: String
@@ -372,6 +966,154 @@ struct TreeNode: Identifiable {
     }
 }
 
+// MARK: - Raw file tree and editor
+
+private struct WorkbenchRawBrowser: View {
+    @Environment(\.dismiss) private var dismiss
+    let channelId: String
+    let root: [TreeNode]
+    let onChanged: () -> Void
+
+    private enum Route: Hashable { case folder(String); case file(String) }
+    @State private var path: [Route] = []
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            fileList(root, title: "Raw files")
+                .navigationDestination(for: Route.self) { route in
+                    switch route {
+                    case .folder(let value):
+                        if let folder = find(value, in: root) { fileList(folder.children, title: folder.name) }
+                        else { ContentUnavailableView("Folder unavailable", systemImage: "folder.badge.questionmark") }
+                    case .file(let value):
+                        RawFileEditor(channelId: channelId, path: value, onSaved: onChanged)
+                    }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                }
+        }
+    }
+
+    private func fileList(_ nodes: [TreeNode], title: String) -> some View {
+        List(nodes) { node in
+            NavigationLink(value: node.isDir ? Route.folder(node.path) : Route.file(node.path)) {
+                HStack(spacing: 10) {
+                    Image(systemName: node.isDir ? "folder.fill" : "doc.text")
+                        .foregroundStyle(node.isDir ? Color.accentColor : .secondary)
+                        .frame(width: 24, height: 44)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(node.name).lineLimit(1).truncationMode(.middle)
+                        if !node.isDir { Text(node.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
+                    }
+                    Spacer()
+                    if node.isDir { Text("\(node.children.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                }
+                .contentShape(Rectangle())
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func find(_ value: String, in nodes: [TreeNode]) -> TreeNode? {
+        for node in nodes {
+            if node.path == value { return node }
+            if let match = find(value, in: node.children) { return match }
+        }
+        return nil
+    }
+}
+
+private struct RawFileEditor: View {
+    @Environment(AppModel.self) private var app
+    let channelId: String
+    let path: String
+    let onSaved: () -> Void
+
+    @State private var content = ""
+    @State private var original = ""
+    @State private var version = 0
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var status: String?
+    @State private var showConflict = false
+
+    var body: some View {
+        Group {
+            if isLoading {
+                ProgressView("Loading…")
+            } else {
+                VStack(spacing: 0) {
+                    if let status {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(showConflict ? Color.orange : .secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Theme.bgRaised)
+                    }
+                    TextEditor(text: $content)
+                        .font(.body.monospaced())
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(8)
+                        .accessibilityLabel("Raw file contents")
+                }
+            }
+        }
+        .navigationTitle(path.split(separator: "/").last.map(String.init) ?? path)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { Task { await save() } } label: {
+                    if isSaving { ProgressView() } else { Label("Save", systemImage: "checkmark") }
+                }
+                .disabled(isLoading || isSaving || content == original)
+            }
+        }
+        .confirmationDialog("This file changed while you were editing", isPresented: $showConflict, titleVisibility: .visible) {
+            Button("Reload latest version", role: .destructive) { Task { await load() } }
+            Button("Keep my draft") { status = "Draft kept. Review it, then save again after reloading the latest version." }
+        } message: {
+            Text("Your draft was not overwritten. Reload to see the latest agent changes, then reapply your edit.")
+        }
+        .task(id: path) { await load() }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let raw = try await app.socket.request(resource: "fs.read", params: ["channel_id": channelId, "path": path])
+            let file = try raw.decode(as: FsFile.self)
+            content = file.content
+            original = file.content
+            version = file.version
+            status = "Version \(version)"
+            showConflict = false
+        } catch { status = (error as? ResourceError)?.errorDescription ?? error.localizedDescription }
+    }
+
+    private func save() async {
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            let raw = try await app.socket.request(resource: "fs.write", params: [
+                "channel_id": channelId, "path": path, "content": content, "if_version": version,
+            ])
+            let response = try raw.decode(as: FsWriteResponse.self)
+            version = response.version
+            original = content
+            status = "Saved · version \(version)"
+            onSaved()
+        } catch ResourceError.server(let code, _) where code == "VERSION_CONFLICT" {
+            status = "Conflict — your draft is still here"
+            showConflict = true
+        } catch { status = (error as? ResourceError)?.errorDescription ?? error.localizedDescription }
+    }
+}
+
 // MARK: - File contents and native renderers
 
 private struct FileContentView: View {
@@ -379,11 +1121,14 @@ private struct FileContentView: View {
     let channelId: String
     let node: TreeNode
     let preferredLens: String?
+    var lensConfig: JSONValue? = nil
 
-    @State private var content: String?
+    @State private var file: FsFile?
     @State private var errorText: String?
     @State private var isLoading = true
-    @State private var selectedLens: String?
+    @State private var isSaving = false
+    @State private var statusText: String?
+    @State private var showConflict = false
 
     var body: some View {
         Group {
@@ -391,77 +1136,51 @@ private struct FileContentView: View {
                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, 28)
             } else if let errorText {
                 ContentUnavailableView("Couldn’t load file", systemImage: "exclamationmark.triangle", description: Text(errorText))
-            } else if let content {
-                if content.isEmpty {
+            } else if let file {
+                if file.content.isEmpty {
                     ContentUnavailableView("Empty file", systemImage: "doc")
                 } else {
-                    renderer(content, lens: activeLens(for: content))
+                    VStack(spacing: 0) {
+                        if let statusText {
+                            Text(statusText)
+                                .font(.caption)
+                                .foregroundStyle(showConflict ? Color.orange : .secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(Theme.bgRaised)
+                        }
+                        renderer(file, lens: activeLens(file))
+                    }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(node.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if let content, !content.isEmpty {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Picker("Renderer", selection: Binding(
-                            get: { activeLens(for: content) },
-                            set: { selectedLens = $0 }
-                        )) {
-                            ForEach(availableLenses(for: content), id: \.self) { lens in
-                                Text(lensTitle(lens)).tag(lens)
-                            }
-                        }
-                    } label: {
-                        Label(lensTitle(activeLens(for: content)), systemImage: "eye")
-                    }
-                }
-            }
+        .overlay { if isSaving { ProgressView().padding(12).background(.regularMaterial, in: Capsule()) } }
+        .confirmationDialog("This item changed while you were editing", isPresented: $showConflict, titleVisibility: .visible) {
+            Button("Reload latest version", role: .destructive) { Task { await load() } }
+            Button("Cancel") {}
+        } message: {
+            Text("The agent or another user saved a newer version. Your edit was not applied.")
         }
-        .task(id: node.path) {
-            selectedLens = preferredLens
-            await load()
-        }
+        .task(id: node.path) { await load() }
     }
 
     @ViewBuilder
-    private func renderer(_ content: String, lens: String) -> some View {
+    private func renderer(_ file: FsFile, lens: String) -> some View {
         switch lens {
-        case "markdown": MarkdownRenderer(content: content)
-        case "table": TableRenderer(content: content)
-        case "kanban": KanbanRenderer(content: content)
-        case "chart": NativeChartRenderer(content: content)
-        default: RawRenderer(content: content)
+        case "markdown": MarkdownWorkbenchEditor(content: file.content) { next in await writeText(next) }
+        case "table": TableWorkbenchEditor(data: file.data, config: lensConfig) { ops in await patch(ops) }
+        case "kanban": KanbanWorkbenchEditor(data: file.data) { ops in await patch(ops) }
+        case "chart": ChartWorkbenchEditor(data: file.data) { ops in await patch(ops) }
+        case "codemap": CodemapWorkbenchEditor(data: file.data) { ops in await patch(ops) }
+        default: RawRenderer(content: file.content)
         }
     }
 
-    private func activeLens(for content: String) -> String {
-        selectedLens ?? preferredLens ?? inferredLens(content)
-    }
-
-    private func availableLenses(for content: String) -> [String] {
-        var values = ["raw"]
-        let inferred = inferredLens(content)
-        if inferred != "raw" { values.insert(inferred, at: 0) }
-        if let preferredLens, !values.contains(preferredLens) { values.insert(preferredLens, at: 0) }
-        return values
-    }
-
-    private func lensTitle(_ lens: String) -> String {
-        lens == "raw" ? "Raw" : lens.capitalized
-    }
-
-    private func inferredLens(_ content: String) -> String {
-        let ext = node.path.split(separator: ".").last.map(String.init)?.lowercased()
-        if ext == "md" || ext == "markdown" { return "markdown" }
-        guard let data = content.data(using: .utf8),
-              let value = try? JSONDecoder().decode(JSONValue.self, from: data) else { return "raw" }
-        if value["series"]?.arrayValue != nil { return "chart" }
-        if value["columns"]?.arrayValue != nil { return "kanban" }
-        if let rows = value.arrayValue, rows.allSatisfy({ $0.objectValue != nil }) { return "table" }
-        return "raw"
+    private func activeLens(_ file: FsFile) -> String {
+        preferredLens ?? inferNativeLens(path: node.path, data: file.data) ?? "raw"
     }
 
     private func load() async {
@@ -469,12 +1188,709 @@ private struct FileContentView: View {
         do {
             let raw = try await app.socket.request(
                 resource: "fs.read", params: ["channel_id": channelId, "path": node.path])
-            content = try raw.decode(as: FsFile.self).content
+            file = try raw.decode(as: FsFile.self)
             errorText = nil
         } catch {
             errorText = (error as? ResourceError)?.errorDescription ?? error.localizedDescription
         }
         isLoading = false
+    }
+
+    private func patch(_ ops: [[String: Any]]) async -> Bool {
+        guard let version = file?.version else { return false }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            _ = try await app.socket.request(resource: "fs.patch", params: [
+                "channel_id": channelId, "path": node.path, "if_version": version, "ops": ops,
+            ])
+            statusText = "Saved"
+            await load()
+            return true
+        } catch ResourceError.server(let code, _) where code == "VERSION_CONFLICT" {
+            statusText = "Conflict — reload and reapply your change"
+            showConflict = true
+        } catch { statusText = (error as? ResourceError)?.errorDescription ?? error.localizedDescription }
+        return false
+    }
+
+    private func writeText(_ next: String) async -> Bool {
+        guard let version = file?.version else { return false }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            _ = try await app.socket.request(resource: "fs.write", params: [
+                "channel_id": channelId, "path": node.path, "content": next, "if_version": version,
+            ])
+            statusText = "Saved"
+            await load()
+            return true
+        } catch ResourceError.server(let code, _) where code == "VERSION_CONFLICT" {
+            statusText = "Conflict — reload and reapply your change"
+            showConflict = true
+        } catch { statusText = (error as? ResourceError)?.errorDescription ?? error.localizedDescription }
+        return false
+    }
+}
+
+private typealias WorkbenchPatchHandler = ([[String: Any]]) async -> Bool
+
+private func patchValue(_ value: JSONValue) -> Any {
+    switch value {
+    case .null: return NSNull()
+    case .bool(let value): return value
+    case .number(let value): return value
+    case .string(let value): return value
+    case .array(let values): return values.map(patchValue)
+    case .object(let values): return values.mapValues(patchValue)
+    }
+}
+
+private func editedValue(_ text: String, matching original: JSONValue?) -> Any {
+    switch original {
+    case .bool: return ["true", "yes", "1"].contains(text.lowercased())
+    case .number: return Double(text) ?? 0
+    case .null: return text
+    default: return text
+    }
+}
+
+private struct MarkdownWorkbenchEditor: View {
+    let content: String
+    let onSave: (String) async -> Bool
+    @State private var draft: String
+    @State private var isEditing = false
+
+    init(content: String, onSave: @escaping (String) async -> Bool) {
+        self.content = content
+        self.onSave = onSave
+        _draft = State(initialValue: content)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Markdown mode", selection: $isEditing) {
+                Text("Preview").tag(false)
+                Text("Edit").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .padding(12)
+            if isEditing {
+                TextEditor(text: $draft)
+                    .font(.body.monospaced())
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 8)
+                HStack {
+                    Button("Discard") { draft = content; isEditing = false }
+                    Spacer()
+                    Button("Save") { Task { if await onSave(draft) { isEditing = false } } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(draft == content)
+                }
+                .padding(12)
+            } else {
+                MarkdownRenderer(content: content)
+            }
+        }
+    }
+}
+
+private struct TableWorkbenchEditor: View {
+    let data: JSONValue?
+    let config: JSONValue?
+    let onPatch: WorkbenchPatchHandler
+
+    private var rows: [[String: JSONValue]] { data?.arrayValue?.compactMap(\.objectValue) ?? [] }
+    private var configuredColumns: [[String: JSONValue]] { config?["columns"]?.arrayValue?.compactMap(\.objectValue) ?? [] }
+    private var columns: [String] {
+        let configured = configuredColumns.compactMap { $0["key"]?.stringValue }
+        return configured + Array(Set(rows.flatMap(\.keys)).subtracting(configured)).sorted()
+    }
+    private var labels: [String: String] {
+        Dictionary(uniqueKeysWithValues: configuredColumns.compactMap { column in
+            guard let key = column["key"]?.stringValue else { return nil }
+            return (key, column["label"]?.stringValue ?? key)
+        })
+    }
+    private var options: [String: [String]] {
+        Dictionary(uniqueKeysWithValues: configuredColumns.compactMap { column in
+            guard let key = column["key"]?.stringValue,
+                  let values = column["options"]?.arrayValue?.compactMap(\.stringValue), !values.isEmpty else { return nil }
+            return (key, values)
+        })
+    }
+
+    var body: some View {
+        List {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                NavigationLink {
+                    TableRowEditor(title: "Row \(index + 1)", row: row, columns: columns, labels: labels, options: options) { updates in
+                        let ops = updates.map { key, value in ["op": "set", "path": [index, key], "value": value] as [String: Any] }
+                        return await onPatch(ops)
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(row.values.compactMap(\.stringValue).first ?? "Row \(index + 1)").font(.headline)
+                        Text(columns.prefix(3).map { "\($0): \(display(row[$0]))" }.joined(separator: "  ·  "))
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    .frame(minHeight: 44, alignment: .leading)
+                }
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) { Task { _ = await onPatch([["op": "remove", "path": [index]]]) } } label: { Label("Delete", systemImage: "trash") }
+                    Button { Task { _ = await onPatch([["op": "insert", "path": [], "index": index + 1, "value": row.mapValues(patchValue)]]) } } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                }
+            }
+            .onMove { source, destination in
+                guard let from = source.first else { return }
+                let to = max(0, min(rows.count - 1, destination > from ? destination - 1 : destination))
+                Task { _ = await onPatch([["op": "move", "path": [], "from": from, "to": to]]) }
+            }
+        }
+        .overlay {
+            if rows.isEmpty { ContentUnavailableView("No rows", systemImage: "tablecells", description: Text("Add the first row to start this table.")) }
+        }
+        .safeAreaInset(edge: .bottom) {
+            Button { Task { _ = await onPatch([["op": "insert", "path": [], "index": rows.count, "value": Dictionary(uniqueKeysWithValues: columns.map { ($0, "") })]]) } } label: {
+                Label("Add row", systemImage: "plus").frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.borderedProminent).padding(12).background(.bar)
+        }
+    }
+}
+
+private struct TableRowEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    let row: [String: JSONValue]
+    let columns: [String]
+    let labels: [String: String]
+    let options: [String: [String]]
+    let onSave: ([String: Any]) async -> Bool
+    @State private var values: [String: String]
+
+    init(title: String, row: [String: JSONValue], columns: [String], labels: [String: String], options: [String: [String]], onSave: @escaping ([String: Any]) async -> Bool) {
+        self.title = title; self.row = row; self.columns = columns; self.labels = labels; self.options = options; self.onSave = onSave
+        _values = State(initialValue: Dictionary(uniqueKeysWithValues: columns.map { ($0, display(row[$0])) }))
+    }
+
+    var body: some View {
+        Form {
+            ForEach(columns, id: \.self) { column in
+                if let choices = options[column] {
+                    Picker(labels[column] ?? column, selection: Binding(get: { values[column] ?? choices.first ?? "" }, set: { values[column] = $0 })) {
+                        ForEach(choices, id: \.self) { Text($0).tag($0) }
+                    }
+                } else {
+                    TextField(labels[column] ?? column, text: Binding(get: { values[column] ?? "" }, set: { values[column] = $0 }), axis: .vertical)
+                        .textInputAutocapitalization(.never)
+                }
+            }
+        }
+        .navigationTitle(title)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Save") {
+                    Task {
+                        let updates = Dictionary(uniqueKeysWithValues: columns.map { ($0, editedValue(values[$0] ?? "", matching: row[$0])) })
+                        if await onSave(updates) { dismiss() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct KanbanWorkbenchEditor: View {
+    let data: JSONValue?
+    let onPatch: WorkbenchPatchHandler
+    private var columns: [[String: JSONValue]] { data?["columns"]?.arrayValue?.compactMap(\.objectValue) ?? [] }
+
+    var body: some View {
+        List {
+            ForEach(Array(columns.enumerated()), id: \.offset) { columnIndex, column in
+                Section {
+                    let items = column["items"]?.arrayValue ?? []
+                    NavigationLink {
+                        WorkbenchNameEditor(title: "Column name", value: column["name"]?.stringValue ?? column["title"]?.stringValue ?? "Column") { name in
+                            await onPatch([["op": "set", "path": ["columns", columnIndex, "name"], "value": name]])
+                        }
+                    } label: {
+                        Label("Rename column", systemImage: "pencil").frame(minHeight: 44)
+                    }
+                    ForEach(Array(items.enumerated()), id: \.offset) { itemIndex, item in
+                        NavigationLink {
+                            KanbanCardEditor(value: item) { next in
+                                await onPatch([["op": "set", "path": ["columns", columnIndex, "items", itemIndex], "value": next]])
+                            }
+                        } label: {
+                            Text(item.firstString("title", "name", "text") ?? display(item)).frame(minHeight: 44, alignment: .leading)
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) { Task { _ = await onPatch([["op": "remove", "path": ["columns", columnIndex, "items", itemIndex]]]) } } label: { Label("Delete", systemImage: "trash") }
+                        }
+                        .contextMenu {
+                            ForEach(Array(columns.enumerated()), id: \.offset) { targetIndex, target in
+                                if targetIndex != columnIndex {
+                                    Button("Move to \(target["name"]?.stringValue ?? "Column")") {
+                                        Task {
+                                            _ = await onPatch([
+                                                ["op": "remove", "path": ["columns", columnIndex, "items", itemIndex]],
+                                                ["op": "insert", "path": ["columns", targetIndex, "items"], "index": target["items"]?.arrayValue?.count ?? 0, "value": patchValue(item)],
+                                            ])
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .onMove { source, destination in
+                        guard let from = source.first else { return }
+                        let to = max(0, min(items.count - 1, destination > from ? destination - 1 : destination))
+                        Task { _ = await onPatch([["op": "move", "path": ["columns", columnIndex, "items"], "from": from, "to": to]]) }
+                    }
+                    Button { Task { _ = await onPatch([["op": "insert", "path": ["columns", columnIndex, "items"], "index": items.count, "value": "New card"]]) } } label: {
+                        Label("Add card", systemImage: "plus").frame(minHeight: 44)
+                    }
+                } header: {
+                    Text(column["name"]?.stringValue ?? column["title"]?.stringValue ?? "Column")
+                }
+            }
+            .onDelete { offsets in
+                guard let index = offsets.first else { return }
+                Task { _ = await onPatch([["op": "remove", "path": ["columns", index]]]) }
+            }
+            .onMove { source, destination in
+                guard let from = source.first else { return }
+                let to = max(0, min(columns.count - 1, destination > from ? destination - 1 : destination))
+                Task { _ = await onPatch([["op": "move", "path": ["columns"], "from": from, "to": to]]) }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            Button { Task { _ = await onPatch([["op": "insert", "path": ["columns"], "index": columns.count, "value": ["name": "New column", "items": []]]]) } } label: {
+                Label("Add column", systemImage: "plus").frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.borderedProminent).padding(12).background(.bar)
+        }
+    }
+}
+
+private struct KanbanCardEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let value: JSONValue
+    let onSave: (Any) async -> Bool
+    @State private var text: String
+
+    init(value: JSONValue, onSave: @escaping (Any) async -> Bool) {
+        self.value = value; self.onSave = onSave
+        _text = State(initialValue: value.firstString("title", "name", "text") ?? display(value))
+    }
+
+    var body: some View {
+        Form { TextField("Card", text: $text, axis: .vertical) }
+            .navigationTitle("Card")
+            .toolbar { ToolbarItem(placement: .primaryAction) { Button("Save") { Task { if await onSave(text) { dismiss() } } } } }
+    }
+}
+
+private struct ChartWorkbenchEditor: View {
+    let data: JSONValue?
+    let onPatch: WorkbenchPatchHandler
+    private var series: [[String: JSONValue]] { data?["series"]?.arrayValue?.compactMap(\.objectValue) ?? [] }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            NativeChartRenderer(content: data.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? "")
+                .frame(minHeight: 220)
+            List {
+                ForEach(Array(series.enumerated()), id: \.offset) { seriesIndex, item in
+                    Section(item["name"]?.stringValue ?? "Series \(seriesIndex + 1)") {
+                        let points = item["points"]?.arrayValue ?? []
+                        NavigationLink {
+                            WorkbenchNameEditor(title: "Series name", value: item["name"]?.stringValue ?? "Series \(seriesIndex + 1)") { name in
+                                await onPatch([["op": "set", "path": ["series", seriesIndex, "name"], "value": name]])
+                            }
+                        } label: {
+                            Label("Rename series", systemImage: "pencil").frame(minHeight: 44)
+                        }
+                        ForEach(Array(points.enumerated()), id: \.offset) { pointIndex, point in
+                            NavigationLink {
+                                ChartPointEditor(point: point) { x, y in
+                                    await onPatch([["op": "set", "path": ["series", seriesIndex, "points", pointIndex], "value": [x, y]]])
+                                }
+                            } label: { Text(display(point)).font(.body.monospacedDigit()).frame(minHeight: 44) }
+                            .swipeActions { Button(role: .destructive) { Task { _ = await onPatch([["op": "remove", "path": ["series", seriesIndex, "points", pointIndex]]]) } } label: { Label("Delete", systemImage: "trash") } }
+                        }
+                        Button { Task { _ = await onPatch([["op": "insert", "path": ["series", seriesIndex, "points"], "index": points.count, "value": [Double(points.count), 0.0]]]) } } label: { Label("Add point", systemImage: "plus") }
+                    }
+                }
+                .onDelete { offsets in
+                    guard let index = offsets.first else { return }
+                    Task { _ = await onPatch([["op": "remove", "path": ["series", index]]]) }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            Button { Task { _ = await onPatch([["op": "insert", "path": ["series"], "index": series.count, "value": ["name": "Series \(series.count + 1)", "points": []]]]) } } label: {
+                Label("Add series", systemImage: "plus").frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.borderedProminent).padding(12).background(.bar)
+        }
+    }
+}
+
+struct CodemapNode: Identifiable, Equatable {
+    let id: String
+    let kind: String
+    let label: String
+    let location: String?
+    let summary: String
+    let status: String
+}
+
+struct CodemapEdge: Equatable {
+    let from: String
+    let to: String
+    let kind: String
+    let label: String?
+}
+
+struct CodemapDocument: Equatable {
+    let repository: String?
+    let updated: String?
+    let focus: Set<String>
+    let nodes: [CodemapNode]
+    let edges: [CodemapEdge]
+}
+
+func parseCodemap(_ data: JSONValue?) -> CodemapDocument? {
+    guard data?["codemap"]?.numberValue == 1 else { return nil }
+    let nodeObjects = data?["nodes"]?.objectValue ?? [:]
+    let nodes = nodeObjects.map { id, value in
+        CodemapNode(
+            id: id,
+            kind: value["kind"]?.stringValue ?? "module",
+            label: value["label"]?.stringValue ?? id.split(separator: ".").last.map(String.init) ?? id,
+            location: value["loc"]?.stringValue,
+            summary: value["summary"]?.stringValue ?? "",
+            status: value["status"]?.stringValue ?? "partial"
+        )
+    }.sorted { lhs, rhs in
+        let lhsDepth = lhs.id.split(separator: ".").count
+        let rhsDepth = rhs.id.split(separator: ".").count
+        return lhsDepth == rhsDepth ? lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending : lhsDepth < rhsDepth
+    }
+    let edges = data?["edges"]?.arrayValue?.compactMap { value -> CodemapEdge? in
+        guard let from = value["from"]?.stringValue, let to = value["to"]?.stringValue else { return nil }
+        return CodemapEdge(from: from, to: to, kind: value["kind"]?.stringValue ?? "calls", label: value["label"]?.stringValue)
+    } ?? []
+    return CodemapDocument(
+        repository: data?["repo"]?.stringValue,
+        updated: data?["updated"]?.stringValue,
+        focus: Set(data?["focus"]?.arrayValue?.compactMap(\.stringValue) ?? []),
+        nodes: nodes,
+        edges: edges
+    )
+}
+
+private struct CodemapLayout {
+    let positions: [String: CGPoint]
+    let size: CGSize
+
+    init(nodes: [CodemapNode]) {
+        let groups = Dictionary(grouping: nodes) { max(0, $0.id.split(separator: ".").count - 1) }
+        var positions: [String: CGPoint] = [:]
+        var longestColumn = 1
+        for depth in groups.keys.sorted() {
+            let column = (groups[depth] ?? []).sorted { $0.id < $1.id }
+            longestColumn = max(longestColumn, column.count)
+            for (index, node) in column.enumerated() {
+                positions[node.id] = CGPoint(x: 86 + CGFloat(depth) * 176, y: 64 + CGFloat(index) * 104)
+            }
+        }
+        self.positions = positions
+        let depthCount = max(1, (groups.keys.max() ?? 0) + 1)
+        size = CGSize(width: CGFloat(depthCount) * 176 + 40, height: CGFloat(longestColumn) * 104 + 48)
+    }
+}
+
+private struct CodemapWorkbenchEditor: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let data: JSONValue?
+    let onPatch: WorkbenchPatchHandler
+    @State private var selectedNode: CodemapNode?
+    @State private var scale: CGFloat = 1
+    @State private var settledScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var settledOffset: CGSize = .zero
+
+    private var document: CodemapDocument? { parseCodemap(data) }
+
+    var body: some View {
+        if let document, !document.nodes.isEmpty {
+            VStack(spacing: 0) {
+                metadata(document)
+                graph(document)
+            }
+            .sheet(item: $selectedNode) { node in
+                NavigationStack {
+                    CodemapNodeEditor(node: node) { summary, status in
+                        await onPatch([
+                            ["op": "set", "path": ["nodes", node.id, "summary"], "value": summary],
+                            ["op": "set", "path": ["nodes", node.id, "status"], "value": status],
+                        ])
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
+        } else {
+            ContentUnavailableView {
+                Label("Codemap is empty", systemImage: "point.3.connected.trianglepath.dotted")
+            } description: {
+                Text("Ask the agent to explore the repository and maintain codemap/map.yaml. New modules will appear here automatically.")
+            }
+        }
+    }
+
+    private func metadata(_ document: CodemapDocument) -> some View {
+        HStack(spacing: 8) {
+            if let repository = document.repository, !repository.isEmpty {
+                Label(repository, systemImage: "shippingbox")
+                    .lineLimit(1)
+            } else {
+                Label("Repository map", systemImage: "shippingbox")
+            }
+            Spacer()
+            Text("\(document.nodes.count) nodes")
+                .monospacedDigit()
+            if !document.focus.isEmpty {
+                Label("\(document.focus.count) focused", systemImage: "scope")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func graph(_ document: CodemapDocument) -> some View {
+        let layout = CodemapLayout(nodes: document.nodes)
+        return GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                ZStack(alignment: .topLeading) {
+                    Canvas { context, _ in
+                        for edge in document.edges {
+                            guard let from = layout.positions[edge.from], let to = layout.positions[edge.to] else { continue }
+                            var path = Path()
+                            path.move(to: CGPoint(x: from.x + 68, y: from.y + 29))
+                            path.addCurve(
+                                to: CGPoint(x: to.x - 68, y: to.y + 29),
+                                control1: CGPoint(x: from.x + 112, y: from.y + 29),
+                                control2: CGPoint(x: to.x - 112, y: to.y + 29)
+                            )
+                            context.stroke(path, with: .color(.secondary.opacity(0.45)), lineWidth: edge.kind == "data" ? 1 : 1.5)
+                        }
+                    }
+                    .frame(width: layout.size.width, height: layout.size.height)
+
+                    ForEach(document.nodes) { node in
+                        if let position = layout.positions[node.id] {
+                            CodemapNodeButton(node: node, isFocused: document.focus.contains(node.id)) {
+                                selectedNode = node
+                            }
+                            .position(position)
+                        }
+                    }
+                }
+                .frame(width: layout.size.width, height: layout.size.height, alignment: .topLeading)
+                .scaleEffect(scale, anchor: .topLeading)
+                .offset(offset)
+
+                VStack(spacing: 8) {
+                    Button { changeZoom(by: 1.2) } label: { Image(systemName: "plus.magnifyingglass").frame(width: 44, height: 44) }
+                        .accessibilityLabel("Zoom in")
+                    Button { changeZoom(by: 1 / 1.2) } label: { Image(systemName: "minus.magnifyingglass").frame(width: 44, height: 44) }
+                        .accessibilityLabel("Zoom out")
+                    Button { resetView() } label: { Image(systemName: "arrow.counterclockwise").frame(width: 44, height: 44) }
+                        .accessibilityLabel("Reset map position")
+                }
+                .buttonStyle(.bordered)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .clipped()
+            .contentShape(Rectangle())
+            .gesture(panGesture)
+            .simultaneousGesture(zoomGesture)
+            .accessibilityLabel("Codemap graph with \(document.nodes.count) nodes and \(document.edges.count) edges")
+        }
+    }
+
+    private var panGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                offset = CGSize(width: settledOffset.width + value.translation.width, height: settledOffset.height + value.translation.height)
+            }
+            .onEnded { _ in settledOffset = offset }
+    }
+
+    private var zoomGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in scale = min(2.4, max(0.55, settledScale * value)) }
+            .onEnded { _ in settledScale = scale }
+    }
+
+    private func changeZoom(by factor: CGFloat) {
+        let update = { scale = min(2.4, max(0.55, scale * factor)); settledScale = scale }
+        if reduceMotion { update() } else { withAnimation(.snappy(duration: 0.2), update) }
+    }
+
+    private func resetView() {
+        let update = { scale = 1; settledScale = 1; offset = .zero; settledOffset = .zero }
+        if reduceMotion { update() } else { withAnimation(.snappy(duration: 0.25), update) }
+    }
+}
+
+private struct CodemapNodeButton: View {
+    let node: CodemapNode
+    let isFocused: Bool
+    let action: () -> Void
+
+    private var statusIcon: String {
+        switch node.status { case "explored": return "checkmark.circle.fill"; case "stale": return "exclamationmark.triangle.fill"; default: return "circle.lefthalf.filled" }
+    }
+
+    private var statusColor: Color {
+        switch node.status { case "explored": return .green; case "stale": return .orange; default: return .blue }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 5) {
+                    Image(systemName: statusIcon).foregroundStyle(statusColor)
+                    Text(node.label).font(.caption.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                Text(node.kind.capitalized)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(10)
+            .frame(width: 136, height: 58, alignment: .leading)
+            .background(Theme.bgRaised, in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isFocused ? Color.accentColor : statusColor.opacity(0.42), lineWidth: isFocused ? 3 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(node.label), \(node.kind), \(node.status)")
+        .accessibilityHint("Opens module details")
+    }
+}
+
+private struct CodemapNodeEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let node: CodemapNode
+    let onSave: (String, String) async -> Bool
+    @State private var summary: String
+    @State private var status: String
+    @State private var isSaving = false
+
+    init(node: CodemapNode, onSave: @escaping (String, String) async -> Bool) {
+        self.node = node
+        self.onSave = onSave
+        _summary = State(initialValue: node.summary)
+        _status = State(initialValue: node.status)
+    }
+
+    var body: some View {
+        Form {
+            Section("Node") {
+                LabeledContent("ID", value: node.id)
+                LabeledContent("Kind", value: node.kind.capitalized)
+                if let location = node.location, !location.isEmpty {
+                    LabeledContent("Location") { Text(location).font(.caption.monospaced()).textSelection(.enabled) }
+                }
+            }
+            Section("Knowledge") {
+                Picker("Status", selection: $status) {
+                    Text("Explored").tag("explored")
+                    Text("Partial").tag("partial")
+                    Text("Stale").tag("stale")
+                }
+                TextField("Summary", text: $summary, axis: .vertical)
+                    .lineLimit(3...8)
+            }
+        }
+        .navigationTitle(node.label)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            ToolbarItem(placement: .primaryAction) {
+                Button("Save") {
+                    isSaving = true
+                    Task {
+                        if await onSave(summary.trimmingCharacters(in: .whitespacesAndNewlines), status) { dismiss() }
+                        isSaving = false
+                    }
+                }
+                .disabled(isSaving || (summary == node.summary && status == node.status))
+            }
+        }
+        .interactiveDismissDisabled(isSaving)
+    }
+}
+
+private struct WorkbenchNameEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    let onSave: (String) async -> Bool
+    @State private var value: String
+
+    init(title: String, value: String, onSave: @escaping (String) async -> Bool) {
+        self.title = title
+        self.onSave = onSave
+        _value = State(initialValue: value)
+    }
+
+    var body: some View {
+        Form { TextField(title, text: $value).textInputAutocapitalization(.sentences) }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Save") { Task { if await onSave(value.trimmingCharacters(in: .whitespacesAndNewlines)) { dismiss() } } }
+                        .disabled(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+    }
+}
+
+private struct ChartPointEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let onSave: (Double, Double) async -> Bool
+    @State private var x: String
+    @State private var y: String
+
+    init(point: JSONValue, onSave: @escaping (Double, Double) async -> Bool) {
+        self.onSave = onSave
+        let values = point.arrayValue ?? []
+        _x = State(initialValue: values.first?.numberValue.map { String($0) } ?? "0")
+        _y = State(initialValue: values.dropFirst().first?.numberValue.map { String($0) } ?? "0")
+    }
+
+    var body: some View {
+        Form {
+            TextField("X", text: $x).keyboardType(.numbersAndPunctuation)
+            TextField("Y", text: $y).keyboardType(.numbersAndPunctuation)
+        }
+        .navigationTitle("Data point")
+        .toolbar { ToolbarItem(placement: .primaryAction) { Button("Save") { Task { if await onSave(Double(x) ?? 0, Double(y) ?? 0) { dismiss() } } } } }
     }
 }
 

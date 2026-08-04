@@ -138,7 +138,7 @@
 
 | 读（频道成员即可） | 写（channel role ∈ owner/admin/member） |
 |---|---|
-| `channel.info` `channel.members` `channel.messages` `channel.files` `channel.files.read` `channel.context` `channel.activity.read` `channel.messages.index` `channel.messages.by-seq` `fs.ls` `fs.read` | `channel.messages.create` `channel.files.create` `fs.write` `fs.edit` `fs.append` `fs.rm` `fs.mv` |
+| `channel.info` `channel.members` `channel.messages` `channel.files` `channel.files.read` `channel.context` `channel.activity.read` `channel.messages.index` `channel.messages.by-seq` `fs.ls` `fs.read` | `channel.messages.create` `channel.files.create` `fs.write` `fs.patch` `fs.edit` `fs.append` `fs.rm` `fs.mv` |
 
 错误码：`UNKNOWN_RESOURCE` / `NOT_MEMBER` / `PERMISSION_DENIED` / `NOT_FOUND` / `INTERNAL_ERROR`。
 
