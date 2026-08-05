@@ -192,27 +192,32 @@ extension PushRouter: UNUserNotificationCenterDelegate {
     /// the event, so banners would be duplicate noise.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        []
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([])
     }
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
-        // Parse off the main actor — userInfo is a plain plist dictionary and
-        // must not hop through MainActor just to read strings (avoids re-entrancy
-        // during notification cold-start).
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        // Apple's documented API (WWDC20 Push Notifications primer):
+        // completion-handler form, not the Swift `async` overload.
         let info = response.notification.request.content.userInfo
         let cheers = PushRouter.cheersPayload(from: info)
         let action = response.actionIdentifier
-        await MainActor.run {
-            handleResponse(action: action, cheers: cheers)
+        // Finish the system callback before MainActor UI. Holding the async
+        // `didReceive` across `await MainActor.run` races UIKit snapshot
+        // restoration and aborts (`_performBlockAfterCATransactionCommitSynchronizes`).
+        completionHandler()
+        Task { @MainActor in
+            PushRouter.shared.handleResponse(action: action, cheers: cheers)
         }
     }
 
-    private func handleResponse(action: String, cheers: [String: Any]) {
+    fileprivate func handleResponse(action: String, cheers: [String: Any]) {
         switch action {
         case "APPROVE", "DENY":
             handleApprovalAction(action: action, cheers: cheers)
@@ -235,8 +240,6 @@ extension PushRouter: UNUserNotificationCenterDelegate {
         }
         let optionKey = action == "APPROVE" ? "approve_option_id" : "reject_option_id"
         guard let optionId = Self.stringValue(cheers[optionKey]) else {
-            // Payload missing option ids — open the approval sheet so the user
-            // can still decide (design §5.4 fallback).
             navigate(.approval(channelId: channelId, requestId: requestId))
             return
         }
@@ -255,7 +258,6 @@ extension PushRouter: UNUserNotificationCenterDelegate {
                     optionId: optionId
                 )
             } catch {
-                // Expired token / already resolved / network — land on the sheet.
                 navigate(.approval(channelId: channelId, requestId: requestId))
             }
         }
