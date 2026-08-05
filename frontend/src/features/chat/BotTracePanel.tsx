@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronRight,
   ChevronDown,
@@ -22,9 +23,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { fetchMessageTrace } from "@/api/approval";
-import { PopoverPanel, usePopoverDismiss } from "@/components/ui/popover";
-import type { TraceEvent } from "@/types";
+import { FloatingPanel } from "@/components/ui/floating-panel";
+import type { Message, PermissionContentData, TraceEvent } from "@/types";
 import { DiffView } from "./DiffView";
+import { PermissionCard } from "./PermissionCard";
 import { coalesceTraceEvents } from "./traceEvent";
 import {
   parseGitStatusResult,
@@ -37,6 +39,9 @@ interface Props {
   channelId: string;
   msgId: string;
   liveEvents?: TraceEvent[];
+  /** Pending permission messages anchored to this bot turn. */
+  pendingApprovals?: Message[];
+  currentUserId?: string;
 }
 
 type EventVisual = { Icon: LucideIcon; tone: string; label: string };
@@ -453,32 +458,172 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
   );
 }
 
+
+/** Visual approval detail built from a trace event when the permission message
+ *  is gone — never fall back to raw JSON for kind=approval. */
+function ApprovalEventCard({ event }: { event: TraceEvent }) {
+  const data = asRecord(event.data);
+  const tool = asRecord(data?.tool);
+  const command =
+    stringField(tool, "command", "summary")
+    ?? (typeof event.message === "string" && event.message.trim() ? event.message : null);
+  const cwd = stringField(tool, "cwd", "working_directory");
+  const title =
+    (typeof event.title === "string" && event.title.trim() && event.title !== "ACP permission request"
+      ? event.title
+      : null)
+    ?? "Approval needed";
+  const pending =
+    event.status === "pending"
+    || event.approval_kind === "requested"
+    || (!event.decision && event.approval_kind !== "resolved" && event.approval_kind !== "expired");
+  const decision = event.decision ?? null;
+  const ok = typeof decision === "string" && decision.startsWith("allow");
+  const denied = typeof decision === "string" && decision.startsWith("reject");
+  const expired = event.approval_kind === "expired" || event.status === "expired";
+
+  return (
+    <div className="overflow-hidden rounded-lg bg-zinc-950/45">
+      <header className="flex items-start justify-between gap-3 px-3 py-2.5 border-b border-zinc-800">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-zinc-200">{title}</p>
+          <p className="mt-0.5 text-xs text-zinc-400">
+            {pending
+              ? "Waiting for a decision."
+              : expired
+                ? "This request expired."
+                : ok
+                  ? "Approved."
+                  : denied
+                    ? "Denied."
+                    : statusLabel(event.status ?? event.approval_kind ?? "done")}
+          </p>
+        </div>
+        <span
+          className={cn(
+            "shrink-0 text-[11px]",
+            pending ? "text-amber-400/90" : ok ? "text-zinc-400" : denied || expired ? "text-red-400/70" : "text-zinc-400",
+          )}
+        >
+          {pending ? "Needs approval" : expired ? "Expired" : ok ? "Approved" : denied ? "Denied" : statusLabel(event.status ?? "Done")}
+        </span>
+      </header>
+      {command && (
+        <div className="border-b border-zinc-800 bg-zinc-950/40 px-3 py-2.5">
+          <p className="mb-1.5 text-[10px] uppercase tracking-wide text-zinc-400">Command</p>
+          <pre className="m-0 max-h-32 overflow-auto whitespace-pre-wrap break-all rounded bg-black/40 px-2 py-1.5 font-mono text-xs text-zinc-300">
+            {command}
+          </pre>
+          {cwd && (
+            <p className="mt-2 truncate font-mono text-[11px] text-zinc-500" title={cwd}>
+              {cwd}
+            </p>
+          )}
+        </div>
+      )}
+      {!pending && decision && (
+        <div className="px-3 py-2.5 text-xs text-zinc-400">
+          Decision: <span className="font-mono text-zinc-300">{decision}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TraceItem({
   event,
   active,
   onToggle,
+  pendingApproval,
+  channelId,
+  currentUserId,
+  onApprovalResolved,
 }: {
   event: TraceEvent;
   active: boolean;
   onToggle: () => void;
+  /** Permission message for this approval row (pending or resolved). */
+  pendingApproval?: Message;
+  channelId?: string;
+  currentUserId?: string;
+  onApprovalResolved?: () => void;
 }) {
-  const rootRef = useRef<HTMLDivElement>(null);
   const { Icon, tone, label } = eventMeta(event);
-  const preview = eventPreview(event);
+  const pendingData = pendingApproval
+    ? (pendingApproval.content_data as PermissionContentData | null | undefined)
+    : null;
+  const preview = eventPreview(event)
+    ?? pendingData?.tool?.command
+    ?? pendingData?.body
+    ?? null;
   const presentation = toolPresentationFromTrace(event);
-  const displayTitle = presentation ? label : event.title || label;
-  const statusTone = event.status === "failed"
-    ? "text-red-400/80"
-    : presentation && GIT_EVENT_TYPES.has(presentation.event_type) && event.status === "completed"
-      ? "text-emerald-400/80"
-      : "text-zinc-400";
-  const close = useCallback(() => {
-    if (active) onToggle();
-  }, [active, onToggle]);
-  usePopoverDismiss(active, close, rootRef);
+  const displayTitle = presentation
+    ? label
+    : event.title || (pendingApproval ? "Approval" : label);
+  const needsAction = Boolean(
+    pendingApproval &&
+      !(pendingApproval.content_data as PermissionContentData | null | undefined)?.resolved,
+  );
+  const statusTone = needsAction
+    ? "text-amber-400/90"
+    : event.status === "failed"
+      ? "text-red-400/80"
+      : presentation && GIT_EVENT_TYPES.has(presentation.event_type) && event.status === "completed"
+        ? "text-emerald-400/80"
+        : "text-zinc-400";
+  const statusText = needsAction
+    ? "Needs approval"
+    : event.status
+      ? statusLabel(event.status)
+      : null;
+
+  // Esc closes the floating inspector only (pending approvals stay inline).
+  useEffect(() => {
+    if (!active || needsAction) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      onToggle();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [active, needsAction, onToggle]);
+
+  // Pending approvals expand inline under the row with action buttons — no click needed.
+  if (needsAction && pendingApproval) {
+    return (
+      <div className="min-w-0 space-y-1.5">
+        <div
+          className={cn(
+            "flex h-7 w-full items-center gap-2 rounded-lg px-2 text-left",
+            "bg-amber-500/5",
+          )}
+        >
+          <Icon className="h-3.5 w-3.5 shrink-0 text-amber-400/80" />
+          <span className="min-w-0 max-w-[45%] shrink truncate text-[11px] font-medium text-zinc-200">
+            {displayTitle}
+          </span>
+          {preview && (
+            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-400" title={preview}>
+              {preview}
+            </span>
+          )}
+          <span className={cn("shrink-0 text-[10px]", statusTone)}>{statusText}</span>
+          <ChevronDown className="h-3 w-3 shrink-0 text-amber-400/70" />
+        </div>
+        <PermissionCard
+          message={pendingApproval}
+          channelId={channelId}
+          currentUserId={currentUserId}
+          onResolved={onApprovalResolved}
+          embedded
+        />
+      </div>
+    );
+  }
 
   return (
-    <div ref={rootRef} className="relative min-w-0">
+    <div className="relative min-w-0">
       <button
         type="button"
         onClick={onToggle}
@@ -498,9 +643,9 @@ function TraceItem({
             {preview}
           </span>
         )}
-        {event.status && (
+        {statusText && (
           <span className={cn("shrink-0 text-[10px]", statusTone)}>
-            {statusLabel(event.status)}
+            {statusText}
           </span>
         )}
         <ChevronRight
@@ -510,23 +655,94 @@ function TraceItem({
           )}
         />
       </button>
-      {active && (
-        <PopoverPanel placement="down" className="w-[min(42rem,calc(100vw-2rem))] max-h-[min(32rem,calc(100vh-2rem))] overflow-auto">
-          <TraceEventInspector event={event} />
-        </PopoverPanel>
-      )}
+      {active &&
+        createPortal(
+          <FloatingPanel
+            title={event.kind === "approval" ? "Approval needed" : displayTitle}
+            icon={event.kind === "approval" ? ShieldCheck : Icon}
+            onClose={onToggle}
+            storageKey={
+              event.kind === "approval"
+                ? "cheers.float.trace-approval"
+                : "cheers.float.trace-inspector"
+            }
+            className={
+              event.kind === "approval"
+                ? "w-[min(28rem,94vw)] h-auto max-h-[min(36rem,calc(100dvh-10rem))]"
+                : "w-[min(42rem,94vw)] h-[min(32rem,calc(100dvh-10rem))]"
+            }
+            defaultPosClassName="top-24 right-6"
+            bodyClassName="!p-0"
+          >
+            <div className="p-3">
+              {pendingApproval ? (
+                <PermissionCard
+                  message={pendingApproval}
+                  channelId={channelId}
+                  currentUserId={currentUserId}
+                  onResolved={onApprovalResolved}
+                />
+              ) : event.kind === "approval" ? (
+                <ApprovalEventCard event={event} />
+              ) : (
+                <TraceEventInspector event={event} />
+              )}
+            </div>
+          </FloatingPanel>,
+          document.body,
+        )}
     </div>
   );
 }
 
+/** Build a timeline row for a pending permission that has not landed in message_traces yet. */
+function syntheticApprovalEvent(message: Message, anchorMsgId: string): TraceEvent {
+  const data = (message.content_data ?? {}) as PermissionContentData;
+  return {
+    v: 1,
+    id: `pending:${message.msg_id}`,
+    msg_id: anchorMsgId,
+    channel_id: null,
+    trace_seq: null,
+    kind: "approval",
+    phase: "approval",
+    status: "pending",
+    title: data.title && data.title !== "ACP permission request" ? data.title : "Approval needed",
+    message: data.body ?? data.tool?.command ?? null,
+    data: { tool: data.tool ?? null },
+    request_id: data.request_id ?? null,
+    tool_call_id: data.tool?.tool_call_id ?? null,
+    operation_kind: "approval",
+    operation_id: data.request_id ?? message.msg_id,
+    is_terminal: false,
+    approval_kind: "requested",
+    decision: null,
+    option_id: null,
+    created_at: message.created_at ?? new Date().toISOString(),
+  };
+}
+
 /**
- * Collapsible "agent steps" panel for a completed bot turn. Lazily fetches the
- * durable trace timeline (docs/arch/TRACE_PERSISTENCE.md) on first expand and
- * renders each persisted step — including approval events interleaved inline.
- * Self-hides when a turn has no recorded steps.
+ * Collapsible "agent steps" panel for a bot turn. Lazily fetches the durable
+ * trace timeline (docs/arch/TRACE_PERSISTENCE.md) on first expand and renders
+ * each step — including approval events interleaved inline. Pending approvals
+ * stay as normal timeline rows; their detail is the interactive PermissionCard,
+ * auto-opened until the user decides.
+ * Self-hides when a turn has no recorded steps and no pending approvals.
  */
-export function BotTracePanel({ channelId, msgId, liveEvents = [] }: Props) {
-  const [expanded, setExpanded] = useState(false);
+export function BotTracePanel({
+  channelId,
+  msgId,
+  liveEvents = [],
+  pendingApprovals = [],
+  currentUserId,
+}: Props) {
+  const [expanded, setExpanded] = useState(
+    pendingApprovals.some(
+      (message) =>
+        !(message.content_data as PermissionContentData | null | undefined)?.resolved,
+    ),
+  );
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
   const [events, setEvents] = useState<TraceEvent[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -535,6 +751,55 @@ export function BotTracePanel({ channelId, msgId, liveEvents = [] }: Props) {
     () => coalesceTraceEvents(events ?? [], liveEvents),
     [events, liveEvents],
   );
+
+  const approvalByRequestId = useMemo(() => {
+    const map = new Map<string, Message>();
+    for (const message of pendingApprovals) {
+      const requestId = (message.content_data as PermissionContentData | null | undefined)
+        ?.request_id;
+      if (requestId) map.set(requestId, message);
+    }
+    return map;
+  }, [pendingApprovals]);
+
+  const actionableApprovals = useMemo(
+    () =>
+      pendingApprovals.filter(
+        (message) =>
+          !(message.content_data as PermissionContentData | null | undefined)?.resolved,
+      ),
+    [pendingApprovals],
+  );
+  const hasActionable = actionableApprovals.length > 0;
+
+  const renderedApprovalIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const event of displayedEvents) {
+      if (event.kind !== "approval" || !event.request_id) continue;
+      const approval = approvalByRequestId.get(event.request_id);
+      if (approval) ids.add(approval.msg_id);
+    }
+    return ids;
+  }, [displayedEvents, approvalByRequestId]);
+
+  const orphanPending = useMemo(
+    () =>
+      actionableApprovals.filter((message) => !renderedApprovalIds.has(message.msg_id)),
+    [actionableApprovals, renderedApprovalIds],
+  );
+
+  const timeline = useMemo(() => {
+    if (orphanPending.length === 0) return displayedEvents;
+    return [
+      ...displayedEvents,
+      ...orphanPending.map((message) => syntheticApprovalEvent(message, msgId)),
+    ];
+  }, [displayedEvents, orphanPending, msgId]);
+
+  // Keep Agent steps open while something still needs a decision.
+  useEffect(() => {
+    if (hasActionable) setExpanded(true);
+  }, [hasActionable]);
 
   async function load() {
     if (loading) return;
@@ -551,24 +816,33 @@ export function BotTracePanel({ channelId, msgId, liveEvents = [] }: Props) {
     }
   }
 
-  function toggle() {
-    const next = !expanded;
-    setExpanded(next);
-    if (next && events === null && !loading) void load();
+  // Fetch on open (user toggle or auto-open for a pending approval).
+  useEffect(() => {
+    if (!expanded || events !== null || loading) return;
+    void load();
+    // Intentionally keyed on expand/cache only — load() closes over the latest ids.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, events, loading, channelId, msgId]);
+
+  // Once we've loaded and found nothing (and nothing pending), drop the toggle.
+  if (
+    events !== null &&
+    timeline.length === 0 &&
+    !hasActionable &&
+    !expanded
+  ) {
+    return null;
   }
 
-  // Once we've loaded and found nothing, drop the toggle entirely (no noise).
-  if (events !== null && displayedEvents.length === 0 && !expanded) return null;
-
-  // Approvals resolved during this turn — surfaced as a shield badge so the reveal
-  // doubles as "review this turn's approvals" (their inline cards are hidden once resolved).
-  const approvalCount = displayedEvents.filter((e) => e.kind === "approval").length;
+  const approvalCount = timeline.filter((e) => e.kind === "approval").length;
+  const pendingCount = actionableApprovals.length;
+  const hasRows = timeline.length > 0;
 
   return (
-    <div className="mt-1 max-w-md">
+    <div className={cn("mt-1", hasActionable ? "max-w-lg" : "max-w-md")}>
       <button
         type="button"
-        onClick={toggle}
+        onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
         title={expanded ? "Hide agent steps" : "Show agent steps"}
         className="flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
@@ -580,37 +854,52 @@ export function BotTracePanel({ channelId, msgId, liveEvents = [] }: Props) {
         )}
         <span>
           Agent steps
-          {events !== null || displayedEvents.length > 0
-            ? ` · ${displayedEvents.length}`
+          {events !== null || timeline.length > 0 || hasActionable
+            ? ` · ${timeline.length}`
             : ""}
         </span>
-        {approvalCount > 0 && (
+        {pendingCount > 0 ? (
+          <span className="inline-flex items-center gap-0.5 text-amber-400/80">
+            <ShieldCheck className="w-3 h-3" />
+            {pendingCount} pending
+          </span>
+        ) : approvalCount > 0 ? (
           <span className="inline-flex items-center gap-0.5 text-zinc-400">
             <ShieldCheck className="w-3 h-3" />
             {approvalCount}
           </span>
-        )}
+        ) : null}
         {loading && <Loader2 className="w-3 h-3 animate-spin" />}
       </button>
 
-      {expanded && displayedEvents.length > 0 && (
+      {expanded && hasRows && (
         <div className="mt-2 flex flex-col gap-1">
-          {displayedEvents.map((event) => (
-            <TraceItem
-              key={event.id}
-              event={event}
-              active={activeEventId === event.id}
-              onToggle={() =>
-                setActiveEventId((current) =>
-                  current === event.id ? null : event.id,
-                )
-              }
-            />
-          ))}
+          {timeline.map((event) => {
+            const approval =
+              event.kind === "approval" && event.request_id
+                ? approvalByRequestId.get(event.request_id)
+                : undefined;
+            return (
+              <TraceItem
+                key={event.id}
+                event={event}
+                active={activeEventId === event.id}
+                pendingApproval={approval}
+                channelId={channelId}
+                currentUserId={currentUserId}
+                onToggle={() =>
+                  setActiveEventId((current) =>
+                    current === event.id ? null : event.id,
+                  )
+                }
+                onApprovalResolved={() => setActiveEventId(null)}
+              />
+            );
+          })}
         </div>
       )}
 
-      {expanded && events && displayedEvents.length === 0 && !loading && !error && (
+      {expanded && events && !hasRows && !loading && !error && (
         <div className="mt-1 px-2.5 text-[11px] text-zinc-400">
           No steps recorded.
         </div>

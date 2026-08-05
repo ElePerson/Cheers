@@ -44,6 +44,8 @@ interface Props {
   repliedTo?: Message | null;
   /** Display name resolver for the reply-quote header. */
   nameOf?: (senderId: string) => string;
+  /** Pending permission cards anchored to this bot turn (rendered in Agent steps). */
+  pendingApprovals?: Message[];
 }
 
 const SYSTEM_TYPES = new Set([
@@ -221,6 +223,7 @@ export const MessageItem = memo(function MessageItem({
   selected: selectedProp,
   repliedTo,
   nameOf,
+  pendingApprovals,
 }: Props) {
   if (message.is_deleted) {
     return (
@@ -235,9 +238,8 @@ export const MessageItem = memo(function MessageItem({
   }
 
   if (message.msg_type === "permission") {
-    // Render inline in the bot's column (indented past the avatar gutter) so the
-    // approval box reads as part of the bot's reply / trace rather than a
-    // detached centered card.
+    // Orphan permission cards (no source_msg_id) stay as their own row.
+    // Anchored approvals render inside the source bot turn's Agent steps.
     return (
       <div className="flex items-start gap-3 px-4 py-0.5">
         <div className="w-9 flex-shrink-0" />
@@ -278,6 +280,24 @@ export const MessageItem = memo(function MessageItem({
   const isBot = message.sender_type === "bot";
 
   const active = message._streaming || message.is_partial;
+  // Agent steps: always after a finished bot turn; also during an active turn
+  // when there are live events or a pending approval folded into this message.
+  const showTrace =
+    isBot &&
+    !!channelId &&
+    (!active ||
+      (pendingApprovals?.length ?? 0) > 0 ||
+      (message._trace_events?.length ?? 0) > 0);
+  const tracePanel = showTrace ? (
+    <BotTracePanel
+      key={`trace-${message.msg_id}`}
+      channelId={channelId!}
+      msgId={message.msg_id}
+      liveEvents={message._trace_events}
+      pendingApprovals={pendingApprovals}
+      currentUserId={currentUserId}
+    />
+  ) : null;
   // A failed/sending placeholder isn't a real server message — no reply/forward/select.
   const showActions = actions && !active && !selectMode && !message._status;
   const selectable = Boolean(actions && selectMode);
@@ -353,14 +373,7 @@ export const MessageItem = memo(function MessageItem({
           {message._status && (
             <SendStatus message={message} onRetry={actions?.onRetry} />
           )}
-          {isBot && channelId && !message._streaming && !message.is_partial && (
-            <BotTracePanel
-              key={`trace-${message.msg_id}`}
-              channelId={channelId}
-              msgId={message.msg_id}
-              liveEvents={message._trace_events}
-            />
-          )}
+          {tracePanel}
         </div>
         {showActions && <ActionBar message={message} actions={actions} anchorRef={rowRef} visible={actionsVisible} onEnter={showActionBar} onLeave={hideActionBar} />}
       </div>
@@ -437,14 +450,7 @@ export const MessageItem = memo(function MessageItem({
         {message._status && (
           <SendStatus message={message} onRetry={actions?.onRetry} />
         )}
-        {isBot && channelId && !message._streaming && !message.is_partial && (
-          <BotTracePanel
-            key={`trace-${message.msg_id}`}
-            channelId={channelId}
-            msgId={message.msg_id}
-            liveEvents={message._trace_events}
-          />
-        )}
+        {tracePanel}
       </div>
       {showActions && <ActionBar message={message} actions={actions} reversed={isOwn} anchorRef={rowRef} visible={actionsVisible} onEnter={showActionBar} onLeave={hideActionBar} />}
     </div>
