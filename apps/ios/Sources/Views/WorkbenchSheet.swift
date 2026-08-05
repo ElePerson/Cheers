@@ -133,11 +133,17 @@ struct WorkbenchSheet: View {
                     compactLayout
                 }
             }
-            .navigationTitle("Workbench")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .principal) {
+                    if sceneIds.isEmpty {
+                        Text("Workbench").font(.headline)
+                    } else {
+                        sceneTitlePicker
+                    }
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { showRaw = true } label: {
@@ -182,7 +188,6 @@ struct WorkbenchSheet: View {
 
     private var compactLayout: some View {
         VStack(spacing: 0) {
-            scenePickerBar
             itemStrip
             documentContent
         }
@@ -190,34 +195,27 @@ struct WorkbenchSheet: View {
 
     private var regularLayout: some View {
         VStack(spacing: 0) {
-            scenePickerBar
             itemStrip
             documentContent
         }
     }
 
-    private var scenePickerBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: WorkbenchSceneStyle.resolve(activeScene).icon)
-                .foregroundStyle(WorkbenchSceneStyle.resolve(activeScene).tint)
-                .frame(width: 28)
-            Picker("Scene", selection: Binding(
-                get: { activeScene },
-                set: { activeScene = $0 }
-            )) {
-                ForEach(sceneIds, id: \.self) { id in
-                    Text(sceneTitle(id)).tag(id)
-                }
+    /// Active scene switcher in the navigation bar principal slot (replaces the
+    /// static "Workbench" title). Menu style matches HIG title-menu patterns.
+    private var sceneTitlePicker: some View {
+        Picker("Scene", selection: Binding(
+            get: { activeScene },
+            set: { activeScene = $0 }
+        )) {
+            ForEach(sceneIds, id: \.self) { id in
+                Label(sceneTitle(id), systemImage: WorkbenchSceneStyle.resolve(id).icon)
+                    .tag(id)
             }
-            .pickerStyle(.menu)
-            .font(.headline)
-            .accessibilityLabel("Select workbench scene")
-            Spacer(minLength: 0)
         }
-        .frame(minHeight: 48)
-        .padding(.horizontal, 12)
-        .background(Theme.bgRaised)
-        .overlay(alignment: .bottom) { Divider() }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .font(.headline)
+        .accessibilityLabel("Select workbench scene")
     }
 
     private var sceneHeader: some View {
