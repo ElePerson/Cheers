@@ -154,7 +154,7 @@ final class PushRouter: NSObject {
 
     /// APNs delivers custom keys as property-list types; `null` becomes NSNull
     /// and UUID-looking values are usually String — normalize carefully.
-    static func cheersPayload(from userInfo: [AnyHashable: Any]) -> [String: Any] {
+    nonisolated static func cheersPayload(from userInfo: [AnyHashable: Any]) -> [String: Any] {
         if let cheers = userInfo["cheers"] as? [String: Any] {
             return cheers
         }
@@ -165,7 +165,7 @@ final class PushRouter: NSObject {
         }
     }
 
-    static func stringValue(_ raw: Any?) -> String? {
+    nonisolated static func stringValue(_ raw: Any?) -> String? {
         switch raw {
         case let s as String:
             let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -177,7 +177,7 @@ final class PushRouter: NSObject {
         }
     }
 
-    static func destination(from cheers: [String: Any]) -> PushDestination? {
+    nonisolated static func destination(from cheers: [String: Any]) -> PushDestination? {
         guard let channelId = stringValue(cheers["channel_id"]) else { return nil }
         let type = stringValue(cheers["type"])
         if type == "permission_request", let requestId = stringValue(cheers["request_id"]) {
@@ -201,8 +201,11 @@ extension PushRouter: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
+        // Parse off the main actor — userInfo is a plain plist dictionary and
+        // must not hop through MainActor just to read strings (avoids re-entrancy
+        // during notification cold-start).
         let info = response.notification.request.content.userInfo
-        let cheers = await MainActor.run { PushRouter.cheersPayload(from: info) }
+        let cheers = PushRouter.cheersPayload(from: info)
         let action = response.actionIdentifier
         await MainActor.run {
             handleResponse(action: action, cheers: cheers)
@@ -261,16 +264,18 @@ extension PushRouter: UNUserNotificationCenterDelegate {
 
 /// UIKit delegate adaptor: receives the APNs registration callbacks and
 /// bootstraps notification categories before the first frame.
+///
+/// Marked `@MainActor` so launch can call `PushRouter.shared` safely. Do **not**
+/// use `MainActor.assumeIsolated` here — on the notification cold-start path
+/// that traps even though the call is on the main thread, which is exactly the
+/// "tap notification → crash" failure mode.
+@MainActor
 final class PushAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        // Must run synchronously on the main thread before returning — an async
-        // Task can lose the cold-start notification response / hide actions.
-        MainActor.assumeIsolated {
-            PushRouter.shared.bootstrap()
-        }
+        PushRouter.shared.bootstrap()
         return true
     }
 
@@ -278,9 +283,7 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-        Task { @MainActor in
-            PushRouter.shared.uploadDeviceToken(deviceToken)
-        }
+        PushRouter.shared.uploadDeviceToken(deviceToken)
     }
 
     func application(
