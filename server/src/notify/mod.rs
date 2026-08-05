@@ -7,11 +7,17 @@
 //! message bodies or command contents; the app fetches full content on tap).
 //!
 //! Taxonomy (§5.3): permission_request always pushes (time-sensitive, with
-//! Approve/Deny action ids so the notification is actionable); DMs, mentions
-//! and invites push at default priority; regular channel traffic never pushes.
+//! Approve/Deny action ids so the notification is actionable); DMs, mentions,
+//! bot-reply (user-triggered agent turn finished), and invites push at default
+//! priority; regular channel traffic never pushes.
 //! The server always sends — a foregrounded client suppresses display itself
 //! (server-side "socket open" suppression would let a desktop tab eat the
 //! phone's approval push).
+//!
+//! BotReply is a **push kind only** — not a DB `msg_type` and not ordinary
+//! `reply_to` semantics. Treating every threaded reply as notifiable would
+//! spam human↔human replies; a dedicated kind fires only when the agent turn
+//! the user triggered finalizes.
 
 pub mod apns;
 pub mod relay;
@@ -84,6 +90,14 @@ pub enum PushKind {
         sender_name: String,
         channel_name: String,
     },
+    /// A bot turn the user triggered just finalized (stream `done`). Push
+    /// taxonomy only — not a chat `msg_type`. Skipped when that user was also
+    /// @-mentioned on the same message (Mention already covers them).
+    BotReply {
+        channel_id: Uuid,
+        bot_name: String,
+        channel_name: String,
+    },
     /// A workspace/channel invite (mirrors the in-app notification inbox).
     Invite { title: String },
 }
@@ -91,9 +105,9 @@ pub enum PushKind {
 impl PushKind {
     fn channel_id_for_mute(&self) -> Option<Uuid> {
         match self {
-            Self::DirectMessage { channel_id, .. } | Self::Mention { channel_id, .. } => {
-                Some(*channel_id)
-            }
+            Self::DirectMessage { channel_id, .. }
+            | Self::Mention { channel_id, .. }
+            | Self::BotReply { channel_id, .. } => Some(*channel_id),
             Self::PermissionRequest { .. } | Self::Invite { .. } => None,
         }
     }
@@ -117,6 +131,17 @@ impl PushKind {
                 format!("#{channel_name}"),
                 format!("{sender_name} mentioned you"),
             ),
+            Self::BotReply {
+                bot_name,
+                channel_name,
+                ..
+            } => {
+                if channel_name.is_empty() {
+                    (bot_name.clone(), "Replied".into())
+                } else {
+                    (format!("#{channel_name}"), format!("{bot_name} replied"))
+                }
+            }
             Self::Invite { title } => ("Invitation".into(), format!("You're invited to {title}")),
         }
     }
@@ -129,6 +154,7 @@ impl PushKind {
             Self::PermissionRequest { request_id, .. } => format!("perm:{request_id}"),
             Self::DirectMessage { channel_id, .. } => format!("dm:{channel_id}"),
             Self::Mention { channel_id, .. } => format!("mention:{channel_id}"),
+            Self::BotReply { channel_id, .. } => format!("bot-reply:{channel_id}"),
             Self::Invite { title } => format!("invite:{title}"),
         }
     }
@@ -146,18 +172,31 @@ impl PushKind {
                 approve_option_id,
                 reject_option_id,
                 ..
-            } => json!({
-                "type": "permission_request",
-                "channel_id": channel_id,
-                "request_id": request_id,
-                "approve_option_id": approve_option_id,
-                "reject_option_id": reject_option_id,
-            }),
+            } => {
+                // Omit null option ids — iOS userInfo turns JSON null into
+                // NSNull, which breaks `as? String` and silently disables
+                // Approve/Deny handlers.
+                let mut payload = json!({
+                    "type": "permission_request",
+                    "channel_id": channel_id,
+                    "request_id": request_id,
+                });
+                if let Some(id) = approve_option_id {
+                    payload["approve_option_id"] = json!(id);
+                }
+                if let Some(id) = reject_option_id {
+                    payload["reject_option_id"] = json!(id);
+                }
+                payload
+            }
             Self::DirectMessage { channel_id, .. } => {
                 json!({ "type": "dm", "channel_id": channel_id })
             }
             Self::Mention { channel_id, .. } => {
                 json!({ "type": "mention", "channel_id": channel_id })
+            }
+            Self::BotReply { channel_id, .. } => {
+                json!({ "type": "bot_reply", "channel_id": channel_id })
             }
             Self::Invite { .. } => json!({ "type": "invite" }),
         }
@@ -176,8 +215,19 @@ impl PushKind {
         match self {
             Self::PermissionRequest { channel_id, .. }
             | Self::DirectMessage { channel_id, .. }
-            | Self::Mention { channel_id, .. } => Some(channel_id.to_string()),
+            | Self::Mention { channel_id, .. }
+            | Self::BotReply { channel_id, .. } => Some(channel_id.to_string()),
             Self::Invite { .. } => None,
+        }
+    }
+
+    fn kind_label(&self) -> &'static str {
+        match self {
+            Self::PermissionRequest { .. } => "permission_request",
+            Self::DirectMessage { .. } => "dm",
+            Self::Mention { .. } => "mention",
+            Self::BotReply { .. } => "bot_reply",
+            Self::Invite { .. } => "invite",
         }
     }
 }
@@ -191,13 +241,16 @@ pub fn push_to_user(state: &AppState, user_id: Uuid, kind: PushKind) {
     };
     let db = state.db.clone();
     tokio::spawn(async move {
+        let kind_label = kind.kind_label();
         if let Some(channel_id) = kind.channel_id_for_mute() {
             if is_channel_muted(&db, user_id, channel_id).await {
+                tracing::debug!(%user_id, %channel_id, kind = kind_label, "apns skipped: channel muted");
                 return;
             }
         }
         let tokens = device_tokens(&db, user_id).await;
         if tokens.is_empty() {
+            tracing::debug!(%user_id, kind = kind_label, "apns skipped: no device tokens");
             return;
         }
         let (title, body) = kind.alert();
@@ -205,19 +258,153 @@ pub fn push_to_user(state: &AppState, user_id: Uuid, kind: PushKind) {
         let collapse = kind.collapse_id();
         for token in tokens {
             match transport.send(&token, &payload, &collapse).await {
-                Ok(()) => {}
+                Ok(()) => {
+                    tracing::info!(%user_id, kind = kind_label, %collapse, "apns push sent");
+                }
                 Err(apns::ApnsError::TokenDead) => {
                     // Prune tokens Apple reports as gone (uninstall / expiry).
+                    tracing::info!(%user_id, kind = kind_label, "apns token dead; pruning");
                     let _ = sqlx::query("DELETE FROM user_devices WHERE push_token = $1")
                         .bind(&token)
                         .execute(&db)
                         .await;
                 }
                 Err(err) => {
-                    tracing::warn!(%user_id, error = %err, "apns push failed");
+                    tracing::warn!(%user_id, kind = kind_label, error = %err, "apns push failed");
                 }
             }
         }
+    });
+}
+
+/// APNs for humans @-mentioned by a bot (parity with REST `push_message_fanout`).
+/// In-app WS / Web Push remain the caller's responsibility — this only covers
+/// the OS push path that bot mention hooks historically skipped.
+pub fn push_bot_mentions_apns(
+    state: &AppState,
+    channel_id: Uuid,
+    bot_id: Uuid,
+    mentioned_user_ids: Vec<Uuid>,
+) {
+    if mentioned_user_ids.is_empty() || state.push.is_none() {
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        let channel_name: String =
+            sqlx::query_scalar("SELECT COALESCE(name, '') FROM channels WHERE channel_id = $1")
+                .bind(channel_id.to_string())
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+        let sender_name: String = sqlx::query_scalar(
+            "SELECT COALESCE(display_name, username) FROM bot_accounts WHERE bot_id = $1",
+        )
+        .bind(bot_id.to_string())
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "Bot".into());
+        for uid in mentioned_user_ids {
+            push_to_user(
+                &state,
+                uid,
+                PushKind::Mention {
+                    channel_id,
+                    sender_name: sender_name.clone(),
+                    channel_name: channel_name.clone(),
+                },
+            );
+        }
+    });
+}
+
+/// Notify the human who triggered a bot turn when that turn finalizes.
+/// No-op when the trigger was another bot (bot@bot hop) or the trigger user
+/// was already @-mentioned on `reply_msg_id` (Mention wins).
+pub fn push_bot_reply_apns(
+    state: &AppState,
+    channel_id: Uuid,
+    bot_id: Uuid,
+    trigger_msg_id: Uuid,
+    reply_msg_id: Uuid,
+) {
+    if state.push.is_none() {
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        #[derive(Debug, sqlx::FromRow)]
+        struct TriggerRow {
+            sender_type: String,
+            sender_id: Option<String>,
+        }
+        let Ok(Some(trigger)) = sqlx::query_as::<_, TriggerRow>(
+            "SELECT sender_type, sender_id FROM messages WHERE msg_id = $1",
+        )
+        .bind(trigger_msg_id.to_string())
+        .fetch_optional(&state.db)
+        .await
+        else {
+            return;
+        };
+        if trigger.sender_type != "user" {
+            return;
+        }
+        let Some(user_id) = trigger
+            .sender_id
+            .as_deref()
+            .and_then(|s| s.parse::<Uuid>().ok())
+        else {
+            return;
+        };
+
+        // Mention already notifies this user for the same reply — don't double-push.
+        let already_mentioned: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM message_mentions
+                WHERE msg_id = $1 AND member_type = 'user' AND member_id = $2
+             )",
+        )
+        .bind(reply_msg_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+        if already_mentioned {
+            return;
+        }
+
+        let channel_name: String =
+            sqlx::query_scalar("SELECT COALESCE(name, '') FROM channels WHERE channel_id = $1")
+                .bind(channel_id.to_string())
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+        let bot_name: String = sqlx::query_scalar(
+            "SELECT COALESCE(display_name, username) FROM bot_accounts WHERE bot_id = $1",
+        )
+        .bind(bot_id.to_string())
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "Bot".into());
+
+        push_to_user(
+            &state,
+            user_id,
+            PushKind::BotReply {
+                channel_id,
+                bot_name,
+                channel_name,
+            },
+        );
     });
 }
 
@@ -350,24 +537,49 @@ pub fn push_message_fanout(
     });
 }
 
-/// Pull the first allow/reject option ids out of a permission card's options
-/// array so the push notification's Approve/Deny actions can resolve directly.
+/// Pull allow/reject option ids out of a permission card's options array so the
+/// iOS notification's Approve once / Deny actions can resolve directly.
+/// Prefers `allow_once` (matches the fixed iOS action title) over other allow*.
 pub fn approval_option_ids(options: &Value) -> (Option<String>, Option<String>) {
     let list = options.as_array().cloned().unwrap_or_default();
-    let find = |prefix: &str| {
+    let option_id = |o: &Value| {
+        o.get("option_id")
+            .or_else(|| o.get("optionId"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    let find_kind = |prefix: &str| {
         list.iter().find_map(|o| {
             let kind = o.get("kind").and_then(Value::as_str).unwrap_or_default();
             if kind.starts_with(prefix) {
-                o.get("option_id")
-                    .or_else(|| o.get("optionId"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
+                option_id(o)
             } else {
                 None
             }
         })
     };
-    (find("allow"), find("reject"))
+    let find_exact_kind = |exact: &str| {
+        list.iter().find_map(|o| {
+            let kind = o.get("kind").and_then(Value::as_str).unwrap_or_default();
+            if kind == exact {
+                option_id(o)
+            } else {
+                None
+            }
+        })
+    };
+    // Prefer option_id == allow_once when kind is missing but ids follow ACP defaults.
+    let find_exact_id = |exact: &str| {
+        list.iter().find_map(|o| {
+            let id = option_id(o)?;
+            (id == exact).then_some(id)
+        })
+    };
+    let approve = find_exact_kind("allow_once")
+        .or_else(|| find_exact_id("allow_once"))
+        .or_else(|| find_kind("allow"));
+    let reject = find_kind("reject").or_else(|| find_exact_id("reject_once"));
+    (approve, reject)
 }
 
 async fn device_tokens(db: &PgPool, user_id: Uuid) -> Vec<String> {
@@ -381,4 +593,80 @@ async fn device_tokens(db: &PgPool, user_id: Uuid) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bot_reply_alert_and_collapse() {
+        let channel_id = Uuid::new_v4();
+        let kind = PushKind::BotReply {
+            channel_id,
+            bot_name: "codex".into(),
+            channel_name: "general".into(),
+        };
+        assert_eq!(kind.alert(), ("#general".into(), "codex replied".into()));
+        assert_eq!(kind.collapse_id(), format!("bot-reply:{channel_id}"));
+        assert_eq!(kind.custom()["type"], "bot_reply");
+        assert_eq!(kind.channel_id_for_mute(), Some(channel_id));
+        assert!(!kind.is_time_sensitive());
+    }
+
+    #[test]
+    fn bot_reply_dm_style_when_channel_unnamed() {
+        let kind = PushKind::BotReply {
+            channel_id: Uuid::new_v4(),
+            bot_name: "codex".into(),
+            channel_name: String::new(),
+        };
+        assert_eq!(kind.alert(), ("codex".into(), "Replied".into()));
+    }
+
+    #[test]
+    fn mention_still_distinct_from_bot_reply() {
+        let channel_id = Uuid::new_v4();
+        let mention = PushKind::Mention {
+            channel_id,
+            sender_name: "codex".into(),
+            channel_name: "general".into(),
+        };
+        let reply = PushKind::BotReply {
+            channel_id,
+            bot_name: "codex".into(),
+            channel_name: "general".into(),
+        };
+        assert_ne!(mention.collapse_id(), reply.collapse_id());
+        assert_eq!(mention.custom()["type"], "mention");
+        assert_eq!(reply.custom()["type"], "bot_reply");
+    }
+
+    #[test]
+    fn approval_option_ids_prefer_allow_once() {
+        let options = json!([
+            {"option_id": "allow_always", "kind": "allow_always"},
+            {"option_id": "allow_once", "kind": "allow_once"},
+            {"option_id": "reject_once", "kind": "reject_once"},
+        ]);
+        let (approve, reject) = approval_option_ids(&options);
+        assert_eq!(approve.as_deref(), Some("allow_once"));
+        assert_eq!(reject.as_deref(), Some("reject_once"));
+    }
+
+    #[test]
+    fn permission_custom_omits_null_option_ids() {
+        let kind = PushKind::PermissionRequest {
+            channel_id: Uuid::new_v4(),
+            request_id: "req-1".into(),
+            bot_name: "codex".into(),
+            title: "run".into(),
+            approve_option_id: Some("allow_once".into()),
+            reject_option_id: None,
+        };
+        let custom = kind.custom();
+        assert_eq!(custom["approve_option_id"], "allow_once");
+        assert!(custom.get("reject_option_id").is_none());
+        assert_eq!(kind.category(), Some("ACP_APPROVAL"));
+    }
 }

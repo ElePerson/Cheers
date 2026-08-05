@@ -1376,6 +1376,8 @@ async fn handle_terminal_frame(
         .get("msg_id")
         .and_then(Value::as_str)
         .and_then(|raw| raw.parse::<Uuid>().ok());
+    // Peek before handle_done removes the StreamEntry.
+    let trigger_msg_id = msg_id.and_then(|mid| state.stream_registry.trigger_msg_id(mid));
 
     match handle_done(
         &state.stream_registry,
@@ -1406,6 +1408,13 @@ async fn handle_terminal_frame(
             // done frame) — same out-of-app nudge as the send/post_message paths.
             if let Some(mid) = msg_id {
                 spawn_bot_mention_pushes(state, bot.bot_id, mid);
+            }
+            // User-triggered turn complete → BotReply APNs (skipped for bot@bot
+            // triggers and when Mention already covers the same user).
+            if let (Some(mid), Some(trigger)) = (msg_id, trigger_msg_id) {
+                if let Some(cid) = channel_of_bot_message(&state.db, bot.bot_id, mid).await {
+                    crate::notify::push_bot_reply_apns(state, cid, bot.bot_id, trigger, mid);
+                }
             }
             // Turn-complete workspace freshness: the turn just finalized. If this
             // bot is workspace-capable (its connector is online), it may have
@@ -1508,6 +1517,7 @@ fn spawn_bot_mention_pushes(state: &AppState, bot_id: Uuid, msg_id: Uuid) {
             "sender_name": sender_name,
             "body": body,
         });
+        let mut mentioned_users = Vec::new();
         for row in &rows {
             let user_id: String = row.try_get("member_id").unwrap_or_default();
             // Desktop shell: user-scoped WS frame (works without VAPID).
@@ -1517,6 +1527,13 @@ fn spawn_bot_mention_pushes(state: &AppState, bot_id: Uuid, msg_id: Uuid) {
                 crate::infra::web_push::push_to_user(&state.db, sender, &user_id, payload.clone())
                     .await;
             }
+            if let Ok(uid) = user_id.parse::<Uuid>() {
+                mentioned_users.push(uid);
+            }
+        }
+        // iOS / native: APNs (parity with human REST mention fanout).
+        if let Ok(cid) = channel_id.parse::<Uuid>() {
+            crate::notify::push_bot_mentions_apns(&state, cid, bot_id, mentioned_users);
         }
     });
 }
