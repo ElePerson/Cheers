@@ -21,6 +21,8 @@ interface Props {
   approverOverride?: boolean;
   /** Called after the gateway records a decision successfully. */
   onResolved?: () => void;
+  /** Inline under an Agent steps row: always expanded, no collapse chrome. */
+  embedded?: boolean;
 }
 
 function optId(o: PermissionOption): string {
@@ -78,6 +80,7 @@ export function PermissionCard({
   currentUserId,
   approverOverride,
   onResolved,
+  embedded = false,
 }: Props) {
   const data = (message.content_data ?? {}) as PermissionContentData;
   const botId = message.sender_id;
@@ -103,10 +106,12 @@ export function PermissionCard({
   // agent ran it", when in fact the agent may never receive the decision.
   const [undelivered, setUndelivered] = useState(false);
   // Pending starts expanded (the user must review); resolved settles collapsed.
-  const [collapsed, setCollapsed] = useState(resolved);
+  // Embedded (Agent steps) stays expanded until resolved.
+  const [collapsed, setCollapsed] = useState(!!resolved);
   useEffect(() => {
     if (resolved) setCollapsed(true);
-  }, [resolved]);
+    else if (embedded) setCollapsed(false);
+  }, [resolved, embedded]);
 
   // Read-side enrichment for `git commit` approvals: fetch + inline-preview the
   // staged diff so a human can see what the commit will actually include. This is
@@ -134,7 +139,6 @@ export function PermissionCard({
       : null) ??
     (data.title && data.title !== "ACP permission request" ? data.title : null) ??
     "Approval needed";
-  const subtitle = `${message.sender_name || "The agent"} is requesting permission.`;
   const impact = data.body && data.body !== command ? data.body : null;
 
   // The patch the agent wants to write, distilled by the connector from the ACP
@@ -142,7 +146,6 @@ export function PermissionCard({
   // card — so it renders inline: on a file-edit approval it IS the thing to review.
   const agentDiff =
     typeof tool?.diff === "string" && tool.diff.trim() ? tool.diff : null;
-  const isEdit = tool?.kind === "edit";
 
   // "View staged diff" is offered only for a real `git commit` whose tool call
   // carries a working directory to diff against.
@@ -276,17 +279,18 @@ export function PermissionCard({
     );
   }
 
-  const shell =
-    "max-w-md rounded-lg bg-zinc-900/50 overflow-hidden";
+  const shell = embedded
+    ? "w-full overflow-hidden rounded-lg bg-zinc-900/60"
+    : "max-w-md overflow-hidden rounded-lg bg-zinc-900/50";
 
   // ── Pending, not an approver: quiet waiting line ──────────────────────────
   if (!amApprover) {
     return (
-      <div className={cn(shell, "flex items-center gap-3 px-3 py-2.5")}>
+      <div className={cn(shell, "flex items-center gap-3 px-3 py-2")}>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-zinc-300">{title}</p>
+          <p className="text-[11px] font-medium text-zinc-200">{title}</p>
           {command && (
-            <p className="text-xs font-mono text-zinc-400 truncate mt-0.5">
+            <p className="mt-0.5 truncate font-mono text-[11px] text-zinc-400">
               {command}
             </p>
           )}
@@ -294,7 +298,7 @@ export function PermissionCard({
         <button
           disabled={busy || requested}
           onClick={onRequestAccess}
-          className="shrink-0 h-7 px-2.5 text-xs rounded-md bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 disabled:opacity-50"
+          className="h-7 shrink-0 rounded-md bg-zinc-800 px-2.5 text-[11px] text-zinc-300 transition-colors hover:bg-zinc-700 hover:text-zinc-100 disabled:opacity-50"
         >
           {requested ? "Requested" : "Request access"}
         </button>
@@ -302,27 +306,27 @@ export function PermissionCard({
     );
   }
 
-  // ── Pending, collapsed: one-line preview ──────────────────────────────────
-  if (collapsed) {
+  // ── Pending, collapsed: one-line preview (skipped when embedded) ──────────
+  if (collapsed && !embedded) {
     return (
       <button
         onClick={() => setCollapsed(false)}
         title="Show approval details"
         className={cn(
           shell,
-          "w-full grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-left hover:bg-zinc-900/70"
+          "grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-zinc-900/70"
         )}
       >
         <div className="min-w-0">
-          <p className="text-sm font-medium text-zinc-200">{title}</p>
+          <p className="text-[11px] font-medium text-zinc-200">{title}</p>
           {command && (
-            <p className="text-xs font-mono text-zinc-400 truncate mt-0.5">
+            <p className="mt-0.5 truncate font-mono text-[11px] text-zinc-400">
               {command}
             </p>
           )}
         </div>
-        <span className="flex items-center gap-1.5 text-xs text-zinc-400 whitespace-nowrap">
-          Details <span className="text-zinc-600">⌄</span>
+        <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-zinc-400">
+          Details <span className="text-zinc-500">⌄</span>
         </span>
       </button>
     );
@@ -330,33 +334,29 @@ export function PermissionCard({
 
   // ── Pending, expanded ─────────────────────────────────────────────────────
   return (
-    <div className={shell}>
-      <header className="flex items-start justify-between gap-3 px-3 py-2.5 border-b border-zinc-800">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-zinc-200">{title}</p>
-          <p className="text-xs text-zinc-400 mt-0.5">{subtitle}</p>
-        </div>
-        <button
-          onClick={() => setCollapsed(true)}
-          aria-label="Collapse"
-          title="Collapse"
-          className="shrink-0 text-zinc-500 hover:text-zinc-300 leading-none"
-        >
-          <span className="inline-block rotate-180 text-sm">⌄</span>
-        </button>
-      </header>
+    <div className={cn(shell, "space-y-2 px-3 py-2.5")}>
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 text-[11px] font-medium text-zinc-200">{title}</p>
+        {!embedded && (
+          <button
+            onClick={() => setCollapsed(true)}
+            aria-label="Collapse"
+            title="Collapse"
+            className="shrink-0 leading-none text-zinc-500 transition-colors hover:text-zinc-300"
+          >
+            <span className="inline-block rotate-180 text-[11px]">⌄</span>
+          </button>
+        )}
+      </div>
 
       {command && (
-        <div className="px-3 py-2.5 border-b border-zinc-800 bg-zinc-950/40">
-          <p className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">
-            {isEdit ? "Changes" : "Command"}
-          </p>
-          <pre className="m-0 text-xs font-mono text-zinc-300 bg-black/40 rounded px-2 py-1.5 whitespace-pre-wrap break-all max-h-32 overflow-auto">
+        <div>
+          <pre className="m-0 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded-md bg-zinc-950 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-zinc-300">
             {command}
           </pre>
-          {impact && <p className="text-xs text-zinc-400 mt-2">{impact}</p>}
+          {impact && <p className="mt-1.5 text-[11px] text-zinc-400">{impact}</p>}
           {agentDiff && (
-            <div className="mt-2 rounded bg-black/30 overflow-hidden">
+            <div className="mt-2 overflow-hidden rounded-md bg-zinc-950">
               <DiffView diff={agentDiff} className="max-h-72" />
             </div>
           )}
@@ -366,14 +366,14 @@ export function PermissionCard({
                 type="button"
                 onClick={onToggleStagedDiff}
                 title="Preview what this commit will include (git diff --staged)"
-                className="inline-flex items-center gap-1.5 h-6 px-2 text-[11px] rounded bg-zinc-800/60 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                className="inline-flex h-6 items-center gap-1.5 rounded-md bg-zinc-800/60 px-2 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
               >
-                <span className="text-zinc-600">±</span>
+                <span className="text-zinc-500">±</span>
                 {diffOpen ? "Hide staged diff" : "View staged diff"}
-                {diffLoading && <span className="text-zinc-600">…</span>}
+                {diffLoading && <span className="text-zinc-500">…</span>}
               </button>
               {diffOpen && (
-                <div className="mt-2 rounded bg-black/30 overflow-hidden">
+                <div className="mt-2 overflow-hidden rounded-md bg-zinc-950">
                   {diffLoading ? (
                     <div className="px-3 py-3 text-[11px] text-zinc-400">
                       Loading staged diff…
@@ -395,7 +395,7 @@ export function PermissionCard({
         </div>
       )}
 
-      <div className="p-1.5 border-b border-zinc-800">
+      <div className="space-y-0.5">
         {radioOptions.map((o) => {
           const id = optId(o);
           const sel = id === selectedId;
@@ -404,44 +404,35 @@ export function PermissionCard({
               key={id}
               onClick={() => setSelectedId(id)}
               className={cn(
-                "w-full grid grid-cols-[16px_minmax(0,1fr)] gap-2.5 text-left px-2.5 py-2 rounded-md transition-colors",
+                "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
                 sel ? "bg-zinc-800/70" : "hover:bg-zinc-800/40"
               )}
             >
               <span
                 className={cn(
-                  "mt-0.5 w-3.5 h-3.5 rounded-full",
-                  sel
-                    ? "border-[4px] border-indigo-400"
-                    : "border border-zinc-600"
+                  "h-3 w-3 shrink-0 rounded-full",
+                  sel ? "bg-indigo-400" : "bg-zinc-700",
                 )}
               />
-              <span className="min-w-0">
-                <span
-                  className={cn(
-                    "block text-sm font-medium leading-tight",
-                    sel ? "text-zinc-100" : "text-zinc-300"
-                  )}
-                >
-                  {o.name || o.kind || id}
-                </span>
-                {o.description && (
-                  <span className="block text-xs text-zinc-400 mt-0.5">
-                    {o.description}
-                  </span>
+              <span
+                className={cn(
+                  "min-w-0 truncate text-[11px] font-medium",
+                  sel ? "text-zinc-100" : "text-zinc-300",
                 )}
+              >
+                {o.name || o.kind || id}
               </span>
             </button>
           );
         })}
       </div>
 
-      <footer className="flex items-center justify-end gap-2 px-2.5 py-2.5 bg-zinc-900/40">
+      <div className="flex items-center justify-end gap-2 pt-0.5">
         {rejectOption && (
           <button
             disabled={busy}
             onClick={() => onResolve(optId(rejectOption))}
-            className="h-8 px-3 text-xs font-medium rounded-md text-zinc-400 hover:text-zinc-200 disabled:opacity-50"
+            className="h-7 rounded-md px-2.5 text-[11px] font-medium text-zinc-400 transition-colors hover:text-zinc-200 disabled:opacity-50"
           >
             {rejectOption.name || "Deny"}
           </button>
@@ -449,14 +440,14 @@ export function PermissionCard({
         <button
           disabled={busy || !selectedId}
           onClick={() => onResolve(selectedId)}
-          className="h-8 px-3.5 text-xs font-semibold rounded-md bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-50"
+          className="h-7 rounded-md bg-zinc-200 px-3 text-[11px] font-semibold text-zinc-900 transition-colors hover:bg-white disabled:opacity-50"
         >
           {allowOptions.length ? "Approve" : "Confirm"}
         </button>
-      </footer>
+      </div>
 
       {error && (
-        <p role="alert" className="text-xs text-red-400 px-3 pb-2">
+        <p role="alert" className="text-[11px] text-red-400">
           {error}
         </p>
       )}

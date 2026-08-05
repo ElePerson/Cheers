@@ -31,11 +31,6 @@ function permissionSourceId(m: Message): string | null {
   return typeof source === "string" && source.length > 0 ? source : null;
 }
 
-function isPendingPermission(m: Message): boolean {
-  if (m.msg_type !== "permission") return false;
-  return !(m.content_data as PermissionContentData | null | undefined)?.resolved;
-}
-
 interface Props {
   messages: Message[];
   currentUserId?: string;
@@ -74,11 +69,11 @@ export function MessageList({
   // Transient flash for a jumped-to message (cleared after the highlight fades).
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
-  // Pending approvals keyed by the bot-turn msg_id they belong to.
-  const pendingApprovalsBySource = useMemo(() => {
+  // Approvals keyed by the bot-turn msg_id they belong to (pending + resolved).
+  const approvalsBySource = useMemo(() => {
     const map = new Map<string, Message[]>();
     for (const m of messages) {
-      if (!isPendingPermission(m)) continue;
+      if (m.msg_type !== "permission") continue;
       const source = permissionSourceId(m);
       if (!source) continue;
       const list = map.get(source);
@@ -252,7 +247,7 @@ export function MessageList({
                   msg.reply_to_msg_id ? byId.get(msg.reply_to_msg_id) ?? null : null
                 }
                 nameOf={nameOf}
-                pendingApprovals={pendingApprovalsBySource.get(msg.msg_id)}
+                pendingApprovals={approvalsBySource.get(msg.msg_id)}
               />
             </div>
           </div>
