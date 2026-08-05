@@ -144,6 +144,10 @@ export interface PermissionOption {
 export interface PermissionContentData {
   kind?: "agent_bridge_permission_request";
   request_id?: string;
+  /** Bot-turn placeholder id this approval belongs to (ActiveRun.msg_id). When
+   *  set, the channel hides the standalone permission row and renders the card
+   *  inside that turn's Agent steps panel instead. */
+  source_msg_id?: string;
   title?: string;
   body?: string;
   tool?: {
