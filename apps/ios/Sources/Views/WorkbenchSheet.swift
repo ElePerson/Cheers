@@ -201,21 +201,37 @@ struct WorkbenchSheet: View {
     }
 
     /// Active scene switcher in the navigation bar principal slot (replaces the
-    /// static "Workbench" title). Menu style matches HIG title-menu patterns.
+    /// static "Workbench" title). Explicit menu label keeps icon + title +
+    /// chevron readable in the compact nav bar (plain `.pickerStyle(.menu)`
+    /// often collapses to a bare title).
     private var sceneTitlePicker: some View {
-        Picker("Scene", selection: Binding(
-            get: { activeScene },
-            set: { activeScene = $0 }
-        )) {
+        let style = WorkbenchSceneStyle.resolve(activeScene)
+        return Menu {
             ForEach(sceneIds, id: \.self) { id in
-                Label(sceneTitle(id), systemImage: WorkbenchSceneStyle.resolve(id).icon)
-                    .tag(id)
+                Button {
+                    activeScene = id
+                } label: {
+                    Label(sceneTitle(id), systemImage: WorkbenchSceneStyle.resolve(id).icon)
+                }
             }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: style.icon)
+                    .foregroundStyle(style.tint)
+                    .imageScale(.medium)
+                Text(sceneTitle(activeScene))
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
         }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .font(.headline)
         .accessibilityLabel("Select workbench scene")
+        .accessibilityValue(sceneTitle(activeScene))
     }
 
     private var sceneHeader: some View {
