@@ -1,10 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0f172a"/>
-  <!-- Optical centering matches frontend/public/cheers-icon.svg + macOS tray-icon.svg. -->
+  <!--
+    A transparent macOS status-bar template. The source mark is shifted up and
+    scaled around the canvas centre so its visible bounds are optically centred
+    and fill the small menu-bar target without a coloured application tile.
+  -->
   <g
     transform="translate(-108 -108) scale(1.42) translate(0 -48)"
     fill="none"
-    stroke="#f8fafc"
+    stroke="#000"
     stroke-width="34"
     stroke-linecap="round"
     stroke-linejoin="round"
