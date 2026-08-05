@@ -39,7 +39,11 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit Cheers", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
     TrayIconBuilder::with_id("main-tray")
-        .icon(app.default_window_icon().cloned().expect("bundled icon"))
+        // The dock icon contains a dark rounded tile and is deliberately not a
+        // status-bar asset. A transparent template lets macOS draw this mark
+        // black on light menu bars and white on dark ones.
+        .icon(tauri::include_image!("icons/tray-icon.png"))
+        .icon_as_template(true)
         .menu(&menu)
         .show_menu_on_left_click(true)
         // Global menu listener: fires for the ids of whatever menu is currently
