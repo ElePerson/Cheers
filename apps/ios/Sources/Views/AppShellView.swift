@@ -18,14 +18,19 @@ struct AppShellView: View {
                 shell.attach(app)
                 activity.attach(app, shell: shell)
                 PushRouter.shared.configure(app: app)
-                PushRouter.shared.onNavigate = { destination in
-                    Task { await handlePushDestination(destination) }
-                }
+                // Finish first paint / list load before wiring deep links so a
+                // cold-start notification tap does not push+sheet against an
+                // empty NavigationStack in the same turn.
                 await shell.loadWorkspacesIfNeeded()
                 await convo.loadIfNeeded()
                 shell.restoreCurrentChannel(from: convo.rows)
                 activity.seed(from: convo.rows)
                 await activity.loadInvites()
+                PushRouter.shared.onNavigate = { destination in
+                    Task { @MainActor in
+                        await handlePushDestination(destination)
+                    }
+                }
             }
             .sheet(item: $shell.pushApproval) { link in
                 PushApprovalLoader(
@@ -129,6 +134,9 @@ struct AppShellView: View {
             await openChannelFromPush(channelId)
         case .approval(let channelId, let requestId):
             await openChannelFromPush(channelId)
+            // Let NavigationStack settle before presenting the approval sheet
+            // on top — simultaneous push+sheet on cold start has crashed.
+            try? await Task.sleep(for: .milliseconds(350))
             shell.pushApproval = PushApprovalDeepLink(channelId: channelId, requestId: requestId)
         }
     }
