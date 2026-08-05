@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronRight,
   ChevronDown,
@@ -22,9 +23,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { fetchMessageTrace } from "@/api/approval";
-import { PopoverPanel, usePopoverDismiss } from "@/components/ui/popover";
-import type { TraceEvent } from "@/types";
+import { FloatingPanel } from "@/components/ui/floating-panel";
+import type { Message, PermissionContentData, TraceEvent } from "@/types";
 import { DiffView } from "./DiffView";
+import { PermissionCard } from "./PermissionCard";
 import { coalesceTraceEvents } from "./traceEvent";
 import {
   parseGitStatusResult,
@@ -37,6 +39,9 @@ interface Props {
   channelId: string;
   msgId: string;
   liveEvents?: TraceEvent[];
+  /** Pending permission messages anchored to this bot turn. */
+  pendingApprovals?: Message[];
+  currentUserId?: string;
 }
 
 type EventVisual = { Icon: LucideIcon; tone: string; label: string };
@@ -462,7 +467,6 @@ function TraceItem({
   active: boolean;
   onToggle: () => void;
 }) {
-  const rootRef = useRef<HTMLDivElement>(null);
   const { Icon, tone, label } = eventMeta(event);
   const preview = eventPreview(event);
   const presentation = toolPresentationFromTrace(event);
@@ -472,13 +476,21 @@ function TraceItem({
     : presentation && GIT_EVENT_TYPES.has(presentation.event_type) && event.status === "completed"
       ? "text-emerald-400/80"
       : "text-zinc-400";
-  const close = useCallback(() => {
-    if (active) onToggle();
+
+  // Esc closes the inspector (FloatingPanel only wires Esc on its mobile sheet).
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      onToggle();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [active, onToggle]);
-  usePopoverDismiss(active, close, rootRef);
 
   return (
-    <div ref={rootRef} className="relative min-w-0">
+    <div className="relative min-w-0">
       <button
         type="button"
         onClick={onToggle}
@@ -510,23 +522,41 @@ function TraceItem({
           )}
         />
       </button>
-      {active && (
-        <PopoverPanel placement="down" className="w-[min(42rem,calc(100vw-2rem))] max-h-[min(32rem,calc(100vh-2rem))] overflow-auto">
-          <TraceEventInspector event={event} />
-        </PopoverPanel>
-      )}
+      {active &&
+        createPortal(
+          <FloatingPanel
+            title={displayTitle}
+            icon={Icon}
+            onClose={onToggle}
+            storageKey="cheers.float.trace-inspector"
+            className="w-[min(42rem,94vw)] h-[min(32rem,calc(100dvh-10rem))]"
+            defaultPosClassName="top-24 right-6"
+            bodyClassName="!p-0"
+          >
+            <TraceEventInspector event={event} />
+          </FloatingPanel>,
+          document.body,
+        )}
     </div>
   );
 }
 
 /**
- * Collapsible "agent steps" panel for a completed bot turn. Lazily fetches the
- * durable trace timeline (docs/arch/TRACE_PERSISTENCE.md) on first expand and
- * renders each persisted step — including approval events interleaved inline.
- * Self-hides when a turn has no recorded steps.
+ * Collapsible "agent steps" panel for a bot turn. Lazily fetches the durable
+ * trace timeline (docs/arch/TRACE_PERSISTENCE.md) on first expand and renders
+ * each step — including approval events interleaved inline. Pending approval
+ * cards for this turn render here (not as standalone channel rows).
+ * Self-hides when a turn has no recorded steps and no pending approvals.
  */
-export function BotTracePanel({ channelId, msgId, liveEvents = [] }: Props) {
-  const [expanded, setExpanded] = useState(false);
+export function BotTracePanel({
+  channelId,
+  msgId,
+  liveEvents = [],
+  pendingApprovals = [],
+  currentUserId,
+}: Props) {
+  const hasPending = pendingApprovals.length > 0;
+  const [expanded, setExpanded] = useState(hasPending);
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
   const [events, setEvents] = useState<TraceEvent[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -534,6 +564,37 @@ export function BotTracePanel({ channelId, msgId, liveEvents = [] }: Props) {
   const displayedEvents = useMemo(
     () => coalesceTraceEvents(events ?? [], liveEvents),
     [events, liveEvents],
+  );
+
+  // A newly arrived pending approval should open the panel so the user can act.
+  useEffect(() => {
+    if (hasPending) setExpanded(true);
+  }, [hasPending]);
+
+  const pendingByRequestId = useMemo(() => {
+    const map = new Map<string, Message>();
+    for (const message of pendingApprovals) {
+      const requestId = (message.content_data as PermissionContentData | null | undefined)
+        ?.request_id;
+      if (requestId) map.set(requestId, message);
+    }
+    return map;
+  }, [pendingApprovals]);
+
+  // Pending cards already rendered in place of a matching approval trace row.
+  const renderedPendingIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const event of displayedEvents) {
+      if (event.kind !== "approval" || !event.request_id) continue;
+      const pending = pendingByRequestId.get(event.request_id);
+      if (pending) ids.add(pending.msg_id);
+    }
+    return ids;
+  }, [displayedEvents, pendingByRequestId]);
+
+  const orphanPending = useMemo(
+    () => pendingApprovals.filter((message) => !renderedPendingIds.has(message.msg_id)),
+    [pendingApprovals, renderedPendingIds],
   );
 
   async function load() {
@@ -551,24 +612,36 @@ export function BotTracePanel({ channelId, msgId, liveEvents = [] }: Props) {
     }
   }
 
-  function toggle() {
-    const next = !expanded;
-    setExpanded(next);
-    if (next && events === null && !loading) void load();
+  // Fetch on open (user toggle or auto-open for a pending approval).
+  useEffect(() => {
+    if (!expanded || events !== null || loading) return;
+    void load();
+    // Intentionally keyed on expand/cache only — load() closes over the latest ids.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, events, loading, channelId, msgId]);
+
+  // Once we've loaded and found nothing (and nothing pending), drop the toggle.
+  if (
+    events !== null &&
+    displayedEvents.length === 0 &&
+    !hasPending &&
+    !expanded
+  ) {
+    return null;
   }
 
-  // Once we've loaded and found nothing, drop the toggle entirely (no noise).
-  if (events !== null && displayedEvents.length === 0 && !expanded) return null;
-
   // Approvals resolved during this turn — surfaced as a shield badge so the reveal
-  // doubles as "review this turn's approvals" (their inline cards are hidden once resolved).
-  const approvalCount = displayedEvents.filter((e) => e.kind === "approval").length;
+  // doubles as "review this turn's approvals".
+  const approvalCount =
+    displayedEvents.filter((e) => e.kind === "approval").length + orphanPending.length;
+  const pendingCount = pendingApprovals.length;
+  const hasRows = displayedEvents.length > 0 || orphanPending.length > 0;
 
   return (
     <div className="mt-1 max-w-md">
       <button
         type="button"
-        onClick={toggle}
+        onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
         title={expanded ? "Hide agent steps" : "Show agent steps"}
         className="flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
@@ -580,37 +653,68 @@ export function BotTracePanel({ channelId, msgId, liveEvents = [] }: Props) {
         )}
         <span>
           Agent steps
-          {events !== null || displayedEvents.length > 0
-            ? ` · ${displayedEvents.length}`
+          {events !== null || displayedEvents.length > 0 || hasPending
+            ? ` · ${displayedEvents.length + orphanPending.length}`
             : ""}
         </span>
-        {approvalCount > 0 && (
+        {pendingCount > 0 ? (
+          <span className="inline-flex items-center gap-0.5 text-amber-400/80">
+            <ShieldCheck className="w-3 h-3" />
+            {pendingCount} pending
+          </span>
+        ) : approvalCount > 0 ? (
           <span className="inline-flex items-center gap-0.5 text-zinc-400">
             <ShieldCheck className="w-3 h-3" />
             {approvalCount}
           </span>
-        )}
+        ) : null}
         {loading && <Loader2 className="w-3 h-3 animate-spin" />}
       </button>
 
-      {expanded && displayedEvents.length > 0 && (
+      {expanded && hasRows && (
         <div className="mt-2 flex flex-col gap-1">
-          {displayedEvents.map((event) => (
-            <TraceItem
-              key={event.id}
-              event={event}
-              active={activeEventId === event.id}
-              onToggle={() =>
-                setActiveEventId((current) =>
-                  current === event.id ? null : event.id,
-                )
-              }
-            />
+          {displayedEvents.map((event) => {
+            const pending =
+              event.kind === "approval" && event.request_id
+                ? pendingByRequestId.get(event.request_id)
+                : undefined;
+            if (pending) {
+              return (
+                <div key={event.id} className="py-0.5">
+                  <PermissionCard
+                    message={pending}
+                    channelId={channelId}
+                    currentUserId={currentUserId}
+                  />
+                </div>
+              );
+            }
+            return (
+              <TraceItem
+                key={event.id}
+                event={event}
+                active={activeEventId === event.id}
+                onToggle={() =>
+                  setActiveEventId((current) =>
+                    current === event.id ? null : event.id,
+                  )
+                }
+              />
+            );
+          })}
+          {orphanPending.map((message) => (
+            <div key={message.msg_id} className="py-0.5">
+              <PermissionCard
+                message={message}
+                channelId={channelId}
+                currentUserId={currentUserId}
+              />
+            </div>
           ))}
         </div>
       )}
 
-      {expanded && events && displayedEvents.length === 0 && !loading && !error && (
+      {expanded && events && !hasRows && !loading && !error && (
         <div className="mt-1 px-2.5 text-[11px] text-zinc-400">
           No steps recorded.
         </div>

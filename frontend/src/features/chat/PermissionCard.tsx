@@ -65,10 +65,12 @@ function previewRawInput(raw: unknown): string | null {
  * Interactive ACP approval box (docs/arch/ACP_APPROVAL_FLOW.md).
  *
  * Design (mockup: AgentNexus/docs/mockups/approve-menu.html): a quiet,
- * trace-styled menu rendered inline with the bot's reply — command-first, radio
- * options, minimal footer. While pending it shows expanded (or a one-line
- * collapsed preview); once resolved it shrinks into a single trace-style line so
- * the decision settles back into the bot's progress timeline.
+ * trace-styled menu — command-first, radio options, minimal footer. Anchored
+ * cards render inside the bot turn's Agent steps (BotTracePanel); only orphans
+ * without `source_msg_id` stay as their own channel row. While pending it shows
+ * expanded (or a one-line collapsed preview); once resolved it shrinks into a
+ * single trace-style line (or disappears from the channel when folded into the
+ * durable approval trace row).
  */
 export function PermissionCard({
   message,

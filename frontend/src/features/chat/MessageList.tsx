@@ -14,15 +14,26 @@ const ROW_CONTENT_VISIBILITY: CSSProperties = {
   containIntrinsicSize: "auto 80px",
 };
 
-// A RESOLVED approval no longer needs its own line in the channel — the decision is
-// persisted in the bot turn's trace and reachable via the per-message "Agent steps"
-// reveal (BotTracePanel). Pending approvals stay inline: they're actionable. Filtering
-// these out up front keeps day-label / consecutive grouping correct.
-function isResolvedPermission(m: Message): boolean {
-  return (
-    m.msg_type === "permission" &&
-    (m.content_data as PermissionContentData | null | undefined)?.resolved === true
-  );
+// Approvals anchored to a bot turn (`source_msg_id`) render inside that turn's
+// Agent steps panel — both pending (actionable PermissionCard) and resolved
+// (trace row). Orphans without an anchor stay as their own channel row.
+// Filtering these out up front keeps day-label / consecutive grouping correct.
+function isFoldedPermission(m: Message): boolean {
+  if (m.msg_type !== "permission") return false;
+  const source = (m.content_data as PermissionContentData | null | undefined)
+    ?.source_msg_id;
+  return typeof source === "string" && source.length > 0;
+}
+
+function permissionSourceId(m: Message): string | null {
+  const source = (m.content_data as PermissionContentData | null | undefined)
+    ?.source_msg_id;
+  return typeof source === "string" && source.length > 0 ? source : null;
+}
+
+function isPendingPermission(m: Message): boolean {
+  if (m.msg_type !== "permission") return false;
+  return !(m.content_data as PermissionContentData | null | undefined)?.resolved;
 }
 
 interface Props {
@@ -63,27 +74,47 @@ export function MessageList({
   // Transient flash for a jumped-to message (cleared after the highlight fades).
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
+  // Pending approvals keyed by the bot-turn msg_id they belong to.
+  const pendingApprovalsBySource = useMemo(() => {
+    const map = new Map<string, Message[]>();
+    for (const m of messages) {
+      if (!isPendingPermission(m)) continue;
+      const source = permissionSourceId(m);
+      if (!source) continue;
+      const list = map.get(source);
+      if (list) list.push(m);
+      else map.set(source, [m]);
+    }
+    return map;
+  }, [messages]);
+
   // External jump (ViewBoard history rows): scroll to the anchored row + flash.
   // ChannelView backfills older pages before focusing, so by the time focusMsg
   // lands the message is loaded — no anchor now means the row exists but isn't
-  // rendered (e.g. a resolved approval folded into the bot turn's trace).
+  // rendered (e.g. an approval folded into the bot turn's Agent steps). Prefer
+  // the source bot turn when the target is a folded permission card.
   useEffect(() => {
     if (!focusMsg) return;
+    const folded = messages.find((m) => m.msg_id === focusMsg.msgId);
+    const targetId =
+      folded && isFoldedPermission(folded)
+        ? permissionSourceId(folded) ?? focusMsg.msgId
+        : focusMsg.msgId;
     const el = containerRef.current?.querySelector(
-      `[data-msg-id="${CSS.escape(focusMsg.msgId)}"]`
+      `[data-msg-id="${CSS.escape(targetId)}"]`
     );
     if (!el) {
       toast("This message isn't shown in the channel view", { icon: "🔍", id: "jump-hidden" });
       return;
     }
     el.scrollIntoView({ block: "center", behavior: "smooth" });
-    setHighlightId(focusMsg.msgId);
+    setHighlightId(targetId);
     // content-visibility rows above the target materialize their real heights
     // during the smooth scroll (backfilled pages arrive with 80px estimates),
     // drifting the anchor — one instant corrective pass after it settles.
     const settle = setTimeout(() => {
       containerRef.current
-        ?.querySelector(`[data-msg-id="${CSS.escape(focusMsg.msgId)}"]`)
+        ?.querySelector(`[data-msg-id="${CSS.escape(targetId)}"]`)
         ?.scrollIntoView({ block: "center" });
     }, 700);
     const t = setTimeout(() => setHighlightId(null), 1800);
@@ -91,11 +122,11 @@ export function MessageList({
       clearTimeout(settle);
       clearTimeout(t);
     };
-  }, [focusMsg]);
+  }, [focusMsg, messages]);
 
-  // Resolved approvals are folded into each bot turn's trace, not shown as their own rows.
+  // Anchored approvals are folded into each bot turn's Agent steps, not shown as their own rows.
   const visible = useMemo(
-    () => messages.filter((m) => !isResolvedPermission(m)),
+    () => messages.filter((m) => !isFoldedPermission(m)),
     [messages]
   );
 
@@ -221,6 +252,7 @@ export function MessageList({
                   msg.reply_to_msg_id ? byId.get(msg.reply_to_msg_id) ?? null : null
                 }
                 nameOf={nameOf}
+                pendingApprovals={pendingApprovalsBySource.get(msg.msg_id)}
               />
             </div>
           </div>
