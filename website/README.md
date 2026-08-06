@@ -6,11 +6,15 @@ CSS and JS, so it works offline and on any static host.
 
 Pages:
 
-- `index.html` — English homepage (the default): features, feature-tour
-  screenshots from `imgs/`, the `#clients` section (Web / macOS / iOS /
-  Android), quick start, docs links.
+- `index.html` — English homepage (the default): product overview, feature
+  tour screenshots from `imgs/`, platforms, quick start, docs links.
 - `index.zh-CN.html` — Chinese mirror of the homepage; the two link to each
   other via the 中文 / EN button in the nav. Keep both in sync when editing.
+- `downloads.html` / `downloads.zh-CN.html` — Download hub (macOS desktop,
+  web app, ACP connector binaries, mobile build guides). Cursor-style layout;
+  keep both in sync.
+- `docs.html` / `docs.zh-CN.html` — Documentation hub linking to help guides,
+  deploy docs, connector/MCP/plugin pages, and architecture. Keep both in sync.
 - `plugin-dev.html` — workbench renderer plugin guide (English only for now).
 - `connector.html` / `connector.zh-CN.html` — user-facing guide to the ACP
   connector (connect your own Claude/Codex bot): install, token, config, keeping
@@ -49,8 +53,9 @@ as its build context.
 
 ## Notes
 
-- Light/dark theme follows the OS by default; the ◐ button cycles
-  auto → light → dark and remembers the choice.
+- The homepage is dark-first (Cursor-like marketing style): warm near-black
+  background, off-white type, pill CTAs. Subpages may still use their own
+  light/dark toggle where present.
 - Documentation and repo links point at `https://github.com/ElePerson/Cheers`
   — update them if the canonical repo URL changes.
 - Content is intentionally kept in sync with `README.md` (and
