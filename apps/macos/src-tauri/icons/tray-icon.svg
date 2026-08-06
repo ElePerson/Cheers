@@ -1,24 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!--
-    A transparent macOS status-bar template. The source mark is shifted up and
-    scaled around the canvas centre so its visible bounds are optically centred
-    and fill the small menu-bar target without a coloured application tile.
-  -->
   <g
-    transform="translate(-108 -108) scale(1.42) translate(0 -48)"
     fill="none"
     stroke="#000"
-    stroke-width="34"
+    stroke-width="32"
     stroke-linecap="round"
     stroke-linejoin="round"
   >
-    <path d="M172 158l84 49-78 136c-7 12-22 16-34 9l-30-17c-12-7-16-22-9-34l67-143Z"/>
-    <path d="M340 158l-84 49 78 136c7 12 22 16 34 9l30-17c12-7 16-22 9-34l-67-143Z"/>
-    <path d="M170 158l86 49"/>
-    <path d="M342 158l-86 49"/>
-    <path d="M172 357l-39 68"/>
-    <path d="M116 450h88"/>
-    <path d="M340 357l39 68"/>
-    <path d="M308 450h88"/>
+    <path d="M164 142h184l-22 132c-5 29-30 50-60 50h-20c-30 0-55-21-60-50Z"/>
+    <path d="M256 324v76"/>
+    <path d="M194 424h124"/>
   </g>
 </svg>
