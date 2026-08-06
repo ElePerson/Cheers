@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cheers · Docs</title>
+<meta name="description" content="Cheers documentation: user guides, deployment, connector setup, architecture, MCP tools, and troubleshooting." />
+<link rel="alternate" hreflang="zh-CN" href="./docs.zh-CN.html" />
+<link rel="alternate" hreflang="en" href="./docs.html" />
+<style>
+  :root {
+    --bg: #14120b; --bg-elevated: #1c1913; --bg-soft: #221f18;
+    --ink: #edecec; --ink-soft: #a8a29e; --ink-faint: #78716c;
+    --line: rgba(237, 236, 236, 0.10); --line-strong: rgba(237, 236, 236, 0.16);
+    --btn: #edecec; --btn-ink: #14120b;
+    --maxw: 1120px; --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --font: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink);
+    line-height: 1.5; font-weight: 400; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { opacity: 0.72; }
+  h1, h2, h3 { font-weight: 400; letter-spacing: -0.025em; line-height: 1.2; margin: 0; }
+  p { margin: 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(16px);
+  }
+  .nav-inner {
+    display: flex; align-items: center; gap: 8px;
+    height: 56px; max-width: 1280px; margin: 0 auto; padding: 0 24px;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: var(--ink); }
+  .brand:hover { opacity: 1; }
+  .brand-mark { width: 18px; height: 18px; display: grid; place-items: center; }
+  .brand-mark svg { width: 18px; height: 18px; }
+  .nav-links { display: flex; align-items: center; gap: 2px; margin-left: 28px; }
+  .nav-links a { font-size: 14px; color: var(--ink); padding: 6px 14px; border-radius: 999px; }
+  .nav-links a:hover, .nav-links a[aria-current="page"] { opacity: 1; background: rgba(237,236,236,.06); }
+  .nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .nav-text { font-size: 14px; color: var(--ink); padding: 4px 8px; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font-family: inherit; font-size: 14px; font-weight: 400;
+    border-radius: 999px; border: 1px solid transparent; padding: 6px 12px; cursor: pointer;
+  }
+  .btn:hover { opacity: 1; text-decoration: none; }
+  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .btn-solid { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); }
+  .btn-solid:hover { opacity: 0.88; }
+  .btn-outline { background: transparent; color: var(--ink); border-color: rgba(237,236,236,.28); }
+  .btn-outline:hover { border-color: rgba(237,236,236,.5); background: rgba(237,236,236,.04); }
+
+  .page-hero { padding: 72px 0 48px; }
+  .page-hero h1 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.03em; }
+  .page-hero .lead { margin-top: 14px; font-size: 16px; color: var(--ink-soft); max-width: 48ch; }
+
+  .start-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    margin-bottom: 64px;
+  }
+  .start-card {
+    background: var(--bg); padding: 28px 26px; display: flex; flex-direction: column; gap: 8px;
+    transition: background 160ms var(--ease);
+  }
+  .start-card:hover { opacity: 1; background: var(--bg-elevated); }
+  .start-card .kicker { font-size: 12px; color: var(--ink-faint); letter-spacing: 0.04em; text-transform: uppercase; }
+  .start-card h2 { font-size: 18px; }
+  .start-card p { font-size: 14px; color: var(--ink-soft); line-height: 1.5; }
+  @media (max-width: 800px) { .start-grid { grid-template-columns: 1fr; } }
+
+  .divider { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  section { padding: 64px 0; }
+  .section-head { margin-bottom: 28px; }
+  .section-head h2 { font-size: clamp(22px, 3vw, 28px); }
+  .section-head p { margin-top: 10px; color: var(--ink-soft); font-size: 15px; }
+
+  .doc-list { border-top: 1px solid var(--line); }
+  .doc-row {
+    display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 20px; align-items: baseline;
+    padding: 16px 0; border-bottom: 1px solid var(--line);
+  }
+  .doc-row .title { font-size: 15px; }
+  .doc-row .desc { font-size: 14px; color: var(--ink-soft); }
+  .doc-row .go { font-size: 14px; color: var(--ink-faint); white-space: nowrap; }
+  .doc-row:hover .go { color: var(--ink); }
+  a.doc-row:hover { opacity: 1; }
+  @media (max-width: 700px) {
+    .doc-row { grid-template-columns: 1fr; gap: 6px; }
+  }
+
+  footer { border-top: 1px solid var(--line); padding: 48px 0 36px; }
+  .foot-grid {
+    display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); gap: 32px; margin-bottom: 40px;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 12px; }
+  .foot-desc { font-size: 13.5px; color: var(--ink-soft); max-width: 240px; }
+  .foot-col h4 {
+    font-size: 12px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 14px;
+  }
+  .foot-col a { display: block; font-size: 14px; color: var(--ink-soft); padding: 4px 0; }
+  .foot-col a:hover { color: var(--ink); opacity: 1; }
+  .foot-bottom {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-faint);
+  }
+  .foot-bottom a { color: var(--ink-faint); }
+  @media (max-width: 800px) { .foot-grid { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.html" aria-label="Cheers home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+      </span>
+      Cheers
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="./index.html#product">Product</a>
+      <a href="./downloads.html">Download</a>
+      <a href="./docs.html" aria-current="page">Docs</a>
+      <a href="./index.html#developers">Developers</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="nav-text" href="./docs.zh-CN.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+      <a class="btn btn-outline" href="https://github.com/ElePerson/Cheers">GitHub</a>
+      <a class="btn btn-solid" href="https://www.tocheers.com">Open app</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap">
+      <h1>Documentation</h1>
+      <p class="lead">Guides for using, deploying, and extending Cheers. English is the default; most docs have a Chinese mirror.</p>
+
+      <div class="start-grid" style="margin-top:40px;">
+        <a class="start-card" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/README.md">
+          <span class="kicker">Start here</span>
+          <h2>Documentation home</h2>
+          <p>Index of user, admin, and operations guides by role.</p>
+        </a>
+        <a class="start-card" href="./connector.html">
+          <span class="kicker">Agents</span>
+          <h2>Connect your AI agent</h2>
+          <p>Install the ACP connector, create a token, and keep it updated.</p>
+        </a>
+        <a class="start-card" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/docker-compose-deploy.md">
+          <span class="kicker">Deploy</span>
+          <h2>Docker Compose</h2>
+          <p>Single-host stack: JWT keys, bots, TLS, and day-two ops.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Using Cheers</h2>
+        <p>Day-to-day product guides for teammates and admins.</p>
+      </div>
+      <div class="doc-list">
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/%E6%99%AE%E9%80%9A%E7%94%A8%E6%88%B7%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md">
+          <span class="title">User guide</span>
+          <span class="desc">Channels, messages, mentioning bots, uploading files.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/%E7%B3%BB%E7%BB%9F%E7%AE%A1%E7%90%86%E8%AF%B4%E6%98%8E%E4%B9%A6.md">
+          <span class="title">Admin guide</span>
+          <span class="desc">Workspaces, channels, members, bots, Agent Bridge.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="./downloads.html">
+          <span class="title">Download clients</span>
+          <span class="desc">macOS desktop, web app, connector binaries, mobile builds.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/%E6%8A%80%E6%9C%AF%E6%8E%92%E6%9F%A5Q&A.md">
+          <span class="title">Troubleshooting</span>
+          <span class="desc">Health checks, logs, bot no-response, preview failures.</span>
+          <span class="go">→</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Deploy &amp; operate</h2>
+        <p>Bring up the gateway stack and keep it healthy.</p>
+      </div>
+      <div class="doc-list">
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/deployment.md">
+          <span class="title">Deployment overview</span>
+          <span class="desc">Source, Docker Compose, and Helm — when to use each.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/docker-compose-deploy.md">
+          <span class="title">Docker Compose deploy</span>
+          <span class="desc">JWT keys, <code>.env</code>, core stack, TLS, ops.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/deploy/helm/cheers/README.md">
+          <span class="title">Helm chart</span>
+          <span class="desc">Kubernetes deployment, values, secrets, ingress.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/RustFS%E5%AF%B9%E8%B1%A1%E5%AD%98%E5%82%A8%E9%83%A8%E7%BD%B2%E8%AF%B4%E6%98%8E.md">
+          <span class="title">Object storage (RustFS)</span>
+          <span class="desc">S3-compatible storage, buckets, and keys.</span>
+          <span class="go">→</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Agents &amp; developers</h2>
+        <p>Connect external agents and extend the workbench.</p>
+      </div>
+      <div class="doc-list">
+        <a class="doc-row" href="./connector.html">
+          <span class="title">ACP connector</span>
+          <span class="desc">Install, token, config, auto-update, and common fixes.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="./mcp.html">
+          <span class="title">MCP tool reference</span>
+          <span class="desc">Tools an external agent uses to live inside a channel.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/AgentBridge%E6%8E%A5%E5%85%A5%E6%8C%87%E5%8D%97.md">
+          <span class="title">Agent Bridge guide</span>
+          <span class="desc">Register bots and connect local ACP-capable agents.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/%E6%9C%AC%E5%9C%B0Bot%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97.md">
+          <span class="title">Local bot setup</span>
+          <span class="desc">Host daemon TOML, tokens, multi-bot management.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="./plugin-dev.html">
+          <span class="title">Plugin development</span>
+          <span class="desc">Workbench renderer plugins — one sandboxed HTML file.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="./plugins.html">
+          <span class="title">Plugin gallery</span>
+          <span class="desc">Official and example plugins you can download and try.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/arch/ARCHITECTURE_OVERVIEW.md">
+          <span class="title">Architecture overview</span>
+          <span class="desc">Two-tier design, data flow, and protocols.</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/arch/WIRE_PROTOCOL.md">
+          <span class="title">Wire protocol</span>
+          <span class="desc">Realtime protocol between browser and gateway.</span>
+          <span class="go">→</span>
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+          </span>
+          Cheers
+        </div>
+        <p class="foot-desc">Open-source collaboration for humans and AI agents. MIT licensed.</p>
+      </div>
+      <div class="foot-col">
+        <h4>Product</h4>
+        <a href="./index.html#product">Overview</a>
+        <a href="./downloads.html">Download</a>
+        <a href="https://www.tocheers.com">Open app</a>
+      </div>
+      <div class="foot-col">
+        <h4>Developers</h4>
+        <a href="./docs.html">Docs</a>
+        <a href="./connector.html">Connector</a>
+        <a href="./mcp.html">MCP tools</a>
+        <a href="https://github.com/ElePerson/Cheers">GitHub</a>
+      </div>
+      <div class="foot-col">
+        <h4>Legal</h4>
+        <a href="./privacy.html">Privacy</a>
+        <a href="./terms.html">Terms</a>
+        <a href="./support.html">Support</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© Cheers · MIT License</span>
+      <span><a href="./docs.zh-CN.html" hreflang="zh-CN">中文</a></span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
