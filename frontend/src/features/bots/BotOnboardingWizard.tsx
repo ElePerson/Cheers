@@ -811,6 +811,18 @@ function ScriptPanel({
   const command = code
     ? `CHEERS_ENROLL_CODE='${code.code}' bash <(curl -fsSL ${installUrl})`
     : "";
+  const needsApiKeyHint =
+    agentType === "claude" ||
+    agentType === "claude-acp" ||
+    agentType === "codex" ||
+    agentType === "codex-acp";
+  const apiKeyVar =
+    agentType === "codex" || agentType === "codex-acp"
+      ? "OPENAI_API_KEY"
+      : "ANTHROPIC_API_KEY";
+  const commandWithKey = code
+    ? `${apiKeyVar}='…' CHEERS_ENROLL_CODE='${code.code}' bash <(curl -fsSL ${installUrl})`
+    : "";
 
   async function mint() {
     setBusy(true);
@@ -888,6 +900,24 @@ function ScriptPanel({
               {command}
             </pre>
           </div>
+          {needsApiKeyHint && (
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 space-y-1.5">
+              <p className="text-[11px] leading-relaxed text-amber-200/90">
+                Headless API-key auth: export{" "}
+                <code className="text-amber-100">{apiKeyVar}</code> in the{" "}
+                <span className="text-amber-100">same</span> command so
+                install.sh wires it into systemd/launchd. A key only in your
+                shell profile will not reach the connector — and Cheers will not
+                show a login URL for EnvVar methods.
+              </p>
+              <pre className="text-[11px] leading-relaxed text-emerald-300/90 whitespace-pre-wrap break-all">
+                {commandWithKey}
+              </pre>
+              <div className="flex justify-end">
+                <CopyBtn value={commandWithKey} label="Copy with API key" />
+              </div>
+            </div>
+          )}
           <p className="text-xs text-zinc-400">
             No terminal handy? If that machine has the Cheers desktop app, open{" "}
             <span className="text-zinc-300">Settings → Connector → I have a code</span>{" "}

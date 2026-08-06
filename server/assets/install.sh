@@ -16,12 +16,18 @@
 #   CHEERS_CONNECTOR_BIN path to cce-acp-connector (else found on PATH, else a
 #                        prebuilt release binary is downloaded for this platform)
 #   CHEERS_CONNECTOR_REPO     GitHub owner/repo for releases (default ElePerson/Cheers)
-#   CHEERS_CONNECTOR_VERSION  connector version, e.g. 0.1.22 (default: latest)
+#   CHEERS_CONNECTOR_VERSION  connector version, e.g. 0.1.36 (default: newest
+#                        connector-v* GitHub release — NOT releases/latest, which
+#                        points at the desktop app)
 #   CHEERS_INSTALL_DAEMON=0  skip the launchd/systemd unit (just write + start)
 #   CHEERS_AUTO_UPDATE=1 enable signed self-update in the written config
 #                        (only applied when this script downloaded the binary,
 #                        i.e. it is provably >= 0.1.27 — older binaries reject
 #                        configs containing the [update] section)
+#   ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / OPENAI_API_KEY / CODEX_API_KEY
+#                        when set in this shell, copied into a 0600 sidecar and
+#                        wired into the keep-alive unit so the ACP child sees them
+#                        (interactive exports alone never reach systemd/launchd)
 set -euo pipefail
 
 API_BASE="${CHEERS_API_BASE:-__CHEERS_API_BASE__}"
@@ -81,6 +87,49 @@ chmod 600 "$TOKEN_PATH"
 info "wrote config → $CONFIG_FILE"
 info "wrote token  → $TOKEN_PATH (chmod 600)"
 
+# ── 3a. capture agent vendor credentials for the keep-alive unit ─────────────
+# systemd/launchd do not see interactive-shell exports. Persist any keys present
+# in THIS installer environment into a 0600 sidecar; the unit loads it so the
+# connector → ACP child (policy.env.allow) can authenticate without a browser.
+AGENT_ENV_FILE="$CONFIG_DIR/secrets/$ACCOUNT_ID.env"
+AGENT_ENV_WRITTEN=0
+if python3 - "$AGENT_ENV_FILE" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+keys = [
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "CODEX_API_KEY",
+]
+lines = []
+for k in keys:
+    v = os.environ.get(k) or ""
+    if not v.strip():
+        continue
+    if any(c in v for c in " \t\n\"'\\#"):
+        lines.append(f"{k}={json.dumps(v)}")
+    else:
+        lines.append(f"{k}={v}")
+if not lines:
+    sys.exit(2)
+open(path, "w").write("\n".join(lines) + "\n")
+sys.exit(0)
+PY
+then
+  chmod 600 "$AGENT_ENV_FILE"
+  AGENT_ENV_WRITTEN=1
+  info "wrote agent credentials → $AGENT_ENV_FILE (chmod 600; loaded by keep-alive unit)"
+else
+  rm -f "$AGENT_ENV_FILE"
+  AGENT_ENV_FILE=""
+  case "$AGENT_TYPE" in
+    claude|claude-acp|codex|codex-acp)
+      info "tip: for headless API-key auth, re-run with ANTHROPIC_API_KEY / OPENAI_API_KEY exported so the service env gets it (shell-only export will not reach systemd/launchd)"
+      ;;
+  esac
+fi
+
 # ── 4. locate (or download) the connector binary ──────────────────────────────
 BIN="${CHEERS_CONNECTOR_BIN:-}"
 if [ -z "$BIN" ]; then
@@ -100,14 +149,34 @@ if [ -z "$BIN" ]; then
   case "$arch" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=amd64 ;; *) arch="" ;; esac
   if [ -n "$os" ] && [ -n "$arch" ]; then
     ASSET="cce-acp-connector-$os-$arch"
+    # GitHub's /releases/latest is the desktop app (make_latest:false on
+    # connector tags). Resolve the newest connector-v* tag when VER=latest.
     if [ "$VER" = "latest" ]; then
-      GH_URL="https://github.com/$REPO/releases/latest/download/$ASSET"
+      VER="$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=40" \
+        | python3 -c '
+import json,sys
+try:
+    rels=json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for r in rels:
+    t=(r.get("tag_name") or "")
+    if t.startswith("connector-v") and not r.get("draft") and not r.get("prerelease"):
+        print(t[len("connector-v"):]); break
+' 2>/dev/null || true)"
+      [ -n "$VER" ] || VER="latest"
+    fi
+    if [ "$VER" = "latest" ]; then
+      # Last resort: gateway proxy only (same-origin). Avoid broken GH latest.
+      GH_URL=""
     else
       GH_URL="https://github.com/$REPO/releases/download/connector-v$VER/$ASSET"
     fi
     DEST="$CONFIG_DIR/bin/cce-acp-connector"
     mkdir -p "$CONFIG_DIR/bin"
-    for SRC in "$API_BASE/connector/download/$ASSET" "$GH_URL"; do
+    SOURCES="$API_BASE/connector/download/$ASSET"
+    [ -n "$GH_URL" ] && SOURCES="$SOURCES $GH_URL"
+    for SRC in $SOURCES; do
       info "downloading connector binary ($os/$arch) from $SRC …"
       if curl -fsSL "$SRC" -o "$DEST" && [ -s "$DEST" ]; then
         chmod +x "$DEST"
@@ -164,12 +233,11 @@ if [ -n "$BIN" ] && [ -n "${os:-}" ] && [ -n "${arch:-}" ]; then
   MCP_DEST="$(dirname "$BIN")/cheers-mcp-server"
   if [ ! -x "$MCP_DEST" ]; then
     MCP_ASSET="cheers-mcp-server-$os-$arch"
-    if [ "$VER" = "latest" ]; then
-      MCP_GH_URL="https://github.com/$REPO/releases/latest/download/$MCP_ASSET"
-    else
-      MCP_GH_URL="https://github.com/$REPO/releases/download/connector-v$VER/$MCP_ASSET"
+    MCP_SOURCES="$API_BASE/connector/download/$MCP_ASSET"
+    if [ -n "${VER:-}" ] && [ "$VER" != "latest" ]; then
+      MCP_SOURCES="$MCP_SOURCES https://github.com/$REPO/releases/download/connector-v$VER/$MCP_ASSET"
     fi
-    for MCP_SRC in "$API_BASE/connector/download/$MCP_ASSET" "$MCP_GH_URL"; do
+    for MCP_SRC in $MCP_SOURCES; do
       info "downloading cheers MCP server ($os/$arch) from $MCP_SRC …"
       if curl -fsSL "$MCP_SRC" -o "$MCP_DEST" && [ -s "$MCP_DEST" ]; then
         chmod +x "$MCP_DEST"
@@ -280,6 +348,31 @@ if [ "${CHEERS_INSTALL_DAEMON:-1}" = "1" ] && [ "$ADAPTER_OK" = "1" ]; then
     LABEL="com.cheers.connector.$ACCOUNT_ID"
     PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
     mkdir -p "$HOME/Library/LaunchAgents"
+    # Optional EnvironmentVariables from the agent credential sidecar.
+    ENV_PLIST_XML=""
+    if [ -n "${AGENT_ENV_FILE:-}" ] && [ -f "$AGENT_ENV_FILE" ]; then
+      ENV_PLIST_XML="$(python3 - "$AGENT_ENV_FILE" <<'PY'
+import sys
+path = sys.argv[1]
+entries = []
+for raw in open(path):
+    line = raw.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    k, _, v = line.partition("=")
+    k, v = k.strip(), v.strip()
+    if len(v) >= 2 and ((v[0] == v[-1] == '"') or (v[0] == v[-1] == "'")):
+        v = v[1:-1]
+    def esc(s):
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    entries.append(f"    <key>{esc(k)}</key>\n    <string>{esc(v)}</string>")
+if entries:
+    print("  <key>EnvironmentVariables</key>\n  <dict>")
+    print("\n".join(entries))
+    print("  </dict>")
+PY
+)"
+    fi
     cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -291,6 +384,7 @@ if [ "${CHEERS_INSTALL_DAEMON:-1}" = "1" ] && [ "$ADAPTER_OK" = "1" ]; then
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>$CONFIG_DIR/$ACCOUNT_ID.out.log</string>
   <key>StandardErrorPath</key><string>$CONFIG_DIR/$ACCOUNT_ID.err.log</string>
+$ENV_PLIST_XML
 </dict></plist>
 EOF
     launchctl unload "$PLIST" >/dev/null 2>&1 || true
@@ -301,6 +395,10 @@ EOF
     UNIT_DIR="$HOME/.config/systemd/user"
     UNIT="$UNIT_DIR/cheers-connector-$ACCOUNT_ID.service"
     mkdir -p "$UNIT_DIR"
+    ENV_FILE_LINE=""
+    if [ -n "${AGENT_ENV_FILE:-}" ] && [ -f "$AGENT_ENV_FILE" ]; then
+      ENV_FILE_LINE="EnvironmentFile=$AGENT_ENV_FILE"
+    fi
     cat > "$UNIT" <<EOF
 [Unit]
 Description=Cheers ACP connector ($ACCOUNT_ID)
@@ -310,6 +408,7 @@ After=network-online.target
 ExecStart=$BIN run --config $CONFIG_FILE --name $ACCOUNT_ID
 Restart=always
 RestartSec=2
+$ENV_FILE_LINE
 
 [Install]
 WantedBy=default.target
@@ -330,6 +429,13 @@ if [ "$ADAPTER_OK" = "0" ]; then
   exit 1
 fi
 if [ "$START_BY_HAND" = "1" ]; then
+  # Shell fallback: export credential sidecar so the daemon child inherits them.
+  if [ -n "${AGENT_ENV_FILE:-}" ] && [ -f "$AGENT_ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$AGENT_ENV_FILE"
+    set +a
+  fi
   "$BIN" start --config "$CONFIG_FILE" --name "$ACCOUNT_ID" || true
 fi
 sleep 1
