@@ -94,15 +94,11 @@ export interface WindowDrag {
   /** Spread onto the drag handle (the window's title bar). */
   handleProps: {
     onPointerDown: (e: ReactPointerEvent) => void;
-    onPointerMove: (e: ReactPointerEvent) => void;
-    onPointerUp: (e: ReactPointerEvent) => void;
     style: CSSProperties;
   };
   /** Spread onto a bottom-right resize grip. */
   resizeProps: {
     onPointerDown: (e: ReactPointerEvent) => void;
-    onPointerMove: (e: ReactPointerEvent) => void;
-    onPointerUp: (e: ReactPointerEvent) => void;
     style: CSSProperties;
   };
   /** Full style for the window root: position + size overrides + stacking. */
@@ -177,8 +173,19 @@ export function useWindowDrag(
   const elRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
   const resizeRef = useRef<{ w: number; h: number; px: number; py: number } | null>(null);
+  // Window-level move/up/cancel teardown — WKWebView often drops element capture
+  // once the cursor leaves the title bar, so we drive the gesture from `window`.
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
   const geomRef = useRef(geom);
   geomRef.current = geom;
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+      resizeCleanupRef.current?.();
+    };
+  }, []);
 
   // Register in the stacking order on mount (new windows open on top).
   useEffect(() => {
@@ -225,75 +232,113 @@ export function useWindowDrag(
   }, [storageKey]);
 
   // ── dragging (title bar) ──
+  // Pointer capture alone is unreliable in macOS WKWebView (Tauri): once the
+  // cursor leaves the thin title bar, move/up often never reach the handle.
+  // Mirror SessionsPanel — best-effort capture + window listeners for the gesture.
   const onDragDown = useCallback(
     (e: ReactPointerEvent) => {
       toFront();
       if (!enabled) return;
       // Buttons/inputs in the title bar keep their click; only bare header space drags.
       if ((e.target as HTMLElement).closest("button, select, input, a, textarea")) return;
-      const el = elRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
+      const panel = elRef.current;
+      if (!panel) return;
+      const handle = e.currentTarget as HTMLElement;
+      const r = panel.getBoundingClientRect();
       dragRef.current = { dx: e.clientX - r.left, dy: e.clientY - r.top };
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      e.preventDefault(); // no text selection while dragging
-    },
-    [enabled, toFront]
-  );
-
-  const onDragMove = useCallback(
-    (e: ReactPointerEvent) => {
-      const drag = dragRef.current;
-      const el = elRef.current;
-      if (!drag || !el) return;
-      const b = getBounds ? getBounds() : null;
-      // In bounded mode the pointer (viewport coords) maps to lane-local coords.
-      const x = e.clientX - drag.dx - (b ? b.left : 0);
-      const y = e.clientY - drag.dy - (b ? b.top : 0);
-      const p = clampPos({ x, y }, el.offsetWidth, el.offsetHeight, b);
-      setGeom((g) => ({ ...g, ...p }));
-      // Feed the cursor (lane-local) to the snap overlay so it can highlight the
-      // zone the window will land in. Start the overlay on the first real move
-      // (not on pointerdown) so a bare header click never flashes the grid.
-      if (snap && b) {
-        if (!getSnapState().active) beginSnap({ width: b.width, height: b.height });
-        updateSnap({ x: e.clientX - b.left, y: e.clientY - b.top });
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch {
+        /* capture unsupported — window listeners still cover the drag */
       }
-    },
-    [getBounds, snap]
-  );
+      e.preventDefault(); // no text selection while dragging
 
-  const onDragUp = useCallback(
-    (e: ReactPointerEvent) => {
-      if (!dragRef.current) return;
-      dragRef.current = null;
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-      // Snap to the zone under the drop point (position AND size), if any. Build
-      // the snapped geom explicitly and persist THAT — geomRef won't reflect the
-      // queued setGeom until the next render, so persist() alone would save the
-      // pre-snap position.
-      if (snap) {
-        const zone = endSnap();
-        if (zone) {
-          const snapped: Geom = {
-            ...geomRef.current,
-            x: Math.round(zone.x),
-            y: Math.round(zone.y),
-            w: Math.round(zone.w),
-            h: Math.round(zone.h),
-          };
-          setGeom(snapped);
-          try {
-            localStorage.setItem(storageKey, JSON.stringify(snapped));
-          } catch {
-            /* private mode etc. — geometry just won't persist */
-          }
+      const pointerId = e.pointerId;
+      const cleanup = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+        dragCleanupRef.current = null;
+        try {
+          if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
+      };
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = cleanup;
+
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        const drag = dragRef.current;
+        const el = elRef.current;
+        if (!drag || !el) return;
+        const b = getBounds ? getBounds() : null;
+        // In bounded mode the pointer (viewport coords) maps to lane-local coords.
+        const x = ev.clientX - drag.dx - (b ? b.left : 0);
+        const y = ev.clientY - drag.dy - (b ? b.top : 0);
+        const p = clampPos({ x, y }, el.offsetWidth, el.offsetHeight, b);
+        setGeom((g) => ({ ...g, ...p }));
+        // Feed the cursor (lane-local) to the snap overlay so it can highlight the
+        // zone the window will land in. Start the overlay on the first real move
+        // (not on pointerdown) so a bare header click never flashes the grid.
+        if (snap && b) {
+          if (!getSnapState().active) beginSnap({ width: b.width, height: b.height });
+          updateSnap({ x: ev.clientX - b.left, y: ev.clientY - b.top });
+        }
+      };
+
+      const finish = (commit: boolean) => {
+        if (!dragRef.current) {
+          cleanup();
           return;
         }
-      }
-      persist();
+        dragRef.current = null;
+        cleanup();
+        if (!commit) {
+          if (snap) endSnap();
+          return;
+        }
+        // Snap to the zone under the drop point (position AND size), if any. Build
+        // the snapped geom explicitly and persist THAT — geomRef won't reflect the
+        // queued setGeom until the next render, so persist() alone would save the
+        // pre-snap position.
+        if (snap) {
+          const zone = endSnap();
+          if (zone) {
+            const snapped: Geom = {
+              ...geomRef.current,
+              x: Math.round(zone.x),
+              y: Math.round(zone.y),
+              w: Math.round(zone.w),
+              h: Math.round(zone.h),
+            };
+            setGeom(snapped);
+            try {
+              localStorage.setItem(storageKey, JSON.stringify(snapped));
+            } catch {
+              /* private mode etc. — geometry just won't persist */
+            }
+            return;
+          }
+        }
+        persist();
+      };
+
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        finish(true);
+      };
+      const onCancel = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        finish(false);
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onCancel);
     },
-    [persist, snap, storageKey]
+    [enabled, toFront, getBounds, snap, persist, storageKey]
   );
 
   // ── resizing (bottom-right grip) ──
@@ -301,9 +346,10 @@ export function useWindowDrag(
     (e: ReactPointerEvent) => {
       toFront();
       if (!enabled) return;
-      const el = elRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
+      const panel = elRef.current;
+      if (!panel) return;
+      const grip = e.currentTarget as HTMLElement;
+      const r = panel.getBoundingClientRect();
       resizeRef.current = { w: r.width, h: r.height, px: e.clientX, py: e.clientY };
       const b = getBounds ? getBounds() : null;
       // Freeze the current spot: a default position is often right-anchored /
@@ -323,38 +369,68 @@ export function useWindowDrag(
             }
           : g
       );
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      try {
+        grip.setPointerCapture(e.pointerId);
+      } catch {
+        /* capture unsupported — window listeners still cover the resize */
+      }
       e.preventDefault();
       e.stopPropagation();
-    },
-    [enabled, toFront, getBounds]
-  );
 
-  const onResizeMove = useCallback(
-    (e: ReactPointerEvent) => {
-      const rs = resizeRef.current;
-      if (!rs) return;
-      const b = getBounds ? getBounds() : null;
-      const g = geomRef.current;
-      // In bounded mode a window can't grow past the lane's right/bottom edge
-      // from its current top-left; otherwise it's clamped to the viewport.
-      const maxW = b ? b.width - (g.x ?? 0) : window.innerWidth - 16;
-      const maxH = b ? b.height - (g.y ?? 0) : window.innerHeight - 16;
-      const w = Math.min(Math.max(rs.w + (e.clientX - rs.px), MIN_W), maxW);
-      const h = Math.min(Math.max(rs.h + (e.clientY - rs.py), MIN_H), maxH);
-      setGeom((gg) => ({ ...gg, w: Math.round(w), h: Math.round(h) }));
-    },
-    [getBounds]
-  );
+      const pointerId = e.pointerId;
+      const cleanup = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+        resizeCleanupRef.current = null;
+        try {
+          if (grip.hasPointerCapture(pointerId)) grip.releasePointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
+      };
+      resizeCleanupRef.current?.();
+      resizeCleanupRef.current = cleanup;
 
-  const onResizeUp = useCallback(
-    (e: ReactPointerEvent) => {
-      if (!resizeRef.current) return;
-      resizeRef.current = null;
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-      persist();
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        const rs = resizeRef.current;
+        if (!rs) return;
+        const bounds = getBounds ? getBounds() : null;
+        const g = geomRef.current;
+        // In bounded mode a window can't grow past the lane's right/bottom edge
+        // from its current top-left; otherwise it's clamped to the viewport.
+        const maxW = bounds ? bounds.width - (g.x ?? 0) : window.innerWidth - 16;
+        const maxH = bounds ? bounds.height - (g.y ?? 0) : window.innerHeight - 16;
+        const w = Math.min(Math.max(rs.w + (ev.clientX - rs.px), MIN_W), maxW);
+        const h = Math.min(Math.max(rs.h + (ev.clientY - rs.py), MIN_H), maxH);
+        setGeom((gg) => ({ ...gg, w: Math.round(w), h: Math.round(h) }));
+      };
+
+      const finish = (commit: boolean) => {
+        if (!resizeRef.current) {
+          cleanup();
+          return;
+        }
+        resizeRef.current = null;
+        cleanup();
+        if (commit) persist();
+      };
+
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        finish(true);
+      };
+      const onCancel = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        finish(false);
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onCancel);
     },
-    [persist]
+    [enabled, toFront, getBounds, persist]
   );
 
   // A persisted position can fall off-screen after a layout change — a narrower
@@ -524,15 +600,19 @@ export function useWindowDrag(
     bounded,
     handleProps: {
       onPointerDown: onDragDown,
-      onPointerMove: onDragMove,
-      onPointerUp: onDragUp,
-      style: enabled ? { cursor: dragRef.current ? "grabbing" : "grab", touchAction: "none" } : {},
+      style: enabled
+        ? ({
+            cursor: dragRef.current ? "grabbing" : "grab",
+            touchAction: "none",
+            // Stop WKWebView from promoting Lucide SVGs into a native image drag.
+            WebkitUserDrag: "none",
+            userSelect: "none",
+          } as CSSProperties)
+        : {},
     },
     resizeProps: {
       onPointerDown: onResizeDown,
-      onPointerMove: onResizeMove,
-      onPointerUp: onResizeUp,
-      style: { touchAction: "none" },
+      style: { touchAction: "none", WebkitUserDrag: "none" } as CSSProperties,
     },
     style: { ...posStyle, ...sizeStyle },
     posStyle,
