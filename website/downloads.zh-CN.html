@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cheers · 下载</title>
+<meta name="description" content="下载 Cheers macOS 客户端，使用网页版，或安装 ACP 连接器与移动端。" />
+<link rel="alternate" hreflang="en" href="./downloads.html" />
+<link rel="alternate" hreflang="zh-CN" href="./downloads.zh-CN.html" />
+<style>
+  :root {
+    --bg: #14120b; --bg-elevated: #1c1913; --bg-soft: #221f18;
+    --ink: #edecec; --ink-soft: #a8a29e; --ink-faint: #78716c;
+    --line: rgba(237, 236, 236, 0.10); --line-strong: rgba(237, 236, 236, 0.16);
+    --btn: #edecec; --btn-ink: #14120b; --code-bg: #0c0b08;
+    --maxw: 1120px; --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --font: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink);
+    line-height: 1.6; font-weight: 400; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { opacity: 0.72; }
+  h1, h2, h3 { font-weight: 400; letter-spacing: -0.02em; line-height: 1.25; margin: 0; }
+  p { margin: 0; }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(16px);
+  }
+  .nav-inner {
+    display: flex; align-items: center; gap: 8px;
+    height: 56px; max-width: 1280px; margin: 0 auto; padding: 0 24px;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: var(--ink); }
+  .brand:hover { opacity: 1; }
+  .brand-mark { width: 18px; height: 18px; display: grid; place-items: center; }
+  .brand-mark svg { width: 18px; height: 18px; }
+  .nav-links { display: flex; align-items: center; gap: 2px; margin-left: 28px; }
+  .nav-links a { font-size: 14px; color: var(--ink); padding: 6px 14px; border-radius: 999px; }
+  .nav-links a:hover, .nav-links a[aria-current="page"] { opacity: 1; background: rgba(237,236,236,.06); }
+  .nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .nav-text { font-size: 14px; color: var(--ink); padding: 4px 8px; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font-family: inherit; font-size: 14px; font-weight: 400;
+    border-radius: 999px; border: 1px solid transparent; padding: 6px 12px; cursor: pointer;
+  }
+  .btn:hover { opacity: 1; text-decoration: none; }
+  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .btn-solid { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); }
+  .btn-solid:hover { opacity: 0.88; }
+  .btn-outline { background: transparent; color: var(--ink); border-color: rgba(237,236,236,.28); }
+  .btn-outline:hover { border-color: rgba(237,236,236,.5); background: rgba(237,236,236,.04); }
+  .btn-lg { font-size: 15px; padding: 11px 18px; }
+
+  .page-hero { padding: 72px 0 40px; }
+  .page-hero h1 { font-size: clamp(28px, 4vw, 42px); max-width: 14em; letter-spacing: -0.025em; }
+  .page-hero .lead { margin-top: 14px; font-size: 16px; color: var(--ink-soft); max-width: 36em; }
+
+  .surface-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+    margin: 40px 0 72px;
+  }
+  .surface {
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    background: var(--bg-elevated); display: flex; flex-direction: column;
+  }
+  .surface-body { padding: 24px 24px 28px; display: flex; flex-direction: column; flex: 1; }
+  .surface h2 { font-size: 20px; margin-bottom: 8px; }
+  .surface p { font-size: 14.5px; color: var(--ink-soft); line-height: 1.65; flex: 1; }
+  .surface .actions { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .surface pre {
+    margin-top: 18px; background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; font-size: 12.5px; overflow-x: auto;
+    color: var(--ink-soft); line-height: 1.5;
+  }
+  @media (max-width: 900px) { .surface-grid { grid-template-columns: 1fr; } }
+
+  .divider { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  section { padding: 72px 0; }
+  .section-head { max-width: 640px; margin-bottom: 36px; }
+  .section-head h2 { font-size: clamp(24px, 3.2vw, 32px); }
+  .section-head p { margin-top: 12px; color: var(--ink-soft); font-size: 15.5px; }
+
+  .dl-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  }
+  .dl-col { background: var(--bg); padding: 28px 26px; }
+  .dl-col h3 { font-size: 16px; margin-bottom: 16px; }
+  .dl-col a.row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+    font-size: 14px; color: var(--ink);
+  }
+  .dl-col a.row:last-child { border-bottom: 0; }
+  .dl-col a.row:hover { opacity: 1; }
+  .dl-col .meta { color: var(--ink-faint); font-size: 12.5px; }
+  .dl-col .note { margin-top: 16px; font-size: 13px; color: var(--ink-faint); line-height: 1.55; }
+  @media (max-width: 800px) { .dl-grid { grid-template-columns: 1fr; } }
+
+  .list-block { border-top: 1px solid var(--line); }
+  .list-row {
+    display: grid; grid-template-columns: 160px 1fr auto; gap: 20px; align-items: center;
+    padding: 18px 0; border-bottom: 1px solid var(--line);
+  }
+  .list-row .label { font-size: 15px; }
+  .list-row .desc { font-size: 14px; color: var(--ink-soft); }
+  @media (max-width: 700px) { .list-row { grid-template-columns: 1fr; gap: 8px; } }
+
+  footer { border-top: 1px solid var(--line); padding: 48px 0 36px; }
+  .foot-grid {
+    display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); gap: 32px; margin-bottom: 40px;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 12px; }
+  .foot-desc { font-size: 13.5px; color: var(--ink-soft); max-width: 240px; }
+  .foot-col h4 {
+    font-size: 12px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 14px;
+  }
+  .foot-col a { display: block; font-size: 14px; color: var(--ink-soft); padding: 4px 0; }
+  .foot-col a:hover { color: var(--ink); opacity: 1; }
+  .foot-bottom {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-faint);
+  }
+  .foot-bottom a { color: var(--ink-faint); }
+  @media (max-width: 800px) { .foot-grid { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.zh-CN.html" aria-label="Cheers 首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+      </span>
+      Cheers
+    </a>
+    <nav class="nav-links" aria-label="主导航">
+      <a href="./index.zh-CN.html#product">产品</a>
+      <a href="./downloads.zh-CN.html" aria-current="page">下载</a>
+      <a href="./docs.zh-CN.html">文档</a>
+      <a href="./index.zh-CN.html#developers">开发者</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="nav-text" href="./downloads.html" hreflang="en" lang="en">EN</a>
+      <a class="btn btn-outline" href="https://github.com/ElePerson/Cheers">GitHub</a>
+      <a class="btn btn-solid" href="https://www.tocheers.com">打开应用</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap">
+      <h1>在你工作的每一处使用 Cheers</h1>
+      <p class="lead">桌面端、浏览器、连接器与移动端 —— 同一个网关，同一套实时协议。</p>
+
+      <div class="surface-grid">
+        <article class="surface">
+          <div class="surface-body">
+            <h2>桌面端</h2>
+            <p>面向 Apple 芯片的原生 macOS 应用。管理本机 ACP 连接器、系统级审批横幅，并在编辑器中打开智能体文件。</p>
+            <div class="actions">
+              <a class="btn btn-solid btn-lg" href="https://github.com/ElePerson/Cheers/releases/download/desktop-v0.1.8/Cheers-macOS-AppleSilicon.dmg">下载 macOS 版 ↓</a>
+            </div>
+          </div>
+        </article>
+
+        <article class="surface">
+          <div class="surface-body">
+            <h2>网页版</h2>
+            <p>任意现代浏览器打开即用 —— 频道、Viewboard、Workbench。无需安装，支持 PWA 与 Web Push。</p>
+            <div class="actions">
+              <a class="btn btn-solid btn-lg" href="https://www.tocheers.com">打开网页版 →</a>
+            </div>
+          </div>
+        </article>
+
+        <article class="surface">
+          <div class="surface-body">
+            <h2>连接器</h2>
+            <p>用 ACP 连接器守护进程，把你自己的 Claude / Codex / OpenCode 智能体接入 Cheers。</p>
+<pre>curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
+  "https://github.com/ElePerson/Cheers/releases/latest/download/cce-acp-connector-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"</pre>
+            <div class="actions">
+              <a class="btn btn-outline btn-lg" href="./connector.zh-CN.html">连接器指南 →</a>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>macOS 桌面应用</h2>
+        <p>最新版本 <strong>desktop-v0.1.8</strong>。未签名预览版 —— 首次启动请右键 → 打开。</p>
+      </div>
+      <div class="dl-grid">
+        <div class="dl-col">
+          <h3>macOS</h3>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/desktop-v0.1.8/Cheers-macOS-AppleSilicon.dmg">
+            <span>Apple Silicon .dmg</span><span class="meta">↓</span>
+          </a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/desktop-v0.1.8/Cheers-macOS-AppleSilicon.app.tar.gz">
+            <span>App 包 .tar.gz</span><span class="meta">↓</span>
+          </a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/desktop-v0.1.8/SHA256SUMS.txt">
+            <span>SHA256 校验和</span><span class="meta">↓</span>
+          </a>
+          <p class="note">目前仅支持 Apple Silicon。请在 Releases 选择最新的 <code>desktop-v*</code> 标签。</p>
+        </div>
+        <div class="dl-col">
+          <h3>Windows</h3>
+          <p class="note" style="margin-top:0;">原生 Windows 构建尚未发布。可先使用 <a href="https://www.tocheers.com">网页版</a>，或自行部署整套栈。</p>
+        </div>
+        <div class="dl-col">
+          <h3>Linux</h3>
+          <p class="note" style="margin-top:0;">尚无桌面安装包。可对自托管网关使用网页客户端，或通过 Docker Compose / Helm 部署。</p>
+          <a class="row" href="./index.zh-CN.html#deploy"><span>自托管方式</span><span class="meta">→</span></a>
+        </div>
+      </div>
+      <p style="margin-top:20px;font-size:14px;color:var(--ink-soft);">
+        <a href="https://github.com/ElePerson/Cheers/releases">查看全部发布 →</a>
+      </p>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>ACP 连接器与 MCP Server</h2>
+        <p>预编译二进制来自 <strong>connector-v0.1.36</strong>。完整安装、令牌与更新步骤见连接器指南。</p>
+      </div>
+      <div class="dl-grid">
+        <div class="dl-col">
+          <h3>macOS</h3>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-darwin-arm64"><span>连接器 · arm64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-darwin-amd64"><span>连接器 · amd64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-darwin-arm64"><span>MCP server · arm64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-darwin-amd64"><span>MCP server · amd64</span><span class="meta">↓</span></a>
+        </div>
+        <div class="dl-col">
+          <h3>Linux</h3>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-linux-arm64"><span>连接器 · arm64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-linux-amd64"><span>连接器 · amd64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-linux-arm64"><span>MCP server · arm64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-linux-amd64"><span>MCP server · amd64</span><span class="meta">↓</span></a>
+        </div>
+        <div class="dl-col">
+          <h3>指南</h3>
+          <a class="row" href="./connector.zh-CN.html"><span>连接器安装</span><span class="meta">→</span></a>
+          <a class="row" href="./mcp.html"><span>MCP 工具参考</span><span class="meta">→</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/tag/connector-v0.1.36"><span>发布说明</span><span class="meta">→</span></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>移动端</h2>
+        <p>原生客户端走同一套网关协议。目前需自行构建 —— App Store / Play 尚未上架。</p>
+      </div>
+      <div class="list-block">
+        <div class="list-row">
+          <div class="label">iOS</div>
+          <div class="desc">面向 iOS 17+ 的 SwiftUI 客户端。流式聊天、审批卡片、钥匙串会话。</div>
+          <a class="btn btn-outline" href="https://github.com/ElePerson/Cheers/blob/main/apps/ios/README.md">构建说明</a>
+        </div>
+        <div class="list-row">
+          <div class="label">Android</div>
+          <div class="desc">Kotlin + Jetpack Compose / Material 3。流式增量、正在输入、断线补齐。</div>
+          <a class="btn btn-outline" href="https://github.com/ElePerson/Cheers/blob/main/apps/android/README.md">构建说明</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+          </span>
+          Cheers
+        </div>
+        <p class="foot-desc">人类与 AI 智能体的开源协作平台。MIT 许可。</p>
+      </div>
+      <div class="foot-col">
+        <h4>产品</h4>
+        <a href="./index.zh-CN.html#product">概览</a>
+        <a href="./downloads.zh-CN.html">下载</a>
+        <a href="https://www.tocheers.com">打开应用</a>
+      </div>
+      <div class="foot-col">
+        <h4>开发者</h4>
+        <a href="./docs.zh-CN.html">文档</a>
+        <a href="./connector.zh-CN.html">连接器</a>
+        <a href="./mcp.html">MCP 工具</a>
+        <a href="https://github.com/ElePerson/Cheers">GitHub</a>
+      </div>
+      <div class="foot-col">
+        <h4>法律</h4>
+        <a href="./privacy.zh-CN.html">隐私政策</a>
+        <a href="./terms.html">服务条款</a>
+        <a href="./support.zh-CN.html">支持</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© Cheers · MIT License</span>
+      <span><a href="./downloads.html" hreflang="en">English</a></span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

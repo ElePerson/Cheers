@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cheers · 文档</title>
+<meta name="description" content="Cheers 文档：用户指南、部署、连接器、架构、MCP 工具与故障排查。" />
+<link rel="alternate" hreflang="en" href="./docs.html" />
+<link rel="alternate" hreflang="zh-CN" href="./docs.zh-CN.html" />
+<style>
+  :root {
+    --bg: #14120b; --bg-elevated: #1c1913; --bg-soft: #221f18;
+    --ink: #edecec; --ink-soft: #a8a29e; --ink-faint: #78716c;
+    --line: rgba(237, 236, 236, 0.10); --line-strong: rgba(237, 236, 236, 0.16);
+    --btn: #edecec; --btn-ink: #14120b;
+    --maxw: 1120px; --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --font: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink);
+    line-height: 1.6; font-weight: 400; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { opacity: 0.72; }
+  h1, h2, h3 { font-weight: 400; letter-spacing: -0.02em; line-height: 1.25; margin: 0; }
+  p { margin: 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(16px);
+  }
+  .nav-inner {
+    display: flex; align-items: center; gap: 8px;
+    height: 56px; max-width: 1280px; margin: 0 auto; padding: 0 24px;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: var(--ink); }
+  .brand:hover { opacity: 1; }
+  .brand-mark { width: 18px; height: 18px; display: grid; place-items: center; }
+  .brand-mark svg { width: 18px; height: 18px; }
+  .nav-links { display: flex; align-items: center; gap: 2px; margin-left: 28px; }
+  .nav-links a { font-size: 14px; color: var(--ink); padding: 6px 14px; border-radius: 999px; }
+  .nav-links a:hover, .nav-links a[aria-current="page"] { opacity: 1; background: rgba(237,236,236,.06); }
+  .nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .nav-text { font-size: 14px; color: var(--ink); padding: 4px 8px; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font-family: inherit; font-size: 14px; font-weight: 400;
+    border-radius: 999px; border: 1px solid transparent; padding: 6px 12px; cursor: pointer;
+  }
+  .btn:hover { opacity: 1; text-decoration: none; }
+  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .btn-solid { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); }
+  .btn-solid:hover { opacity: 0.88; }
+  .btn-outline { background: transparent; color: var(--ink); border-color: rgba(237,236,236,.28); }
+  .btn-outline:hover { border-color: rgba(237,236,236,.5); background: rgba(237,236,236,.04); }
+
+  .page-hero { padding: 72px 0 48px; }
+  .page-hero h1 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.025em; }
+  .page-hero .lead { margin-top: 14px; font-size: 16px; color: var(--ink-soft); max-width: 36em; }
+
+  .start-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    margin-bottom: 64px;
+  }
+  .start-card {
+    background: var(--bg); padding: 28px 26px; display: flex; flex-direction: column; gap: 8px;
+    transition: background 160ms var(--ease);
+  }
+  .start-card:hover { opacity: 1; background: var(--bg-elevated); }
+  .start-card .kicker { font-size: 12px; color: var(--ink-faint); letter-spacing: 0.04em; text-transform: uppercase; }
+  .start-card h2 { font-size: 18px; }
+  .start-card p { font-size: 14px; color: var(--ink-soft); line-height: 1.55; }
+  @media (max-width: 800px) { .start-grid { grid-template-columns: 1fr; } }
+
+  .divider { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  section { padding: 64px 0; }
+  .section-head { margin-bottom: 28px; }
+  .section-head h2 { font-size: clamp(22px, 3vw, 28px); }
+  .section-head p { margin-top: 10px; color: var(--ink-soft); font-size: 15px; }
+
+  .doc-list { border-top: 1px solid var(--line); }
+  .doc-row {
+    display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 20px; align-items: baseline;
+    padding: 16px 0; border-bottom: 1px solid var(--line);
+  }
+  .doc-row .title { font-size: 15px; }
+  .doc-row .desc { font-size: 14px; color: var(--ink-soft); }
+  .doc-row .go { font-size: 14px; color: var(--ink-faint); white-space: nowrap; }
+  .doc-row:hover .go { color: var(--ink); }
+  a.doc-row:hover { opacity: 1; }
+  @media (max-width: 700px) { .doc-row { grid-template-columns: 1fr; gap: 6px; } }
+
+  footer { border-top: 1px solid var(--line); padding: 48px 0 36px; }
+  .foot-grid {
+    display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); gap: 32px; margin-bottom: 40px;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 12px; }
+  .foot-desc { font-size: 13.5px; color: var(--ink-soft); max-width: 240px; }
+  .foot-col h4 {
+    font-size: 12px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 14px;
+  }
+  .foot-col a { display: block; font-size: 14px; color: var(--ink-soft); padding: 4px 0; }
+  .foot-col a:hover { color: var(--ink); opacity: 1; }
+  .foot-bottom {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-faint);
+  }
+  .foot-bottom a { color: var(--ink-faint); }
+  @media (max-width: 800px) { .foot-grid { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.zh-CN.html" aria-label="Cheers 首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+      </span>
+      Cheers
+    </a>
+    <nav class="nav-links" aria-label="主导航">
+      <a href="./index.zh-CN.html#product">产品</a>
+      <a href="./downloads.zh-CN.html">下载</a>
+      <a href="./docs.zh-CN.html" aria-current="page">文档</a>
+      <a href="./index.zh-CN.html#developers">开发者</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="nav-text" href="./docs.html" hreflang="en" lang="en">EN</a>
+      <a class="btn btn-outline" href="https://github.com/ElePerson/Cheers">GitHub</a>
+      <a class="btn btn-solid" href="https://www.tocheers.com">打开应用</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap">
+      <h1>文档</h1>
+      <p class="lead">使用、部署与扩展 Cheers 的指南。英文是默认语言；多数文档有中文镜像。</p>
+
+      <div class="start-grid" style="margin-top:40px;">
+        <a class="start-card" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/README.zh-CN.md">
+          <span class="kicker">从这里开始</span>
+          <h2>文档主页</h2>
+          <p>按角色索引的用户、管理员与运维指南。</p>
+        </a>
+        <a class="start-card" href="./connector.zh-CN.html">
+          <span class="kicker">智能体</span>
+          <h2>连接你的 AI 智能体</h2>
+          <p>安装 ACP 连接器、创建令牌并保持更新。</p>
+        </a>
+        <a class="start-card" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/docker-compose-deploy.zh-CN.md">
+          <span class="kicker">部署</span>
+          <h2>Docker Compose</h2>
+          <p>单机全栈：JWT 密钥、bot、TLS 与日常运维。</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>使用 Cheers</h2>
+        <p>面向团队成员与管理员的日常产品指南。</p>
+      </div>
+      <div class="doc-list">
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/%E6%99%AE%E9%80%9A%E7%94%A8%E6%88%B7%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.zh-CN.md">
+          <span class="title">用户指南</span>
+          <span class="desc">频道、消息、提及 bot、上传文件。</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/%E7%B3%BB%E7%BB%9F%E7%AE%A1%E7%90%86%E8%AF%B4%E6%98%8E%E4%B9%A6.zh-CN.md">
+          <span class="title">系统管理说明书</span>
+          <span class="desc">工作区、频道、成员、bot、Agent Bridge。</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="./downloads.zh-CN.html">
+          <span class="title">下载客户端</span>
+          <span class="desc">macOS 桌面端、网页版、连接器二进制、移动端构建。</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/%E6%8A%80%E6%9C%AF%E6%8E%92%E6%9F%A5Q&A.zh-CN.md">
+          <span class="title">技术排查 Q&A</span>
+          <span class="desc">健康检查、日志、bot 无响应、预览失败。</span>
+          <span class="go">→</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>部署与运维</h2>
+        <p>拉起网关栈并保持健康运行。</p>
+      </div>
+      <div class="doc-list">
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/deployment.zh-CN.md">
+          <span class="title">部署总览</span>
+          <span class="desc">源码、Docker Compose、Helm —— 何时用哪种。</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/docker-compose-deploy.zh-CN.md">
+          <span class="title">Docker Compose 部署</span>
+          <span class="desc">JWT 密钥、<code>.env</code>、核心栈、TLS、运维。</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/deploy/helm/cheers/README.md">
+          <span class="title">Helm Chart</span>
+          <span class="desc">Kubernetes 部署、values、密钥、ingress。（英文）</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/RustFS%E5%AF%B9%E8%B1%A1%E5%AD%98%E5%82%A8%E9%83%A8%E7%BD%B2%E8%AF%B4%E6%98%8E.zh-CN.md">
+          <span class="title">对象存储（RustFS）</span>
+          <span class="desc">S3 兼容存储、bucket 与密钥。</span>
+          <span class="go">→</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>智能体与开发者</h2>
+        <p>接入外部智能体，扩展 Workbench。</p>
+      </div>
+      <div class="doc-list">
+        <a class="doc-row" href="./connector.zh-CN.html">
+          <span class="title">ACP 连接器</span>
+          <span class="desc">安装、令牌、配置、自动更新与常见问题。</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="./mcp.html">
+          <span class="title">MCP 工具参考</span>
+          <span class="desc">外部智能体在频道内使用的工具。（英文）</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/AgentBridge%E6%8E%A5%E5%85%A5%E6%8C%87%E5%8D%97.zh-CN.md">
+          <span class="title">Agent Bridge 接入指南</span>
+          <span class="desc">注册 bot 并接入本地 ACP 智能体。</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/%E6%9C%AC%E5%9C%B0Bot%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97.zh-CN.md">
+          <span class="title">本地 Bot 配置指南</span>
+          <span class="desc">主机守护进程 TOML、令牌、多 bot 管理。</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="./plugin-dev.html">
+          <span class="title">插件开发</span>
+          <span class="desc">Workbench 渲染器插件 —— 一个沙箱 HTML。（英文）</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="./plugins.html">
+          <span class="title">插件画廊</span>
+          <span class="desc">可下载试用的官方与示例插件。（英文）</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/arch/ARCHITECTURE_OVERVIEW.md">
+          <span class="title">架构总览</span>
+          <span class="desc">两层设计、数据流与协议。（英文）</span>
+          <span class="go">→</span>
+        </a>
+        <a class="doc-row" href="https://github.com/ElePerson/Cheers/blob/main/docs/arch/WIRE_PROTOCOL.md">
+          <span class="title">网关协议</span>
+          <span class="desc">浏览器与网关之间的实时协议。（英文）</span>
+          <span class="go">→</span>
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+          </span>
+          Cheers
+        </div>
+        <p class="foot-desc">人类与 AI 智能体的开源协作平台。MIT 许可。</p>
+      </div>
+      <div class="foot-col">
+        <h4>产品</h4>
+        <a href="./index.zh-CN.html#product">概览</a>
+        <a href="./downloads.zh-CN.html">下载</a>
+        <a href="https://www.tocheers.com">打开应用</a>
+      </div>
+      <div class="foot-col">
+        <h4>开发者</h4>
+        <a href="./docs.zh-CN.html">文档</a>
+        <a href="./connector.zh-CN.html">连接器</a>
+        <a href="./mcp.html">MCP 工具</a>
+        <a href="https://github.com/ElePerson/Cheers">GitHub</a>
+      </div>
+      <div class="foot-col">
+        <h4>法律</h4>
+        <a href="./privacy.zh-CN.html">隐私政策</a>
+        <a href="./terms.html">服务条款</a>
+        <a href="./support.zh-CN.html">支持</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© Cheers · MIT License</span>
+      <span><a href="./docs.html" hreflang="en">English</a></span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
