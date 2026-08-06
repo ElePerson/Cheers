@@ -708,7 +708,8 @@ cp .env.example .env
 <span class="c"># 2. 生成必需的 RS256 JWT 密钥对</span>
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out jwt_priv.pem
 openssl rsa -in jwt_priv.pem -pubout -out jwt_pub.pem
-<span class="c"># 把两个 PEM 粘贴到 .env 的 JWT_PRIVATE_KEY / JWT_PUBLIC_KEY</span>
+<span class="c"># 把两个 PEM 粘贴到 .env 的 JWT_PRIVATE_KEY / JWT_PUBLIC_KEY，</span>
+<span class="c"># 并修改 ADMIN_PASSWORD、POSTGRES_PASSWORD、S3 密钥与 CORS。</span>
 
 <span class="c"># 3. 启动核心栈</span>
 docker compose up -d

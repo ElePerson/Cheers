@@ -730,7 +730,8 @@ cp .env.example .env
 <span class="c"># 2. generate the required RS256 JWT keypair</span>
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out jwt_priv.pem
 openssl rsa -in jwt_priv.pem -pubout -out jwt_pub.pem
-<span class="c"># paste both PEMs into JWT_PRIVATE_KEY / JWT_PUBLIC_KEY in .env</span>
+<span class="c"># paste both PEMs into JWT_PRIVATE_KEY / JWT_PUBLIC_KEY in .env,</span>
+<span class="c"># and change ADMIN_PASSWORD, POSTGRES_PASSWORD, the S3 keys, CORS.</span>
 
 <span class="c"># 3. bring up the core stack</span>
 docker compose up -d

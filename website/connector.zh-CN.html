@@ -149,10 +149,10 @@
     <a class="brand" href="./index.zh-CN.html"><span class="glass">🍻</span> Cheers</a>
     <nav class="nav-links">
       <a href="./index.zh-CN.html#features">功能</a>
-      <a href="./index.zh-CN.html#users">面向用户</a>
-      <a href="./index.zh-CN.html#quickstart">快速开始</a>
+      <a href="./index.zh-CN.html#teams">面向用户</a>
+      <a href="./index.zh-CN.html#deploy">快速开始</a>
       <a href="./plugins.html">插件</a>
-      <a href="./index.zh-CN.html#docs">文档</a>
+      <a href="./docs.zh-CN.html">文档</a>
     </nav>
     <div class="nav-actions">
       <a class="icon-btn lang" href="./connector.html" hreflang="en" lang="en" title="Switch to English">EN</a>
@@ -201,7 +201,7 @@
 os=$(uname -s | tr 'A-Z' 'a-z'); arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 mkdir -p ~/.cheers/bin ~/.cheers/workspace   <span class="c"># workspace 是智能体的工作目录——必须存在，否则连接器会拒绝启动</span>
 curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
-  "https://github.com/ElePerson/Cheers/releases/latest/download/cce-acp-connector-$os-$arch"
+  "https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
 chmod +x ~/.cheers/bin/cce-acp-connector
 export PATH="$HOME/.cheers/bin:$PATH"   <span class="c"># 把这行加进 ~/.zshrc 就能长期生效</span>
 cce-acp-connector --help                <span class="c"># 打印出帮助 = 成功</span></pre>
@@ -303,7 +303,7 @@ auto = true</pre>
     <p>重新跑一遍<a href="#install">第 3 步</a>的下载（会覆盖旧二进制），然后重启：</p>
 <pre class="code">os=$(uname -s | tr 'A-Z' 'a-z'); arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
-  "https://github.com/ElePerson/Cheers/releases/latest/download/cce-acp-connector-$os-$arch"
+  "https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
 chmod +x ~/.cheers/bin/cce-acp-connector
 cce-acp-connector restart --name claude</pre>
     <p>自动更新<strong>默认关闭</strong>是有意为之——更新意味着执行下载来的代码，所以由机器主人自己选择开启。
