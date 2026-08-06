@@ -49,8 +49,9 @@ as its build context.
 
 ## Notes
 
-- Light/dark theme follows the OS by default; the ◐ button cycles
-  auto → light → dark and remembers the choice.
+- The homepage is dark-first (Cursor-like marketing style): warm near-black
+  background, off-white type, pill CTAs. Subpages may still use their own
+  light/dark toggle where present.
 - Documentation and repo links point at `https://github.com/ElePerson/Cheers`
   — update them if the canonical repo URL changes.
 - Content is intentionally kept in sync with `README.md` (and
