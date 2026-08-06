@@ -16,8 +16,10 @@ function isEnvAuthMethod(data: AuthRequiredContentData): boolean {
   return (
     typ === "env" ||
     typ === "envvar" ||
+    typ === "env_var" ||
     id === "env" ||
     id === "envvar" ||
+    id === "env_var" ||
     id === "api-key" ||
     id === "api_key" ||
     id.includes("api-key") ||

@@ -149,11 +149,31 @@ if [ -z "$BIN" ]; then
   case "$arch" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=amd64 ;; *) arch="" ;; esac
   if [ -n "$os" ] && [ -n "$arch" ]; then
     ASSET="cce-acp-connector-$os-$arch"
-    # GitHub's /releases/latest is the desktop app (make_latest:false on
-    # connector tags). Resolve the newest connector-v* tag when VER=latest.
-    if [ "$VER" = "latest" ]; then
-      VER="$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=40" \
-        | python3 -c '
+    DEST="$CONFIG_DIR/bin/cce-acp-connector"
+    mkdir -p "$CONFIG_DIR/bin"
+    # Same-origin FIRST: hosts that can reach this gateway may not reach GitHub
+    # at all (firewalled / black-holed). Do not query api.github.com until the
+    # gateway proxy has been tried — otherwise onboarding stalls on a timeout.
+    info "downloading connector binary ($os/$arch) from $API_BASE/connector/download/$ASSET …"
+    if curl -fsSL "$API_BASE/connector/download/$ASSET" -o "$DEST" && [ -s "$DEST" ]; then
+      chmod +x "$DEST"
+      if RUN_ERR="$("$DEST" --help </dev/null 2>&1 >/dev/null)"; then
+        BIN="$DEST"
+        BIN_DOWNLOADED=1
+        info "installed connector → $BIN"
+      else
+        info "downloaded binary does not run here (${RUN_ERR:-unknown error}) — trying GitHub"
+        rm -f "$DEST"
+      fi
+    else
+      rm -f "$DEST"
+    fi
+    if [ -z "$BIN" ]; then
+      # GitHub's /releases/latest is the desktop app (make_latest:false on
+      # connector tags). Resolve the newest connector-v* tag when VER=latest.
+      if [ "$VER" = "latest" ]; then
+        VER="$(curl -fsSL --max-time 15 "https://api.github.com/repos/$REPO/releases?per_page=40" \
+          | python3 -c '
 import json,sys
 try:
     rels=json.load(sys.stdin)
@@ -164,37 +184,26 @@ for r in rels:
     if t.startswith("connector-v") and not r.get("draft") and not r.get("prerelease"):
         print(t[len("connector-v"):]); break
 ' 2>/dev/null || true)"
-      [ -n "$VER" ] || VER="latest"
-    fi
-    if [ "$VER" = "latest" ]; then
-      # Last resort: gateway proxy only (same-origin). Avoid broken GH latest.
-      GH_URL=""
-    else
-      GH_URL="https://github.com/$REPO/releases/download/connector-v$VER/$ASSET"
-    fi
-    DEST="$CONFIG_DIR/bin/cce-acp-connector"
-    mkdir -p "$CONFIG_DIR/bin"
-    SOURCES="$API_BASE/connector/download/$ASSET"
-    [ -n "$GH_URL" ] && SOURCES="$SOURCES $GH_URL"
-    for SRC in $SOURCES; do
-      info "downloading connector binary ($os/$arch) from $SRC …"
-      if curl -fsSL "$SRC" -o "$DEST" && [ -s "$DEST" ]; then
-        chmod +x "$DEST"
-        # Run check: --help must exit 0. Captures the loader error (e.g.
-        # "version GLIBC_2.39 not found") so the failure is explainable.
-        if RUN_ERR="$("$DEST" --help </dev/null 2>&1 >/dev/null)"; then
-          BIN="$DEST"
-          BIN_DOWNLOADED=1
-          info "installed connector → $BIN"
-          break
+        [ -n "$VER" ] || VER="latest"
+      fi
+      if [ "$VER" != "latest" ]; then
+        GH_URL="https://github.com/$REPO/releases/download/connector-v$VER/$ASSET"
+        info "downloading connector binary ($os/$arch) from $GH_URL …"
+        if curl -fsSL --max-time 120 "$GH_URL" -o "$DEST" && [ -s "$DEST" ]; then
+          chmod +x "$DEST"
+          if RUN_ERR="$("$DEST" --help </dev/null 2>&1 >/dev/null)"; then
+            BIN="$DEST"
+            BIN_DOWNLOADED=1
+            info "installed connector → $BIN"
+          else
+            info "downloaded binary does not run here (${RUN_ERR:-unknown error})"
+            rm -f "$DEST"
+          fi
         else
-          info "downloaded binary does not run here (${RUN_ERR:-unknown error}) — trying next source"
           rm -f "$DEST"
         fi
-      else
-        rm -f "$DEST"
       fi
-    done
+    fi
     [ -n "$BIN" ] || info "no usable prebuilt binary for $os/$arch (will fall back to build instructions)"
   fi
 fi
@@ -415,6 +424,10 @@ WantedBy=default.target
 EOF
     systemctl --user daemon-reload
     systemctl --user enable --now "cheers-connector-$ACCOUNT_ID.service"
+    # enable --now only starts a previously inactive unit; re-running install.sh
+    # to rotate ANTHROPIC_API_KEY / EnvironmentFile must restart an already-
+    # active process so it picks up the new credential sidecar.
+    systemctl --user restart "cheers-connector-$ACCOUNT_ID.service"
     info "installed systemd --user unit → $UNIT"
     START_BY_HAND=0
   else

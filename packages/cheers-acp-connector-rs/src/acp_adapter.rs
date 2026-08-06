@@ -74,10 +74,12 @@ fn is_api_key_auth_method(method: &AuthMethodInfo) -> bool {
         "api-key" | "api_key" | "apikey" | "env" | "envvar" | "env_var"
     ) || id.contains("api-key")
         || id.contains("api_key")
-        || method
-            .auth_type
-            .as_deref()
-            .is_some_and(|t| t.eq_ignore_ascii_case("env") || t.eq_ignore_ascii_case("envvar"))
+        || method.auth_type.as_deref().is_some_and(|t| {
+            matches!(
+                t.to_ascii_lowercase().as_str(),
+                "env" | "envvar" | "env_var"
+            )
+        })
 }
 
 fn is_chatgpt_auth_method(method: &AuthMethodInfo) -> bool {
@@ -1488,6 +1490,22 @@ mod tests {
         assert_eq!(
             preferred_auth_method_id(&claude_init, &with_anthropic).as_deref(),
             Some("env")
+        );
+
+        // ACP wire type is `env_var` (bridge-protocol / AuthMethodInfo docs).
+        let env_var_wire = json!({
+            "authMethods": [
+                { "methodId": "anthropic-key", "name": "API Key", "type": "env_var" },
+                { "methodId": "claude-login", "name": "Claude subscription", "type": "agent" }
+            ]
+        });
+        assert_eq!(
+            preferred_auth_method_id(&env_var_wire, &empty).as_deref(),
+            Some("claude-login")
+        );
+        assert_eq!(
+            preferred_auth_method_id(&env_var_wire, &with_anthropic).as_deref(),
+            Some("anthropic-key")
         );
 
         assert_eq!(preferred_auth_method_id(&json!({}), &empty), None);
