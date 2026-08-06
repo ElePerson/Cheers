@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronRight,
@@ -549,6 +549,7 @@ function TraceItem({
   onApprovalResolved?: () => void;
 }) {
   const { Icon, tone, label } = eventMeta(event);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const pendingData = pendingApproval
     ? (pendingApproval.content_data as PermissionContentData | null | undefined)
     : null;
@@ -625,6 +626,7 @@ function TraceItem({
   return (
     <div className="relative min-w-0">
       <button
+        ref={triggerRef}
         type="button"
         onClick={onToggle}
         aria-expanded={active}
@@ -671,7 +673,11 @@ function TraceItem({
                 ? "w-[min(28rem,94vw)] h-auto max-h-[min(36rem,calc(100dvh-10rem))]"
                 : "w-[min(42rem,94vw)] h-[min(32rem,calc(100dvh-10rem))]"
             }
-            defaultPosClassName="top-24 right-6"
+            // Portaled to body: must ignore LaneBoundsContext, else absolute
+            // coords bind to the wrong box and drag/placement break.
+            viewport
+            anchorRef={triggerRef}
+            reanchorOnOpen
             bodyClassName="!p-0"
           >
             <div className="p-3">

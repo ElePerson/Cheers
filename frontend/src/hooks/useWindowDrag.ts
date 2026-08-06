@@ -7,8 +7,9 @@
 // clamped into the viewport on load and while dragging/resizing, so a stale
 // value can never strand a window off-screen. Mobile renders windows as
 // full-screen sheets — pass `enabled: false` there and the hook is inert.
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from "react";
+import { placeNearRect } from "@/components/ui/floating-layer";
 import {
   beginSnap,
   updateSnap,
@@ -127,6 +128,10 @@ export interface WindowDragOptions {
   spawnKind?: SpawnKind;
   /** Panel visibility — spawn/occupant tracking only while open. Defaults true. */
   open?: boolean;
+  /** Free (viewport) windows: place near this element when opening. */
+  anchorRef?: RefObject<HTMLElement | null>;
+  /** Ignore persisted x/y on each open and re-place near `anchorRef` (keeps w/h). */
+  reanchorOnOpen?: boolean;
 }
 
 // `getBounds` (optional) turns on BOUNDED mode: the window floats inside that
@@ -149,12 +154,22 @@ export function useWindowDrag(
   const snap = opts.snap ?? false;
   const spawnKind = opts.spawnKind;
   const panelOpen = opts.open ?? true;
+  const anchorRef = opts.anchorRef;
+  const reanchorOnOpen = opts.reanchorOnOpen ?? false;
   const [geom, setGeom] = useState<Geom>(() => {
     try {
       const raw = localStorage.getItem(storageKey);
       if (!raw) return {};
       const g = JSON.parse(raw) as Geom;
-      return typeof g === "object" && g !== null ? g : {};
+      if (typeof g !== "object" || g === null) return {};
+      // Re-anchored inspectors keep size, not a stale corner from last open.
+      if (reanchorOnOpen) {
+        const next: Geom = {};
+        if (typeof g.w === "number") next.w = g.w;
+        if (typeof g.h === "number") next.h = g.h;
+        return next;
+      }
+      return g;
     } catch {
       return {};
     }
@@ -176,6 +191,23 @@ export function useWindowDrag(
       }
     };
   }, [storageKey]);
+
+  // Free viewport floats: pin beside the trigger (with auto-flip) when there is
+  // no position yet, or when the caller asks to re-anchor on every open.
+  useLayoutEffect(() => {
+    if (!enabled || !panelOpen || getBounds) return;
+    const anchor = anchorRef?.current;
+    if (!anchor) return;
+    const g = geomRef.current;
+    if (!reanchorOnOpen && g.x != null && g.y != null) return;
+    const el = elRef.current;
+    const w = g.w ?? el?.offsetWidth ?? 640;
+    const h = g.h ?? el?.offsetHeight ?? 480;
+    const placed = placeNearRect(anchor.getBoundingClientRect(), w, h);
+    const next: Geom = { ...g, x: placed.x, y: placed.y };
+    setGeom(next);
+    // Size may already be persisted; don't write until the user drags/resizes.
+  }, [enabled, panelOpen, getBounds, anchorRef, reanchorOnOpen]);
 
   const z = useSyncExternalStore(subscribeZ, () => {
     const i = zOrder.indexOf(storageKey);
