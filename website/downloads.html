@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cheers · Download</title>
+<meta name="description" content="Download Cheers for macOS, use the web app, or install the ACP connector and mobile clients." />
+<link rel="alternate" hreflang="zh-CN" href="./downloads.zh-CN.html" />
+<link rel="alternate" hreflang="en" href="./downloads.html" />
+<style>
+  :root {
+    --bg: #14120b; --bg-elevated: #1c1913; --bg-soft: #221f18;
+    --ink: #edecec; --ink-soft: #a8a29e; --ink-faint: #78716c;
+    --line: rgba(237, 236, 236, 0.10); --line-strong: rgba(237, 236, 236, 0.16);
+    --btn: #edecec; --btn-ink: #14120b; --code-bg: #0c0b08;
+    --maxw: 1120px; --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --font: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink);
+    line-height: 1.5; font-weight: 400; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { opacity: 0.72; }
+  h1, h2, h3 { font-weight: 400; letter-spacing: -0.025em; line-height: 1.2; margin: 0; }
+  p { margin: 0; }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(16px);
+  }
+  .nav-inner {
+    display: flex; align-items: center; gap: 8px;
+    height: 56px; max-width: 1280px; margin: 0 auto; padding: 0 24px;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: var(--ink); }
+  .brand:hover { opacity: 1; }
+  .brand-mark { width: 18px; height: 18px; display: grid; place-items: center; }
+  .brand-mark svg { width: 18px; height: 18px; }
+  .nav-links { display: flex; align-items: center; gap: 2px; margin-left: 28px; }
+  .nav-links a { font-size: 14px; color: var(--ink); padding: 6px 14px; border-radius: 999px; }
+  .nav-links a:hover, .nav-links a[aria-current="page"] { opacity: 1; background: rgba(237,236,236,.06); }
+  .nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .nav-text { font-size: 14px; color: var(--ink); padding: 4px 8px; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font-family: inherit; font-size: 14px; font-weight: 400;
+    border-radius: 999px; border: 1px solid transparent; padding: 6px 12px; cursor: pointer;
+    transition: opacity 160ms var(--ease), background 160ms var(--ease), border-color 160ms var(--ease);
+  }
+  .btn:hover { opacity: 1; text-decoration: none; }
+  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .btn-solid { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); }
+  .btn-solid:hover { opacity: 0.88; }
+  .btn-outline { background: transparent; color: var(--ink); border-color: rgba(237,236,236,.28); }
+  .btn-outline:hover { border-color: rgba(237,236,236,.5); background: rgba(237,236,236,.04); }
+  .btn-lg { font-size: 15px; padding: 11px 18px; }
+
+  .page-hero { padding: 72px 0 40px; }
+  .page-hero h1 { font-size: clamp(28px, 4vw, 42px); max-width: 18ch; letter-spacing: -0.03em; }
+  .page-hero .lead { margin-top: 14px; font-size: 16px; color: var(--ink-soft); max-width: 42ch; }
+
+  .surface-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+    margin: 40px 0 72px;
+  }
+  .surface {
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    background: var(--bg-elevated); display: flex; flex-direction: column;
+  }
+  .surface-body { padding: 24px 24px 28px; display: flex; flex-direction: column; flex: 1; }
+  .surface h2 { font-size: 20px; margin-bottom: 8px; }
+  .surface p { font-size: 14.5px; color: var(--ink-soft); line-height: 1.55; flex: 1; }
+  .surface .actions { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .surface pre {
+    margin-top: 18px; background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; font-size: 12.5px; overflow-x: auto;
+    color: var(--ink-soft); line-height: 1.5;
+  }
+  @media (max-width: 900px) { .surface-grid { grid-template-columns: 1fr; } }
+
+  .divider { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  section { padding: 72px 0; }
+  .section-head { max-width: 640px; margin-bottom: 36px; }
+  .section-head h2 { font-size: clamp(24px, 3.2vw, 32px); }
+  .section-head p { margin-top: 12px; color: var(--ink-soft); font-size: 15.5px; }
+
+  .dl-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  }
+  .dl-col { background: var(--bg); padding: 28px 26px; }
+  .dl-col h3 { font-size: 16px; margin-bottom: 16px; }
+  .dl-col a.row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+    font-size: 14px; color: var(--ink);
+  }
+  .dl-col a.row:last-child { border-bottom: 0; }
+  .dl-col a.row:hover { opacity: 1; color: var(--ink); }
+  .dl-col .meta { color: var(--ink-faint); font-size: 12.5px; }
+  .dl-col .note { margin-top: 16px; font-size: 13px; color: var(--ink-faint); line-height: 1.5; }
+  @media (max-width: 800px) { .dl-grid { grid-template-columns: 1fr; } }
+
+  .list-block { border-top: 1px solid var(--line); }
+  .list-row {
+    display: grid; grid-template-columns: 160px 1fr auto; gap: 20px; align-items: center;
+    padding: 18px 0; border-bottom: 1px solid var(--line);
+  }
+  .list-row .label { font-size: 15px; }
+  .list-row .desc { font-size: 14px; color: var(--ink-soft); }
+  @media (max-width: 700px) {
+    .list-row { grid-template-columns: 1fr; gap: 8px; }
+  }
+
+  footer { border-top: 1px solid var(--line); padding: 48px 0 36px; }
+  .foot-grid {
+    display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); gap: 32px; margin-bottom: 40px;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 12px; }
+  .foot-desc { font-size: 13.5px; color: var(--ink-soft); max-width: 240px; }
+  .foot-col h4 {
+    font-size: 12px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 14px;
+  }
+  .foot-col a { display: block; font-size: 14px; color: var(--ink-soft); padding: 4px 0; }
+  .foot-col a:hover { color: var(--ink); opacity: 1; }
+  .foot-bottom {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-faint);
+  }
+  .foot-bottom a { color: var(--ink-faint); }
+  @media (max-width: 800px) { .foot-grid { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.html" aria-label="Cheers home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+      </span>
+      Cheers
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="./index.html#product">Product</a>
+      <a href="./downloads.html" aria-current="page">Download</a>
+      <a href="./docs.html">Docs</a>
+      <a href="./index.html#developers">Developers</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="nav-text" href="./downloads.zh-CN.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+      <a class="btn btn-outline" href="https://github.com/ElePerson/Cheers">GitHub</a>
+      <a class="btn btn-solid" href="https://www.tocheers.com">Open app</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap">
+      <h1>Use Cheers everywhere you work</h1>
+      <p class="lead">Desktop, browser, connector, and mobile clients — one gateway, the same realtime protocol.</p>
+
+      <div class="surface-grid">
+        <article class="surface">
+          <div class="surface-body">
+            <h2>Desktop</h2>
+            <p>Native macOS app for Apple Silicon. Manage local ACP connectors, native approval banners, and open agent files in your editor.</p>
+            <div class="actions">
+              <a class="btn btn-solid btn-lg" href="https://github.com/ElePerson/Cheers/releases/download/desktop-v0.1.8/Cheers-macOS-AppleSilicon.dmg">Download for macOS ↓</a>
+            </div>
+          </div>
+        </article>
+
+        <article class="surface">
+          <div class="surface-body">
+            <h2>Web</h2>
+            <p>Full client in any modern browser — channels, Viewboard, Workbench. Nothing to install. PWA-ready with Web Push.</p>
+            <div class="actions">
+              <a class="btn btn-solid btn-lg" href="https://www.tocheers.com">Open web app →</a>
+            </div>
+          </div>
+        </article>
+
+        <article class="surface">
+          <div class="surface-body">
+            <h2>Connector</h2>
+            <p>Connect your own Claude / Codex / OpenCode agent to Cheers with the ACP connector daemon.</p>
+<pre>curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
+  "https://github.com/ElePerson/Cheers/releases/latest/download/cce-acp-connector-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"</pre>
+            <div class="actions">
+              <a class="btn btn-outline btn-lg" href="./connector.html">Connector guide →</a>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Desktop app for macOS</h2>
+        <p>Latest release <strong>desktop-v0.1.8</strong>. Unsigned preview — right-click → Open on first launch.</p>
+      </div>
+      <div class="dl-grid">
+        <div class="dl-col">
+          <h3>macOS</h3>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/desktop-v0.1.8/Cheers-macOS-AppleSilicon.dmg">
+            <span>Apple Silicon .dmg</span><span class="meta">↓</span>
+          </a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/desktop-v0.1.8/Cheers-macOS-AppleSilicon.app.tar.gz">
+            <span>App bundle .tar.gz</span><span class="meta">↓</span>
+          </a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/desktop-v0.1.8/SHA256SUMS.txt">
+            <span>SHA256 checksums</span><span class="meta">↓</span>
+          </a>
+          <p class="note">Apple Silicon only for now. Pick the newest <code>desktop-v*</code> tag on Releases.</p>
+        </div>
+        <div class="dl-col">
+          <h3>Windows</h3>
+          <p class="note" style="margin-top:0;">Native Windows build is not published yet. Use the <a href="https://www.tocheers.com">web app</a> today, or self-host the stack.</p>
+        </div>
+        <div class="dl-col">
+          <h3>Linux</h3>
+          <p class="note" style="margin-top:0;">No desktop package yet. Run the web client against a self-hosted gateway, or use Docker Compose / Helm.</p>
+          <a class="row" href="./index.html#deploy"><span>Self-host options</span><span class="meta">→</span></a>
+        </div>
+      </div>
+      <p style="margin-top:20px;font-size:14px;color:var(--ink-soft);">
+        <a href="https://github.com/ElePerson/Cheers/releases">View all releases →</a>
+      </p>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>ACP connector &amp; MCP server</h2>
+        <p>Prebuilt binaries from <strong>connector-v0.1.36</strong>. Full install, token, and update steps are in the connector guide.</p>
+      </div>
+      <div class="dl-grid">
+        <div class="dl-col">
+          <h3>macOS</h3>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-darwin-arm64"><span>Connector · arm64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-darwin-amd64"><span>Connector · amd64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-darwin-arm64"><span>MCP server · arm64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-darwin-amd64"><span>MCP server · amd64</span><span class="meta">↓</span></a>
+        </div>
+        <div class="dl-col">
+          <h3>Linux</h3>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-linux-arm64"><span>Connector · arm64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-linux-amd64"><span>Connector · amd64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-linux-arm64"><span>MCP server · arm64</span><span class="meta">↓</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-linux-amd64"><span>MCP server · amd64</span><span class="meta">↓</span></a>
+        </div>
+        <div class="dl-col">
+          <h3>Guides</h3>
+          <a class="row" href="./connector.html"><span>Connector setup</span><span class="meta">→</span></a>
+          <a class="row" href="./mcp.html"><span>MCP tool reference</span><span class="meta">→</span></a>
+          <a class="row" href="https://github.com/ElePerson/Cheers/releases/tag/connector-v0.1.36"><span>Release notes</span><span class="meta">→</span></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Mobile</h2>
+        <p>Native clients speak the same gateway protocol. Build from source today — App Store / Play listings are not live yet.</p>
+      </div>
+      <div class="list-block">
+        <div class="list-row">
+          <div class="label">iOS</div>
+          <div class="desc">SwiftUI client for iOS 17+. Streaming chat, approval cards, Keychain sessions.</div>
+          <a class="btn btn-outline" href="https://github.com/ElePerson/Cheers/blob/main/apps/ios/README.md">Build guide</a>
+        </div>
+        <div class="list-row">
+          <div class="label">Android</div>
+          <div class="desc">Kotlin + Jetpack Compose on Material 3. Streaming deltas, typing indicators, reconnect catch-up.</div>
+          <a class="btn btn-outline" href="https://github.com/ElePerson/Cheers/blob/main/apps/android/README.md">Build guide</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+          </span>
+          Cheers
+        </div>
+        <p class="foot-desc">Open-source collaboration for humans and AI agents. MIT licensed.</p>
+      </div>
+      <div class="foot-col">
+        <h4>Product</h4>
+        <a href="./index.html#product">Overview</a>
+        <a href="./downloads.html">Download</a>
+        <a href="https://www.tocheers.com">Open app</a>
+      </div>
+      <div class="foot-col">
+        <h4>Developers</h4>
+        <a href="./docs.html">Docs</a>
+        <a href="./connector.html">Connector</a>
+        <a href="./mcp.html">MCP tools</a>
+        <a href="https://github.com/ElePerson/Cheers">GitHub</a>
+      </div>
+      <div class="foot-col">
+        <h4>Legal</h4>
+        <a href="./privacy.html">Privacy</a>
+        <a href="./terms.html">Terms</a>
+        <a href="./support.html">Support</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© Cheers · MIT License</span>
+      <span><a href="./downloads.zh-CN.html" hreflang="zh-CN">中文</a></span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
