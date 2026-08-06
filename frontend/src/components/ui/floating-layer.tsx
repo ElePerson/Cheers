@@ -128,5 +128,32 @@ export function FloatingLayer({
   );
 }
 
-/** Exported for unit tests. */
-export { resolvePlacement };
+/**
+ * Viewport top-left for a free-floating panel near an anchor. Flips above when
+ * the preferred side is cramped; clamps so a grabbable sliver stays on-screen.
+ */
+function placeNearRect(
+  anchor: DOMRect,
+  panelW: number,
+  panelH: number,
+  preferred: Placement = "down",
+  viewport: { width: number; height: number } = {
+    width: typeof window !== "undefined" ? window.innerWidth : 0,
+    height: typeof window !== "undefined" ? window.innerHeight : 0,
+  },
+): { x: number; y: number } {
+  const spaceBelow = viewport.height - anchor.bottom - GAP;
+  const spaceAbove = anchor.top - GAP;
+  const side = resolvePlacement(preferred, spaceAbove, spaceBelow);
+  const rawY = side === "down" ? anchor.bottom + GAP : anchor.top - GAP - panelH;
+  const rawX = anchor.left;
+  const maxX = Math.max(GAP, viewport.width - Math.min(panelW, viewport.width - GAP * 2) - GAP);
+  const maxY = Math.max(GAP, viewport.height - Math.min(panelH, viewport.height - GAP * 2) - GAP);
+  return {
+    x: Math.round(Math.min(Math.max(GAP, rawX), maxX)),
+    y: Math.round(Math.min(Math.max(GAP, rawY), maxY)),
+  };
+}
+
+/** Exported for unit tests and viewport-float callers. */
+export { resolvePlacement, placeNearRect };

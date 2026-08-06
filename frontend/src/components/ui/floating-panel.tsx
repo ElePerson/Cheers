@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useContext, useEffect, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { Maximize2, Minimize2, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -17,6 +17,8 @@ import type { SpawnKind } from "@/features/chat/workbench/laneSnap";
 // it's `absolute`, drag/resize stay inside that box, and dragging snaps to the
 // lane's grid zones (FancyZones-style). With no lane (e.g. the Channel files
 // dialog on its own) it floats `fixed` over the whole viewport.
+// Pass `viewport` when the panel is portaled to `document.body` — React context
+// still sees the lane, but body-mounted `absolute` is the wrong containing block.
 //
 // Mobile: a full-screen sheet (drag/resize/minimize disabled), mirroring
 // Dialog's fullScreenOnMobile behavior so heavy panels are never crushed.
@@ -31,6 +33,9 @@ export function FloatingPanel({
   headerExtra,
   collapsedSummary,
   spawnKind,
+  viewport = false,
+  anchorRef,
+  reanchorOnOpen = false,
   children,
 }: {
   title: ReactNode;
@@ -54,20 +59,30 @@ export function FloatingPanel({
   collapsedSummary?: (expand: () => void) => ReactNode;
   /** Bias first-open placement inside the work lane (fill when alone). */
   spawnKind?: SpawnKind;
+  /** Force viewport-fixed float even inside LaneBoundsContext (body portals). */
+  viewport?: boolean;
+  /** Place near this trigger on open (viewport mode). */
+  anchorRef?: RefObject<HTMLElement | null>;
+  /** Recompute x/y from the anchor every open; keep resized w/h. */
+  reanchorOnOpen?: boolean;
   children: ReactNode;
 }) {
   const isMobile = useIsMobile();
-  const getBounds = useContext(LaneBoundsContext);
+  const laneBounds = useContext(LaneBoundsContext);
   // Bounded to the lane when one is present (snap on); otherwise floats free over
-  // the viewport (snap off — nothing to snap to).
+  // the viewport (snap off — nothing to snap to). `viewport` opts out of the lane
+  // even when context is set (portals to document.body must do this).
+  const getBounds = viewport ? undefined : (laneBounds ?? undefined);
   const drag = useWindowDrag(
     storageKey,
     !isMobile,
-    getBounds ?? undefined,
+    getBounds,
     {
       snap: !isMobile && getBounds != null,
       spawnKind: !isMobile && getBounds != null ? spawnKind : undefined,
       open: true,
+      anchorRef: viewport ? anchorRef : undefined,
+      reanchorOnOpen: viewport ? reanchorOnOpen : false,
     }
   );
   // Minimized = just the title bar (a compact chip you can park anywhere).
