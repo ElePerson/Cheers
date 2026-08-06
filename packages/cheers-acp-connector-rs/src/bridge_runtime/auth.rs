@@ -117,10 +117,7 @@ impl RuntimeContext {
                 .clone()
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| detail.to_string());
-            let has_link = method
-                .link
-                .as_deref()
-                .is_some_and(|s| !s.trim().is_empty());
+            let has_link = method.link.as_deref().is_some_and(|s| !s.trim().is_empty());
             if has_link {
                 base
             } else {
