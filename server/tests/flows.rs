@@ -514,6 +514,9 @@ async fn flow4_done_finalizes_and_second_done_is_idempotent(db: PgPool) {
     let locator: Arc<dyn BotLocator> = Arc::new(CountingBotLocator::default());
     let bot = Uuid::new_v4();
 
+    let trigger = Uuid::new_v4();
+    let session = Uuid::new_v4();
+
     // 派发占位（在线 → Dispatched），并注册流。
     let res = dispatcher::dispatch(
         &db,
@@ -522,13 +525,13 @@ async fn flow4_done_finalizes_and_second_done_is_idempotent(db: PgPool) {
         &locator,
         DispatchParams {
             context_bundle: None,
-            trigger_msg_id: Uuid::new_v4(),
+            trigger_msg_id: trigger,
             trigger_seq: 0,
             bot_id: bot,
             channel_id: ch,
             depth: 0,
             provider_session_key: "cheers:test".into(),
-            session_id: None,
+            session_id: Some(session),
             chain_id: None,
         },
         &dispatcher::MediaCache::default(),
@@ -539,24 +542,65 @@ async fn flow4_done_finalizes_and_second_done_is_idempotent(db: PgPool) {
         _ => panic!("expected Dispatched"),
     };
 
+    // Nested under trigger + session stamped before finalize.
+    let pre = sqlx::query(
+        "SELECT in_reply_to_msg_id, content_data FROM messages WHERE msg_id = $1",
+    )
+    .bind(placeholder.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    let reply_to: Option<String> = pre.try_get("in_reply_to_msg_id").unwrap();
+    assert_eq!(
+        reply_to.as_deref(),
+        Some(trigger.to_string().as_str()),
+        "bot placeholder nests under trigger"
+    );
+    let content_data: Option<Value> = pre.try_get("content_data").unwrap();
+    assert_eq!(
+        content_data
+            .as_ref()
+            .and_then(|v| v.get("session_id"))
+            .and_then(|v| v.as_str()),
+        Some(session.to_string().as_str()),
+        "placeholder content_data carries session_id for reply reuse"
+    );
+
     // done 帧 → finalize。
     let frame = serde_json::json!({ "msg_id": placeholder.to_string(), "content": "hello" });
     stream::handle_done(&registry, &fanout, &db, &locator, bot, "", &frame)
         .await
         .expect("first done should finalize");
 
-    let row =
-        sqlx::query("SELECT is_partial, channel_seq, content FROM messages WHERE msg_id = $1")
-            .bind(placeholder.to_string())
-            .fetch_one(&db)
-            .await
-            .unwrap();
+    let row = sqlx::query(
+        "SELECT is_partial, channel_seq, content, in_reply_to_msg_id, content_data
+         FROM messages WHERE msg_id = $1",
+    )
+    .bind(placeholder.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
     let is_partial: bool = row.try_get("is_partial").unwrap();
     let seq: Option<i64> = row.try_get("channel_seq").unwrap();
     let content: String = row.try_get("content").unwrap();
     assert!(!is_partial, "done 后占位应 finalize");
     assert_eq!(seq, Some(1), "finalize 时才分配 seq=1（占位期不耗 seq）");
     assert_eq!(content, "hello");
+    let reply_to_after: Option<String> = row.try_get("in_reply_to_msg_id").unwrap();
+    assert_eq!(
+        reply_to_after.as_deref(),
+        Some(trigger.to_string().as_str()),
+        "finalize must keep in_reply_to_msg_id"
+    );
+    let content_data_after: Option<Value> = row.try_get("content_data").unwrap();
+    assert_eq!(
+        content_data_after
+            .as_ref()
+            .and_then(|v| v.get("session_id"))
+            .and_then(|v| v.as_str()),
+        Some(session.to_string().as_str()),
+        "finalize must keep content_data.session_id"
+    );
 
     // 迟到的第二个 done：DB 守卫拦截 → Err。
     let second = stream::handle_done(&registry, &fanout, &db, &locator, bot, "", &frame).await;

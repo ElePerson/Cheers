@@ -314,7 +314,8 @@ pub async fn handle_done(
              is_partial = FALSE,
              file_ids = COALESCE($3::jsonb, file_ids)
          WHERE msg_id = $4 AND is_partial = TRUE AND channel_seq IS NULL
-         RETURNING channel_id, channel_seq, depth, file_ids, msg_type, in_reply_to_msg_id AS reply_to_msg_id, chain_id, context_bundle",
+         RETURNING channel_id, channel_seq, depth, file_ids, msg_type,
+                   in_reply_to_msg_id AS reply_to_msg_id, chain_id, context_bundle, content_data",
     )
     .bind(channel_seq)
     .bind(content)
@@ -385,6 +386,12 @@ pub async fn handle_done(
             "file_ids": file_ids,
             "mentions": mention_dtos(&mentions),
             "files": files,
+            // session_id (and any other bot-turn metadata) stamped at placeholder
+            // create — keep it on finalize so Reply can reuse session/model.
+            "content_data": details
+                .try_get::<Option<Value>, _>("content_data")
+                .ok()
+                .flatten(),
             // Preserve the F2 handoff card on the finalized bot message (round-trips
             // via the DTO too; here it keeps the card without a history refetch).
             "context_bundle": details

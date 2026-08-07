@@ -129,6 +129,7 @@ struct BotTracePanelView: View {
 
     private var summaryDetail: String? {
         guard let result = singleGitStatus else { return nil }
+        if result.clean { return String(localized: "Clean") }
         return String(localized: "\(result.files.count) files changed")
     }
 

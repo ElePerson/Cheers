@@ -204,7 +204,7 @@ function AuditRow({
 }: {
   e: AuditEvent;
   memberOf: MemberLookup;
-  onJump?: (msgId: string) => void;
+  onJump?: (msgId: string, requestId?: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const t = tone(e);
@@ -248,8 +248,8 @@ function AuditRow({
             {e.msg_id && onJump ? (
               <button
                 type="button"
-                onClick={() => onJump(e.msg_id!)}
-                title="Jump to this message"
+                onClick={() => onJump(e.msg_id!, e.request_id)}
+                title="Jump to this approval in chat"
                 className="block w-full text-left text-xs text-zinc-200 font-medium leading-snug break-words hover:text-indigo-300 transition-colors"
               >
                 {content || t.label}
