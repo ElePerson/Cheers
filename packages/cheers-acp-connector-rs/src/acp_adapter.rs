@@ -68,15 +68,35 @@ fn auth_method_info(m: &Value) -> Option<AuthMethodInfo> {
 }
 
 fn is_api_key_auth_method(method: &AuthMethodInfo) -> bool {
-    matches!(method.id.as_str(), "api-key" | "api_key")
+    let id = method.id.to_ascii_lowercase();
+    matches!(
+        id.as_str(),
+        "api-key" | "api_key" | "apikey" | "env" | "envvar" | "env_var"
+    ) || id.contains("api-key")
+        || id.contains("api_key")
+        || method.auth_type.as_deref().is_some_and(|t| {
+            matches!(
+                t.to_ascii_lowercase().as_str(),
+                "env" | "envvar" | "env_var"
+            )
+        })
 }
 
 fn is_chatgpt_auth_method(method: &AuthMethodInfo) -> bool {
     matches!(method.id.as_str(), "chat-gpt" | "chatgpt" | "chat_gpt")
 }
 
-fn agent_env_has_openai_api_key(agent_env: &BTreeMap<String, String>) -> bool {
-    ["CODEX_API_KEY", "OPENAI_API_KEY"].iter().any(|name| {
+/// True when the agent child env already has a vendor API / OAuth token that
+/// can satisfy an EnvVar / api-key auth method (Codex, Claude, …).
+fn agent_env_has_api_credentials(agent_env: &BTreeMap<String, String>) -> bool {
+    [
+        "CODEX_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+    ]
+    .iter()
+    .any(|name| {
         agent_env
             .get(*name)
             .map(|v| !v.trim().is_empty())
@@ -88,9 +108,11 @@ fn agent_env_has_openai_api_key(agent_env: &BTreeMap<String, String>) -> bool {
 ///
 /// Wire shape uses `id` or `methodId`. When several methods exist, agents may
 /// list `api-key` first (Codex does) even though a ChatGPT / session method is
-/// also advertised. Prefer `api-key` only when `CODEX_API_KEY` / `OPENAI_API_KEY`
-/// is actually present in the agent child env; otherwise prefer `chat-gpt` (or
-/// any non-api-key method) so subscription login via `HOME`/`~/.codex` works.
+/// also advertised. Prefer `api-key` / EnvVar only when a matching credential
+/// (`CODEX_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` /
+/// `CLAUDE_CODE_OAUTH_TOKEN`) is actually present in the agent child env;
+/// otherwise prefer `chat-gpt` (or any non-api-key method) so subscription
+/// login via `HOME`/`~/.codex` / `~/.claude` works.
 pub(crate) fn preferred_auth_method(
     initialize: &Value,
     agent_env: &BTreeMap<String, String>,
@@ -105,7 +127,7 @@ pub(crate) fn preferred_auth_method(
         return None;
     }
 
-    let has_api_key = agent_env_has_openai_api_key(agent_env);
+    let has_api_key = agent_env_has_api_credentials(agent_env);
     if has_api_key {
         if let Some(method) = methods.iter().find(|m| is_api_key_auth_method(m)) {
             return Some(method.clone());
@@ -138,6 +160,10 @@ pub(crate) fn looks_like_auth_error(err: &str) -> bool {
         || lower.contains("auth required")
         || lower.contains("please log in")
         || lower.contains("please sign in")
+        || lower.contains("not authenticated")
+        || lower.contains("missing api key")
+        || lower.contains("invalid api key")
+        || lower.contains("api key required")
         || (lower.contains("unauthorized") && lower.contains("auth"))
 }
 
@@ -155,6 +181,35 @@ pub(crate) fn auth_failure_hint(method: &AuthMethodInfo) -> String {
              Agent methods usually open a browser/CLI login when authenticate runs."
         ),
     }
+}
+
+/// Extra operator guidance when the agent auth method has no browser/login URL.
+/// Headless Claude/Codex API-key flows typically advertise EnvVar methods without
+/// `link` — Cheers must tell the owner how to fix credentials on the connector host.
+pub(crate) fn no_link_auth_operator_hint(
+    method: &AuthMethodInfo,
+    agent_env: &BTreeMap<String, String>,
+) -> String {
+    let has_creds = agent_env_has_api_credentials(agent_env);
+    if has_creds {
+        return "Credentials are present in the connector→agent env, but auth still failed. \
+                Check the key/token is valid, restart the connector if you just rotated it, \
+                then tap \"I've signed in\" to retry."
+            .into();
+    }
+    if is_api_key_auth_method(method) {
+        return "This auth method has no login URL. On the machine running the connector, put \
+                ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN (Claude) or OPENAI_API_KEY / \
+                CODEX_API_KEY (Codex) into the *connector service* environment — e.g. systemd \
+                `--user` EnvironmentFile=~/.cheers/secrets/<bot>.env, or re-run install.sh with \
+                that variable exported — then restart the connector and tap \"I've signed in\". \
+                Interactive shell exports alone do not reach launchd/systemd."
+            .into();
+    }
+    "This auth method has no login URL. Complete login on the connector host (e.g. `claude` / \
+     `codex` CLI under the same HOME the connector uses), or set the vendor API key in the \
+     connector service environment, restart the connector, then tap \"I've signed in\"."
+        .into()
 }
 
 /// The outcome of ACP protocol-version negotiation given the version the agent
@@ -1413,6 +1468,44 @@ mod tests {
         assert_eq!(
             preferred_auth_method_id(&init, &with_key).as_deref(),
             Some("api-key")
+        );
+
+        let mut with_anthropic = BTreeMap::new();
+        with_anthropic.insert("ANTHROPIC_API_KEY".into(), "sk-ant-test".into());
+        assert_eq!(
+            preferred_auth_method_id(&init, &with_anthropic).as_deref(),
+            Some("api-key")
+        );
+
+        let claude_init = json!({
+            "authMethods": [
+                { "methodId": "env", "name": "API Key", "type": "env" },
+                { "methodId": "claude-login", "name": "Claude subscription" }
+            ]
+        });
+        assert_eq!(
+            preferred_auth_method_id(&claude_init, &empty).as_deref(),
+            Some("claude-login")
+        );
+        assert_eq!(
+            preferred_auth_method_id(&claude_init, &with_anthropic).as_deref(),
+            Some("env")
+        );
+
+        // ACP wire type is `env_var` (bridge-protocol / AuthMethodInfo docs).
+        let env_var_wire = json!({
+            "authMethods": [
+                { "methodId": "anthropic-key", "name": "API Key", "type": "env_var" },
+                { "methodId": "claude-login", "name": "Claude subscription", "type": "agent" }
+            ]
+        });
+        assert_eq!(
+            preferred_auth_method_id(&env_var_wire, &empty).as_deref(),
+            Some("claude-login")
+        );
+        assert_eq!(
+            preferred_auth_method_id(&env_var_wire, &with_anthropic).as_deref(),
+            Some("anthropic-key")
         );
 
         assert_eq!(preferred_auth_method_id(&json!({}), &empty), None);

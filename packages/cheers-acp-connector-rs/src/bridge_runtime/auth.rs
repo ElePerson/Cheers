@@ -7,7 +7,9 @@
 //! than `request_permission`.
 
 use super::*;
-use crate::acp_adapter::{looks_like_auth_error, preferred_auth_method, AuthMethodInfo};
+use crate::acp_adapter::{
+    looks_like_auth_error, no_link_auth_operator_hint, preferred_auth_method, AuthMethodInfo,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AuthAckAction {
@@ -109,11 +111,24 @@ impl RuntimeContext {
                 "ACP auth_required timed out waiting for human acknowledgment"
             );
         });
-        let description = method
-            .description
-            .clone()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| detail.to_string());
+        let description = {
+            let base = method
+                .description
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| detail.to_string());
+            let has_link = method.link.as_deref().is_some_and(|s| !s.trim().is_empty());
+            if has_link {
+                base
+            } else {
+                let hint = no_link_auth_operator_hint(&method, &self.config.agent.env);
+                if hint.is_empty() {
+                    base
+                } else {
+                    format!("{base}\n\n{hint}")
+                }
+            }
+        };
         tracing::info!(
             account = %self.account_id,
             request_id = %request_id,
@@ -188,6 +203,7 @@ mod tests {
             "ACP authenticate(cursor_login) failed: not logged in"
         ));
         assert!(looks_like_auth_error("Please sign in to continue"));
+        assert!(looks_like_auth_error("missing api key for Anthropic"));
         assert!(!looks_like_auth_error("tool call timed out"));
         assert!(!looks_like_auth_error("session not found"));
     }

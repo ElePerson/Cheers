@@ -12,8 +12,6 @@ struct SettingsView: View {
     @State private var showChangePassword = false
     @State private var showTwoFactor = false
     @State private var showPasskeys = false
-    @State private var showAppleAccount = false
-    @State private var showGoogleAccount = false
     @State private var showBlockedUsers = false
     @State private var showAIConsents = false
     @State private var showDeleteAccount = false
@@ -21,13 +19,18 @@ struct SettingsView: View {
     @State private var showAccountSessions = false
     @State private var showProfileEdit = false
     @State private var showSwitchServerConfirm = false
+    @State private var appleIdentity: ExternalIdentityStatusDto?
+    @State private var googleIdentity: ExternalIdentityStatusDto?
 
     var body: some View {
         List {
             profileSection
             serverSection
+            securitySection
+            signInMethodsSection
+            privacySection
+            sessionSection
             legalSection
-            accountSection
         }
         .scrollContentBackground(.hidden)
         .background(Theme.bgApp)
@@ -64,8 +67,6 @@ struct SettingsView: View {
         .sheet(isPresented: $showPasskeys) {
             PasskeySettingsView()
         }
-        .sheet(isPresented: $showAppleAccount) { AppleAccountSheet() }
-        .sheet(isPresented: $showGoogleAccount) { GoogleAccountSheet() }
         .sheet(isPresented: $showBlockedUsers) { BlockedUsersSheet() }
         .sheet(isPresented: $showAIConsents) { AIConsentSettingsSheet() }
         .sheet(isPresented: $showDeleteAccount) { DeleteAccountSheet() }
@@ -76,7 +77,13 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showAccountSessions) { AccountSessionsSheet() }
         .sheet(isPresented: $showProfileEdit) { ProfileEditSheet() }
-        .task { await refreshProfileSummary() }
+        .task {
+            await refreshProfileSummary()
+            await refreshSignInMethodsSummary()
+        }
+        .onAppear {
+            Task { await refreshSignInMethodsSummary() }
+        }
     }
 
     private var displayName: String {
@@ -88,6 +95,25 @@ struct SettingsView: View {
     private func refreshProfileSummary() async {
         guard let api = app.api, let profile = try? await api.getMe() else { return }
         app.applyProfile(displayName: profile.displayName, avatarURL: profile.avatarURL)
+    }
+
+    private func refreshSignInMethodsSummary() async {
+        guard let api = app.api else { return }
+        async let apple = api.externalIdentityStatus(provider: "apple")
+        async let google = api.externalIdentityStatus(provider: "google")
+        appleIdentity = try? await apple
+        googleIdentity = try? await google
+    }
+
+    private var signInMethodsSummary: String {
+        let linked = [
+            appleIdentity?.linked == true ? "Apple" : nil,
+            googleIdentity?.linked == true ? "Google" : nil,
+        ].compactMap { $0 }
+        if linked.isEmpty {
+            return (appleIdentity == nil && googleIdentity == nil) ? "" : "None"
+        }
+        return linked.joined(separator: ", ")
     }
 
     private var profileSection: some View {
@@ -182,65 +208,75 @@ struct SettingsView: View {
         }
     }
 
-    private var accountSection: some View {
+    private var securitySection: some View {
         Section {
             if let workspace = shell.selectedWorkspace, workspace.kind != "personal" {
-                Button { showWorkspaceAdmin = true } label: {
-                    Label("Manage \(workspace.name)", systemImage: "building.2")
-                        .foregroundStyle(Theme.textBody)
+                settingsNavRow("Manage \(workspace.name)", systemImage: "building.2") {
+                    showWorkspaceAdmin = true
                 }
-                .listRowBackground(Theme.bgSurface)
             }
-
-            Button { showAccountSessions = true } label: {
-                Label("Devices and sessions", systemImage: "laptopcomputer.and.iphone")
-                    .foregroundStyle(Theme.textBody)
+            settingsNavRow("Change password", systemImage: "key") {
+                showChangePassword = true
             }
-            .listRowBackground(Theme.bgSurface)
-
-            Button { showChangePassword = true } label: {
-                Label("Change password", systemImage: "key")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.textBody)
+            settingsNavRow("Two-factor authentication", systemImage: "lock.shield") {
+                showTwoFactor = true
             }
-            .listRowBackground(Theme.bgSurface)
-
-            Button { showTwoFactor = true } label: {
-                Label("Two-factor authentication", systemImage: "lock.shield")
-                    .foregroundStyle(Theme.textBody)
+            settingsNavRow("Passkeys", systemImage: "person.badge.key") {
+                showPasskeys = true
             }
-            .listRowBackground(Theme.bgSurface)
-
-            Button { showPasskeys = true } label: {
-                Label("Passkeys", systemImage: "person.badge.key")
-                    .foregroundStyle(Theme.textBody)
+            settingsNavRow("Devices and sessions", systemImage: "laptopcomputer.and.iphone") {
+                showAccountSessions = true
             }
-            .listRowBackground(Theme.bgSurface)
+        } header: {
+            sectionHeader("Security")
+        }
+    }
 
-            Button { showAppleAccount = true } label: {
-                Label("Sign in with Apple", systemImage: "apple.logo")
-                    .foregroundStyle(Theme.textBody)
-            }
-            .listRowBackground(Theme.bgSurface)
-
-            Button { showGoogleAccount = true } label: {
-                Label("Google account", systemImage: "g.circle")
-                    .foregroundStyle(Theme.textBody)
-            }
-            .listRowBackground(Theme.bgSurface)
-
-            Button { showBlockedUsers = true } label: {
-                Label("Blocked users", systemImage: "hand.raised")
-                    .foregroundStyle(Theme.textBody)
+    private var signInMethodsSection: some View {
+        Section {
+            NavigationLink {
+                SignInMethodsView(
+                    appleIdentity: $appleIdentity,
+                    googleIdentity: $googleIdentity
+                )
+            } label: {
+                HStack {
+                    Label("Sign-in methods", systemImage: "link")
+                        .foregroundStyle(Theme.textBody)
+                    Spacer()
+                    if !signInMethodsSummary.isEmpty {
+                        Text(signInMethodsSummary)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.textMuted)
+                            .lineLimit(1)
+                    }
+                }
             }
             .listRowBackground(Theme.bgSurface)
+        } header: {
+            sectionHeader("Account")
+        } footer: {
+            Text("Link Apple or Google to sign in on other devices.")
+                .font(.caption)
+                .foregroundStyle(Theme.textFaint)
+        }
+    }
 
-            Button { showAIConsents = true } label: {
-                Label("External AI permissions", systemImage: "brain.head.profile")
-                    .foregroundStyle(Theme.textBody)
+    private var privacySection: some View {
+        Section {
+            settingsNavRow("Blocked users", systemImage: "hand.raised") {
+                showBlockedUsers = true
             }
-            .listRowBackground(Theme.bgSurface)
+            settingsNavRow("External AI permissions", systemImage: "brain.head.profile") {
+                showAIConsents = true
+            }
+        } header: {
+            sectionHeader("Privacy")
+        }
+    }
 
+    private var sessionSection: some View {
+        Section {
             Button {
                 showSignOutConfirm = true
             } label: {
@@ -263,8 +299,22 @@ struct SettingsView: View {
             }
             .listRowBackground(Theme.bgSurface)
         } header: {
-            sectionHeader("Account")
+            sectionHeader("Session")
         }
+    }
+
+    private func settingsNavRow(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Label(title, systemImage: systemImage)
+                    .foregroundStyle(Theme.textBody)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.textFaint)
+            }
+        }
+        .listRowBackground(Theme.bgSurface)
     }
 
     private var legalSection: some View {
@@ -632,156 +682,231 @@ private struct AppleAuthorizationControl: View {
     }
 }
 
-private struct AppleAccountSheet: View {
+private struct SignInMethodsView: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.dismiss) private var dismiss
-    @State private var status: AppleIdentityStatus?
+    @Binding var appleIdentity: ExternalIdentityStatusDto?
+    @Binding var googleIdentity: ExternalIdentityStatusDto?
+
     @State private var newPassword = ""
     @State private var confirmation = ""
     @State private var errorText: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                if let status {
-                    Section {
-                        Label(status.appleLinked ? "Apple account linked" : "Apple account not linked",
-                              systemImage: status.appleLinked ? "checkmark.shield" : "apple.logo")
-                    }
-                    if !status.appleLinked {
-                        Section("Link account") {
-                            Text("Authenticate both your current Cheers session and Apple account. Matching email addresses are never linked automatically.")
-                            AppleAuthorizationControl { payload in
-                                guard let api = app.api else { throw APIError.unauthorized }
-                                try await api.linkApple(payload)
-                                await load()
-                            }
-                        }
-                    } else if !status.hasPassword {
-                        Section("Add a password for Web sign-in") {
-                            SecureField("New password", text: $newPassword)
-                            SecureField("Confirm password", text: $confirmation)
-                            if newPassword.count < 12 && !newPassword.isEmpty { Text("Use at least 12 characters.").foregroundStyle(Theme.danger) }
-                            AppleAuthorizationControl { payload in
-                                guard newPassword.count >= 12, newPassword == confirmation else {
-                                    throw APIError.http(status: 400, detail: "Passwords must match and contain at least 12 characters.")
-                                }
-                                guard let api = app.api else { throw APIError.unauthorized }
-                                try await api.setPassword(newPassword, apple: payload)
-                                newPassword = ""; confirmation = ""; await load()
-                            }
-                        }
-                    } else {
-                        Section {
-                            Button("Unlink Apple", role: .destructive) { Task { await unlink() } }
-                        } footer: { Text("Your password remains available after unlinking Apple.") }
-                    }
-                } else { ProgressView() }
-                if let errorText { Section { Text(errorText).foregroundStyle(Theme.danger) } }
-            }
-            .navigationTitle("Sign in with Apple")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .task { await load() }
-        }
-    }
-
-    private func load() async {
-        do { status = try await app.api?.appleIdentityStatus(); errorText = nil }
-        catch { errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription }
-    }
-
-    private func unlink() async {
-        do { try await app.api?.unlinkApple(); await load() }
-        catch { errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription }
-    }
-}
-
-private struct GoogleAccountSheet: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.dismiss) private var dismiss
-    @State private var status: ExternalIdentityStatusDto?
-    @State private var errorText: String?
-    @State private var isBusy = false
+    @State private var busyProvider: String?
+    @State private var isLoading = false
     @State private var googleOAuth = GoogleOAuthSession()
 
     var body: some View {
-        NavigationStack {
-            Form {
-                if let status {
-                    Section {
-                        Label(
-                            status.linked ? "Google account linked" : "Google account not linked",
-                            systemImage: status.linked ? "checkmark.shield" : "g.circle"
-                        )
-                        if status.linked {
-                            if let email = status.email, !email.isEmpty {
-                                Text(email).foregroundStyle(Theme.textSecondary)
-                            } else if let name = status.displayName, !name.isEmpty {
-                                Text(name).foregroundStyle(Theme.textSecondary)
-                            }
-                        }
+        List {
+            Section {
+                providerRow(
+                    provider: "apple",
+                    title: "Apple",
+                    systemImage: "apple.logo",
+                    status: appleIdentity
+                )
+                providerRow(
+                    provider: "google",
+                    title: "Google",
+                    systemImage: "g.circle",
+                    status: googleIdentity
+                )
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Removing a provider signs out other sessions and removes trusted devices.")
+                    if unlinkBlockedByMissingMethod {
+                        Text("Add another sign-in method (password, Apple, Google, or passkey) before unlinking.")
                     }
-
-                    if status.linked {
-                        Section {
-                            Button("Unlink Google", role: .destructive) {
-                                Task { await unlink() }
-                            }
-                            .disabled(isBusy || !status.canUnlink || !status.recentAuthentication)
-                        } footer: {
-                            if !status.canUnlink {
-                                Text("Add another sign-in method (password, Apple, or passkey) before unlinking Google.")
-                            } else if !status.recentAuthentication {
-                                Text("Sign in again (within the last 5 minutes) to make this change.")
-                            } else {
-                                Text("Unlinking signs out other sessions and removes trusted devices.")
-                            }
-                        }
-                    } else {
-                        Section {
-                            Button {
-                                Task { await link() }
-                            } label: {
-                                if isBusy {
-                                    ProgressView()
-                                } else {
-                                    Text("Link Google")
-                                }
-                            }
-                            .disabled(isBusy || !status.recentAuthentication)
-                        } footer: {
-                            if !status.recentAuthentication {
-                                Text("Sign in again (within the last 5 minutes), then tap Link Google.")
-                            } else {
-                                Text("Opens Google sign-in and attaches that account to your current Cheers session.")
-                            }
-                        }
+                    if needsRecentAuthReminder {
+                        Text("Sign in again (within the last 5 minutes) before linking or unlinking.")
+                            .foregroundStyle(Theme.warning)
                     }
-                } else {
-                    ProgressView()
                 }
-                if let errorText {
-                    Section { Text(errorText).foregroundStyle(Theme.danger) }
+                .font(.caption)
+                .foregroundStyle(Theme.textFaint)
+            }
+
+            if let apple = appleIdentity, !apple.linked {
+                Section {
+                    Text("Authenticate both your current Cheers session and Apple account. Matching email addresses are never linked automatically.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                    AppleAuthorizationControl { payload in
+                        guard let api = app.api else { throw APIError.unauthorized }
+                        try await api.linkApple(payload)
+                        await load()
+                    }
+                    .disabled(busyProvider != nil || !(appleIdentity?.recentAuthentication ?? false))
+                    .opacity((appleIdentity?.recentAuthentication ?? false) ? 1 : 0.55)
+                } header: {
+                    Text("Link Apple")
+                } footer: {
+                    if appleIdentity?.recentAuthentication == false {
+                        Text("Sign in again (within the last 5 minutes), then link Apple.")
+                    }
                 }
             }
-            .navigationTitle("Google account")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .task { await load() }
+
+            if let apple = appleIdentity, apple.linked, !apple.hasPassword {
+                Section {
+                    SecureField("New password", text: $newPassword)
+                        .textContentType(.newPassword)
+                    SecureField("Confirm password", text: $confirmation)
+                        .textContentType(.newPassword)
+                    if !newPassword.isEmpty && newPassword.count < 12 {
+                        Text("Use at least 12 characters.")
+                            .foregroundStyle(Theme.danger)
+                    }
+                    AppleAuthorizationControl { payload in
+                        guard newPassword.count >= 12, newPassword == confirmation else {
+                            throw APIError.http(
+                                status: 400,
+                                detail: "Passwords must match and contain at least 12 characters."
+                            )
+                        }
+                        guard let api = app.api else { throw APIError.unauthorized }
+                        try await api.setPassword(newPassword, apple: payload)
+                        newPassword = ""
+                        confirmation = ""
+                        await load()
+                    }
+                } header: {
+                    Text("Add a password for Web sign-in")
+                }
+            }
+
+            if isLoading && appleIdentity == nil && googleIdentity == nil {
+                Section {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            if let errorText {
+                Section {
+                    Text(errorText).foregroundStyle(Theme.danger)
+                }
+            }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.bgApp)
+        .navigationTitle("Sign-in methods")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .refreshable { await load() }
+    }
+
+    private var needsRecentAuthReminder: Bool {
+        [appleIdentity, googleIdentity].compactMap { $0 }.contains { !$0.recentAuthentication }
+    }
+
+    private var unlinkBlockedByMissingMethod: Bool {
+        [appleIdentity, googleIdentity].compactMap { $0 }.contains { $0.linked && !$0.canUnlink }
+    }
+
+    @ViewBuilder
+    private func providerRow(
+        provider: String,
+        title: String,
+        systemImage: String,
+        status: ExternalIdentityStatusDto?
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(Theme.textBody)
+                    Text(subtitle(for: status))
+                        .font(.caption)
+                        .foregroundStyle(Theme.textMuted)
+                        .lineLimit(1)
+                }
+            } icon: {
+                Image(systemName: systemImage)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            Spacer(minLength: 8)
+
+            if let status {
+                trailingControl(provider: provider, title: title, status: status)
+            } else if isLoading {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .listRowBackground(Theme.bgSurface)
+    }
+
+    @ViewBuilder
+    private func trailingControl(provider: String, title: String, status: ExternalIdentityStatusDto) -> some View {
+        if status.linked {
+            Button("Unlink", role: .destructive) {
+                Task { await unlink(provider: provider) }
+            }
+            .disabled(busyProvider != nil || !status.canUnlink || !status.recentAuthentication)
+            .accessibilityHint(unlinkHint(for: status))
+        } else if provider == "google" {
+            Button {
+                Task { await linkGoogle() }
+            } label: {
+                if busyProvider == "google" {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Link")
+                }
+            }
+            .disabled(busyProvider != nil || !status.recentAuthentication)
+        }
+        // Apple link uses SignInWithAppleButton in the dedicated section below.
+    }
+
+    private func subtitle(for status: ExternalIdentityStatusDto?) -> String {
+        guard let status else { return "Loading…" }
+        if status.linked {
+            if let email = status.email, !email.isEmpty { return email }
+            if let name = status.displayName, !name.isEmpty { return name }
+            return "Linked"
+        }
+        return "Not linked"
+    }
+
+    private func unlinkHint(for status: ExternalIdentityStatusDto) -> String {
+        if !status.canUnlink {
+            return "Add another sign-in method first"
+        }
+        if !status.recentAuthentication {
+            return "Sign in again to make this change"
+        }
+        return "Unlink this provider"
     }
 
     private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        guard let api = app.api else { return }
         do {
-            status = try await app.api?.externalIdentityStatus(provider: "google")
+            async let apple = api.externalIdentityStatus(provider: "apple")
+            async let google = api.externalIdentityStatus(provider: "google")
+            appleIdentity = try await apple
+            googleIdentity = try await google
             errorText = nil
         } catch {
             errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
     }
 
-    private func link() async {
-        isBusy = true
-        defer { isBusy = false }
+    private func unlink(provider: String) async {
+        busyProvider = provider
+        defer { busyProvider = nil }
+        do {
+            try await app.api?.unlinkExternalIdentity(provider: provider)
+            await load()
+        } catch {
+            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func linkGoogle() async {
+        busyProvider = "google"
+        defer { busyProvider = nil }
         do {
             guard let api = app.api else { throw APIError.unauthorized }
             let started = try await api.startExternalIdentityOAuthLink(
@@ -805,17 +930,6 @@ private struct GoogleAccountSheet: View {
         } catch let oauthError as GoogleOAuthError {
             if case .cancelled = oauthError { return }
             errorText = oauthError.localizedDescription
-        } catch {
-            errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
-        }
-    }
-
-    private func unlink() async {
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            try await app.api?.unlinkExternalIdentity(provider: "google")
-            await load()
         } catch {
             errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }

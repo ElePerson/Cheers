@@ -71,7 +71,7 @@ Devin 的 codemap 是 **agent 边探索边维护的代码库认知地图**，不
 
 ```yaml
 codemap: 1                # schema 版本；渲染器 dataHas 认领的锚点
-repo: ElePerson/Cheers
+repo: haowei2000/Cheers
 updated: 2026-07-16T12:00:00Z   # bot 每次写入时更新
 focus: [gateway.resource]       # agent 当前工作焦点（渲染器高亮）
 

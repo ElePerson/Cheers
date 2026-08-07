@@ -10,6 +10,23 @@ interface Props {
   currentUserId?: string;
 }
 
+function isEnvAuthMethod(data: AuthRequiredContentData): boolean {
+  const id = (data.method_id ?? "").toLowerCase();
+  const typ = (data.auth_type ?? "").toLowerCase();
+  return (
+    typ === "env" ||
+    typ === "envvar" ||
+    typ === "env_var" ||
+    id === "env" ||
+    id === "envvar" ||
+    id === "env_var" ||
+    id === "api-key" ||
+    id === "api_key" ||
+    id.includes("api-key") ||
+    id.includes("api_key")
+  );
+}
+
 /**
  * ACP agent re-auth card. Distinct from tool-permission approvals: the owner
  * completes login on the connector host (or sets env credentials), then taps
@@ -29,6 +46,7 @@ export function AuthRequiredCard({ message, channelId, currentUserId }: Props) {
     "This agent needs authentication before it can continue.";
   const link = data.link?.trim() || null;
   const action = data.chosen_action;
+  const envAuth = isEnvAuthMethod(data);
 
   async function ack(next: "retry" | "cancel") {
     if (!channelId || !data.request_id || busy) return;
@@ -66,14 +84,16 @@ export function AuthRequiredCard({ message, channelId, currentUserId }: Props) {
         <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-zinc-100">{title}</p>
-          <p className="mt-1 text-xs leading-relaxed text-zinc-400">{description}</p>
+          <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-zinc-400">
+            {description}
+          </p>
           {data.method_id && (
             <p className="mt-1 font-mono text-[10px] text-zinc-500">
               method: {data.method_id}
               {data.auth_type ? ` · ${data.auth_type}` : ""}
             </p>
           )}
-          {link && (
+          {link ? (
             <a
               href={link}
               target="_blank"
@@ -82,6 +102,30 @@ export function AuthRequiredCard({ message, channelId, currentUserId }: Props) {
             >
               Open login page <ExternalLink className="h-3 w-3" />
             </a>
+          ) : (
+            <div className="mt-2 rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-2.5 py-2 text-[11px] leading-relaxed text-zinc-400">
+              {envAuth ? (
+                <>
+                  No login URL for this method — set{" "}
+                  <code className="text-zinc-300">ANTHROPIC_API_KEY</code> /{" "}
+                  <code className="text-zinc-300">CLAUDE_CODE_OAUTH_TOKEN</code>{" "}
+                  (or Codex{" "}
+                  <code className="text-zinc-300">OPENAI_API_KEY</code>) in the{" "}
+                  <span className="text-zinc-300">connector service</span> env on
+                  the agent host (systemd{" "}
+                  <code className="text-zinc-300">EnvironmentFile</code>, not
+                  just your shell), restart the connector, then confirm below.
+                </>
+              ) : (
+                <>
+                  No login URL from the agent. Finish auth on the connector host
+                  (CLI login under the same{" "}
+                  <code className="text-zinc-300">HOME</code>, or vendor API key
+                  in the connector service env), restart if needed, then confirm
+                  below.
+                </>
+              )}
+            </div>
           )}
           {isOwner ? (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -92,7 +136,7 @@ export function AuthRequiredCard({ message, channelId, currentUserId }: Props) {
                 className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
               >
                 {busy === "retry" && <Loader2 className="h-3 w-3 animate-spin" />}
-                I&apos;ve signed in
+                {link ? "I've signed in" : "Credentials set — retry"}
               </button>
               <button
                 type="button"

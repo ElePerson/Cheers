@@ -453,6 +453,10 @@ backend_may_set_cwd = true
 [accounts.{id}.policy.env]
 inherit = false
 allow   = [{env_allow}]
+# Headless API-key auth: put ANTHROPIC_API_KEY / OPENAI_API_KEY in the *connector
+# process* env (systemd EnvironmentFile / launchd EnvironmentVariables — install.sh
+# does this when those vars are exported at install time). Shell-only export does
+# not reach the keep-alive unit. Do not paste secrets into this TOML.
 
 [accounts.{id}.policy.config]
 backend_may_set_model = false
