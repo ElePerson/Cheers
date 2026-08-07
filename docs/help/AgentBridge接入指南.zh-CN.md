@@ -244,30 +244,36 @@ ACP Connector 适合把本机 stdio ACP agent 接到 Cheers。它本身负责：
 
 ### 4.1 安装 Rust ACP Connector
 
-推荐直接下载 [GitHub Releases](https://github.com/haowei2000/Cheers/releases/latest)
+推荐直接下载 [GitHub Releases](https://github.com/haowei2000/Cheers/releases)
 上的预编译二进制（无需 Rust 工具链；`release-connector` workflow 会按平台发布
-`cce-acp-connector-{darwin,linux}-{arm64,amd64}` 四个产物）：
+`cce-acp-connector-{darwin,linux}-{arm64,amd64}` 以及配套的 `cheers-mcp-server-*`）：
 
 ```bash
 os=$(uname -s | tr 'A-Z' 'a-z'); arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 mkdir -p ~/.cheers/bin
 curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
-  "https://github.com/haowei2000/Cheers/releases/latest/download/cce-acp-connector-$os-$arch"
-chmod +x ~/.cheers/bin/cce-acp-connector
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
+curl -fsSL -o ~/.cheers/bin/cheers-mcp-server \
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-$os-$arch"
+chmod +x ~/.cheers/bin/cce-acp-connector ~/.cheers/bin/cheers-mcp-server
 ~/.cheers/bin/cce-acp-connector --help   # 建议把 ~/.cheers/bin 加进 PATH
 ```
 
-> 需要固定版本时，把 `latest/download` 换成 `download/connector-v<版本号>`
-> （例如 `download/connector-v0.1.22`）。
+> 换版本时把 `connector-v0.1.36` 换成其他 `connector-v*` tag
+> （**不要**用 `releases/latest`——那指向桌面端）。
 >
 > 仓库还是**私有**时，匿名 curl 会 404 —— 有仓库权限的用户请改用
 > GitHub CLI 认证下载（先 `gh auth login`）：
 >
 > ```bash
-> gh release download connector-v0.1.22 -R haowei2000/Cheers \
+> gh release download connector-v0.1.36 -R haowei2000/Cheers \
 >   -p "cce-acp-connector-$os-$arch" -O ~/.cheers/bin/cce-acp-connector
-> chmod +x ~/.cheers/bin/cce-acp-connector
+> gh release download connector-v0.1.36 -R haowei2000/Cheers \
+>   -p "cheers-mcp-server-$os-$arch" -O ~/.cheers/bin/cheers-mcp-server
+> chmod +x ~/.cheers/bin/cce-acp-connector ~/.cheers/bin/cheers-mcp-server
 > ```
+>
+> MCP 伴生二进制必须放在连接器同目录——默认 `inject_cheers = true` 会在那里解析它。
 
 也可以从当前仓库源码安装（需要 Rust）：
 

@@ -38,24 +38,29 @@
 
 ### 1.1 获取连接器二进制（预编译 Release）
 
-直接从项目的 [GitHub Releases](https://github.com/haowei2000/Cheers/releases/latest)
-下载对应平台的二进制，无需 Rust 工具链（`release-connector` workflow 按 tag 发布
-`cce-acp-connector-{darwin,linux}-{arm64,amd64}` 四个产物）：
+直接从项目的 [GitHub Releases](https://github.com/haowei2000/Cheers/releases)
+下载对应平台的二进制，无需 Rust 工具链（`release-connector` workflow 按 `connector-v*` tag 发布
+`cce-acp-connector-{darwin,linux}-{arm64,amd64}` 以及配套的 `cheers-mcp-server-*`）：
 
 ```bash
 os=$(uname -s | tr 'A-Z' 'a-z'); arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 mkdir -p ~/.cheers/bin
 curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
-  "https://github.com/haowei2000/Cheers/releases/latest/download/cce-acp-connector-$os-$arch"
-chmod +x ~/.cheers/bin/cce-acp-connector
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
+curl -fsSL -o ~/.cheers/bin/cheers-mcp-server \
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-$os-$arch"
+chmod +x ~/.cheers/bin/cce-acp-connector ~/.cheers/bin/cheers-mcp-server
 export PATH="$HOME/.cheers/bin:$PATH"   # 写进 shell profile 长期生效
 cce-acp-connector --help
 ```
 
-需要固定版本时，把 `latest/download` 换成 `download/connector-v<版本号>`
-（例如 `download/connector-v0.1.22`）。仓库还是**私有**时匿名 curl 会 404，
+换版本时把 `connector-v0.1.36` 换成其他 `connector-v*` tag
+（**不要**用 `releases/latest`——那指向桌面端）。仓库还是**私有**时匿名 curl 会 404，
 有权限的用户改用 GitHub CLI 认证下载：
-`gh release download connector-v0.1.22 -R haowei2000/Cheers -p "cce-acp-connector-$os-$arch" -O ~/.cheers/bin/cce-acp-connector`。
+`gh release download connector-v0.1.36 -R haowei2000/Cheers -p "cce-acp-connector-$os-$arch" -O ~/.cheers/bin/cce-acp-connector`
+以及
+`gh release download connector-v0.1.36 -R haowei2000/Cheers -p "cheers-mcp-server-$os-$arch" -O ~/.cheers/bin/cheers-mcp-server`。
+MCP 伴生二进制必须放在连接器同目录——默认 `inject_cheers = true` 会在那里解析它。
 开发连接器本身的同学仍可用源码构建
 （`cargo build` → `target/debug/cce-acp-connector`）；下文命令默认
 `cce-acp-connector` 已在 `PATH` 上，两种方式均可。
@@ -68,6 +73,9 @@ cce-acp-connector --help
 
 ```
 ~/.cheers/
+├─ bin/
+│   ├─ cce-acp-connector
+│   └─ cheers-mcp-server         # inject_cheers 需要的同目录伴生二进制
 ├─ cheers-daemon.codex.toml      # bot：codex（一个文件一个 bot）
 ├─ cheers-daemon.claude.toml     # bot：claude
 ├─ secrets/

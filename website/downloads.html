@@ -199,9 +199,14 @@
         <article class="surface">
           <div class="surface-body">
             <h2>Connector</h2>
-            <p>Connect your own Claude / Codex / OpenCode agent to Cheers with the ACP connector daemon.</p>
-<pre>curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
-  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"</pre>
+            <p>Connect your own Claude / Codex / OpenCode agent to Cheers with the ACP connector daemon. The snippet also stages <code>cheers-mcp-server</code> beside it — required for default <code>inject_cheers</code>.</p>
+<pre>mkdir -p ~/.cheers/bin
+os=$(uname -s | tr A-Z a-z); arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
+curl -fsSL -o ~/.cheers/bin/cheers-mcp-server \
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-$os-$arch"
+chmod +x ~/.cheers/bin/cce-acp-connector ~/.cheers/bin/cheers-mcp-server</pre>
             <div class="actions">
               <a class="btn btn-outline btn-lg" href="./connector.html">Connector guide →</a>
             </div>
