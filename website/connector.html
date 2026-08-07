@@ -214,12 +214,13 @@ chmod +x ~/.cheers/bin/cce-acp-connector ~/.cheers/bin/cheers-mcp-server
 export PATH="$HOME/.cheers/bin:$PATH"   <span class="c"># add this line to your ~/.zshrc so it sticks</span>
 cce-acp-connector --help                <span class="c"># prints help = success</span></pre>
     <div class="callout"><strong>If the repo is private</strong>, plain <code>curl</code> returns a 404. Download with the
-      GitHub CLI instead, e.g.
-      <code>gh release download -R haowei2000/Cheers -p "cce-acp-connector-$os-$arch" -O ~/.cheers/bin/cce-acp-connector</code>
+      GitHub CLI instead (pin the <code>connector-v*</code> tag — omitting it hits the desktop
+      <code>latest</code> release):
+      <code>gh release download connector-v0.1.36 -R haowei2000/Cheers -p "cce-acp-connector-$os-$arch" -O ~/.cheers/bin/cce-acp-connector</code>
       and
-      <code>gh release download -R haowei2000/Cheers -p "cheers-mcp-server-$os-$arch" -O ~/.cheers/bin/cheers-mcp-server</code>
-      (with no tag, <code>gh</code> fetches the latest release). The MCP companion must sit next to the connector —
-      default <code>inject_cheers = true</code> resolves it there.</div>
+      <code>gh release download connector-v0.1.36 -R haowei2000/Cheers -p "cheers-mcp-server-$os-$arch" -O ~/.cheers/bin/cheers-mcp-server</code>,
+      then <code>chmod +x ~/.cheers/bin/cce-acp-connector ~/.cheers/bin/cheers-mcp-server</code>.
+      The MCP companion must sit next to the connector — default <code>inject_cheers = true</code> resolves it there.</div>
 
     <h2 id="token">4. Create the bot and get its token</h2>
     <p>A <strong>token</strong> is the connector's password to log in to the gateway as your bot. Get one in the UI:</p>
@@ -320,6 +321,7 @@ auto = true</pre>
     <h3>Option B — update by hand</h3>
     <p>Re-run the download from <a href="#install">step 3</a> (it overwrites the old binary), then restart:</p>
 <pre class="code">os=$(uname -s | tr 'A-Z' 'a-z'); arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+mkdir -p ~/.cheers/bin
 curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
   "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
 curl -fsSL -o ~/.cheers/bin/cheers-mcp-server \
