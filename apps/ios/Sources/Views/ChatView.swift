@@ -212,7 +212,11 @@ private enum ChatTimelineItem: Identifiable, Hashable {
         showAvatar: Bool,
         isLast: Bool,
         formattedTime: String,
-        repliedTo: MessageDto?
+        repliedTo: MessageDto?,
+        /// Nesting depth under a reply parent (0 = top-level root).
+        depth: Int,
+        /// Parent is in the loaded window — skip the quote strip.
+        hideReplyQuote: Bool
     )
 
     var id: String {
@@ -220,7 +224,7 @@ private enum ChatTimelineItem: Identifiable, Hashable {
         case .loadOlder: return "load-older"
         case .day(_, let key): return "day-\(key)"
         case .system(let message): return "sys-\(message.msgId)"
-        case .bubble(let message, _, _, _, _, _, _): return message.msgId
+        case .bubble(let message, _, _, _, _, _, _, _, _): return message.msgId
         }
     }
 }
@@ -252,6 +256,9 @@ struct ChatView: View {
     @State private var manualBottomTick = 0
     @State private var jumpTargetId: String?
     @State private var jumpTargetTick = 0
+    /// Deep-link into Agent steps for a specific approval request (from ViewBoard Audit).
+    @State private var focusTraceMsgId: String?
+    @State private var focusTraceRequestId: String?
     private let listModel: ConversationListModel?
 
     /// `model` comes from AppModel.chatModels so history survives channel
@@ -313,27 +320,10 @@ struct ChatView: View {
             model.detach()
             voice.detach()
         }
-        .sheet(item: $panel) { panel in
-            Group {
-                switch panel {
-                case .members:   MembersSheet(channel: model.channel)
-                case .viewboard: ViewBoardSheet(channelId: model.channel.channelId)
-                case .workbench:
-                    WorkbenchSheet(
-                        channelId: model.channel.channelId,
-                        onAddContext: { model.addContext($0) }
-                    )
-                case .remoteWorkspace:
-                    RemoteWorkspaceSheet(
-                        channelId: model.channel.channelId,
-                        onAddContext: { model.addContext($0) }
-                    )
-                case .taskClaims: TaskClaimManagementSheet(model: model)
-                case .settings:  ChannelSettingsSheet(channel: model.channel)
-                }
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+        .sheet(item: $panel) { selected in
+            channelPanelSheet(selected)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $forwardMessage) { message in
             ForwardSheet(message: message, convo: listModel)
@@ -555,7 +545,7 @@ struct ChatView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.link)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Replying to \(reply.senderName ?? (reply.isBot ? "Bot" : "message"))")
+                Text("Replying under \(reply.senderName ?? (reply.isBot ? "Bot" : "message"))")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text(reply.content.replacingOccurrences(of: "\n", with: " "))
@@ -565,7 +555,7 @@ struct ChatView: View {
             }
             Spacer()
             Button {
-                model.replyTo = nil
+                model.cancelReply()
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption.weight(.semibold))
@@ -640,6 +630,36 @@ struct ChatView: View {
         .accessibilityLabel("Channel options")
     }
 
+    @ViewBuilder
+    private func channelPanelSheet(_ selected: ChannelPanel) -> some View {
+        switch selected {
+        case .members:
+            MembersSheet(channel: model.channel)
+        case .viewboard:
+            ViewBoardSheet(
+                channelId: model.channel.channelId,
+                onJumpToMessage: { msgId, requestId in
+                    panel = nil
+                    jumpToMessage(msgId: msgId, requestId: requestId)
+                }
+            )
+        case .workbench:
+            WorkbenchSheet(
+                channelId: model.channel.channelId,
+                onAddContext: { model.addContext($0) }
+            )
+        case .remoteWorkspace:
+            RemoteWorkspaceSheet(
+                channelId: model.channel.channelId,
+                onAddContext: { model.addContext($0) }
+            )
+        case .taskClaims:
+            TaskClaimManagementSheet(model: model)
+        case .settings:
+            ChannelSettingsSheet(channel: model.channel)
+        }
+    }
+
     // MARK: Message list
 
     private var messageScroll: some View {
@@ -654,9 +674,15 @@ struct ChatView: View {
             scrollTargetId: jumpTargetId,
             scrollTargetTick: jumpTargetTick,
             highlightedMessageId: jumpTargetId,
+            focusTraceMsgId: focusTraceMsgId,
+            focusTraceRequestId: focusTraceRequestId,
             atBottom: $atBottom,
             onLoadOlder: { Task { await model.loadOlder() } },
-            onReply: { model.replyTo = $0 },
+            onReply: { message in
+                model.beginReply(to: message)
+                jumpTargetId = message.msgId
+                jumpTargetTick += 1
+            },
             onForward: { forwardMessage = $0 },
             onFile: { previewFile = $0 },
             onReport: { reportTarget = $0 },
@@ -676,12 +702,40 @@ struct ChatView: View {
     }
 
     private func jumpToSearchResult(_ message: MessageDto) {
+        jumpToMessage(msgId: message.msgId, requestId: nil, known: message)
+    }
+
+    /// Scroll/flash a message in the timeline. Remaps folded permission cards to
+    /// their source bot turn (web MessageList parity).
+    private func jumpToMessage(msgId: String, requestId: String?, known: MessageDto? = nil) {
         Task {
-            await model.loadAround(message)
-            jumpTargetId = message.msgId
+            var targetId = msgId
+            let existing = known ?? model.messages.first(where: { $0.msgId == msgId })
+            if let existing, let source = MessageTree.permissionSourceId(existing) {
+                targetId = source
+            }
+            if let existing, existing.msgId == targetId || MessageTree.permissionSourceId(existing) != nil {
+                // already in window (or we only need the source which may also be loaded)
+            } else if let existing {
+                await model.loadAround(existing)
+            } else if let stub = model.messages.first(where: { $0.msgId == targetId }) {
+                await model.loadAround(stub)
+            }
+            // Prefer source if the permission arrived later with source_msg_id.
+            if let loaded = model.messages.first(where: { $0.msgId == msgId }),
+               let source = MessageTree.permissionSourceId(loaded)
+            {
+                targetId = source
+            }
+            jumpTargetId = targetId
             jumpTargetTick += 1
+            // Stash request id for BotTracePanel deep-link via a short-lived state.
+            if let requestId {
+                focusTraceRequestId = requestId
+                focusTraceMsgId = targetId
+            }
             try? await Task.sleep(for: .seconds(1.6))
-            guard jumpTargetId == message.msgId else { return }
+            guard jumpTargetId == targetId else { return }
             jumpTargetId = nil
             jumpTargetTick += 1
         }
@@ -755,7 +809,7 @@ struct ChatView: View {
         var result: [ChatTimelineItem] = []
         result.reserveCapacity(visible.count + 8)
         var previousDay: Date?
-        let messagesById = Dictionary(uniqueKeysWithValues: visible.map { ($0.msgId, $0) })
+
         let displayMessages = visible.filter { message in
             guard message.msgType == "permission" else { return true }
             let resolved = PermissionRequest(contentData: message.contentData)?.resolved == true
@@ -763,24 +817,43 @@ struct ChatView: View {
             return !resolved
         }
 
-        for (index, message) in displayMessages.enumerated() {
+        // Pending approvals keyed by the bot turn they belong to — rendered
+        // immediately under that turn (web folds them into Agent steps).
+        var approvalsBySource: [String: [MessageDto]] = [:]
+        for message in displayMessages where message.msgType == "permission" {
+            if let source = MessageTree.permissionSourceId(message) {
+                approvalsBySource[source, default: []].append(message)
+            }
+        }
+
+        let tree = MessageTree.groupByReply(displayMessages)
+        // Top-level walk: roots keep channel order; children nest under parents.
+        let roots = tree.roots
+
+        func appendDayIfNeeded(for message: MessageDto, depth: Int) {
+            guard depth == 0 else { return }
             let day = message.createdDate
             if let day, !TimeFormat.sameDay(day, previousDay) {
                 result.append(.day(label: TimeFormat.dayLabel(day), key: message.msgId))
             }
             if day != nil { previousDay = day }
+        }
+
+        func emit(_ message: MessageDto, depth: Int, prevSibling: MessageDto?, nextSibling: MessageDto?) {
+            appendDayIfNeeded(for: message, depth: depth)
 
             let isSystem = message.senderType == "system"
                 || Self.systemTypes.contains(message.msgType ?? "")
             if isSystem {
                 result.append(.system(message))
-                continue
+                return
             }
 
             let isOwn = message.senderType == "user" && message.senderId == currentUserId
+            let kids = tree.childrenByParent[message.msgId] ?? []
 
             func groupable(_ other: MessageDto?) -> Bool {
-                guard let other else { return false }
+                guard depth == 0, let other else { return false }
                 let otherIsSystem = other.senderType == "system"
                     || Self.systemTypes.contains(other.msgType ?? "")
                 return !otherIsSystem
@@ -789,20 +862,45 @@ struct ChatView: View {
                     && TimeFormat.sameDay(other.createdDate, message.createdDate)
             }
 
-            let prev = index > 0 ? displayMessages[index - 1] : nil
-            let next = index + 1 < displayMessages.count ? displayMessages[index + 1] : nil
-            let isFirstInGroup = !groupable(prev)
-            let isLastInGroup = !groupable(next)
+            let isFirstInGroup = depth > 0 || !groupable(prevSibling)
+            let isLastInGroup = kids.isEmpty && (depth > 0 || !groupable(nextSibling))
+            let parentInView = message.replyToMsgId.flatMap { tree.byId[$0] } != nil
 
             result.append(.bubble(
                 message,
                 traceEvents: model.traceEvents(for: message.msgId),
                 isOwn: isOwn,
-                showAvatar: !isOwn && isFirstInGroup,   // web parity: avatar on the FIRST of a run, top-aligned
+                showAvatar: depth > 0 ? true : (!isOwn && isFirstInGroup),
                 isLast: isLastInGroup,
                 formattedTime: TimeFormat.time(message.createdDate),
-                repliedTo: message.replyToMsgId.flatMap { messagesById[$0] }
+                repliedTo: parentInView ? nil : message.replyToMsgId.flatMap { tree.byId[$0] },
+                depth: depth,
+                hideReplyQuote: parentInView
             ))
+
+            // Anchored pending approvals sit under the bot turn they belong to.
+            for approval in approvalsBySource[message.msgId] ?? [] {
+                result.append(.system(approval))
+            }
+
+            for (i, child) in kids.enumerated() {
+                let prev = i > 0 ? kids[i - 1] : nil
+                let next = i + 1 < kids.count ? kids[i + 1] : nil
+                emit(child, depth: depth + 1, prevSibling: prev, nextSibling: next)
+            }
+        }
+
+        for (index, root) in roots.enumerated() {
+            // Folded permissions are excluded from the tree — skip any that
+            // somehow landed as roots (orphans without source stay as system).
+            if MessageTree.isFoldedPermission(root) {
+                appendDayIfNeeded(for: root, depth: 0)
+                result.append(.system(root))
+                continue
+            }
+            let prev = index > 0 ? roots[index - 1] : nil
+            let next = index + 1 < roots.count ? roots[index + 1] : nil
+            emit(root, depth: 0, prevSibling: prev, nextSibling: next)
         }
         return result
     }
@@ -847,6 +945,8 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
     let scrollTargetId: String?
     let scrollTargetTick: Int
     let highlightedMessageId: String?
+    var focusTraceMsgId: String? = nil
+    var focusTraceRequestId: String? = nil
     @Binding var atBottom: Bool
     let onLoadOlder: () -> Void
     let onReply: (MessageDto) -> Void
@@ -913,6 +1013,9 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
                 ChatTimelineRow(
                     item: item,
                     channelId: self.parent.channelId,
+                    focusTraceRequestId: self.parent.focusTraceMsgId == itemId
+                        ? self.parent.focusTraceRequestId
+                        : nil,
                     onLoadOlder: self.parent.onLoadOlder,
                     onReply: self.parent.onReply,
                     onForward: self.parent.onForward,
@@ -1052,6 +1155,7 @@ private struct ChatCollectionTimeline: UIViewRepresentable {
 private struct ChatTimelineRow: View {
     let item: ChatTimelineItem
     let channelId: String
+    var focusTraceRequestId: String? = nil
     let onLoadOlder: () -> Void
     let onReply: (MessageDto) -> Void
     let onForward: (MessageDto) -> Void
@@ -1085,14 +1189,15 @@ private struct ChatTimelineRow: View {
             } else {
                 SystemMessageView(message: message)
             }
-        case .bubble(let message, let traceEvents, let isOwn, let showAvatar, let isLast, let time, let repliedTo):
+        case .bubble(let message, let traceEvents, let isOwn, let showAvatar, let isLast, let time, let repliedTo, let depth, let hideReplyQuote):
             VStack(alignment: isOwn ? .trailing : .leading, spacing: 0) {
                 MessageBubbleView(
                     message: message,
                     isOwn: isOwn,
                     showAvatar: showAvatar,
                     formattedTime: time,
-                    repliedTo: repliedTo,
+                    repliedTo: hideReplyQuote ? nil : repliedTo,
+                    nested: depth > 0,
                     onReply: { onReply(message) },
                     onForward: { onForward(message) },
                     onTapFile: onFile,
@@ -1105,14 +1210,25 @@ private struct ChatTimelineRow: View {
                         channelId: channelId,
                         msgId: message.msgId,
                         liveEvents: traceEvents,
-                        isRunning: message.isPartial == true
+                        isRunning: message.isPartial == true,
+                        focusRequestId: focusTraceRequestId
                     )
-                    .padding(.horizontal, Theme.space5)
+                    .padding(.leading, Theme.space5 + CGFloat(depth) * 16)
+                    .padding(.trailing, Theme.space5)
                 }
                 if message.msgType == "task_claim_confirmation" {
                     TaskClaimConfirmationFooter(message: message, channelId: channelId)
-                        .padding(.leading, 58)
+                        .padding(.leading, 58 + CGFloat(depth) * 16)
                         .padding(.top, 2)
+                }
+            }
+            .padding(.leading, CGFloat(depth) * 16)
+            .overlay(alignment: .leading) {
+                if depth > 0 {
+                    Rectangle()
+                        .fill(Theme.border.opacity(0.7))
+                        .frame(width: 2)
+                        .padding(.leading, CGFloat(depth - 1) * 16 + 8)
                 }
             }
             // Keep the trace visually attached to its message, then create a

@@ -11,6 +11,8 @@ struct BotTracePanelView: View {
     let msgId: String
     var liveEvents: [TraceEventDto] = []
     var isRunning = false
+    /// When set, auto-open the steps sheet (ViewBoard Approval deep-link).
+    var focusRequestId: String? = nil
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -81,6 +83,12 @@ struct BotTracePanelView: View {
                 if isRunning {
                     durableEvents = TraceEventContract.coalesce(durableEvents ?? [], latest)
                 }
+            }
+            .onChange(of: focusRequestId) { _, requestId in
+                if requestId != nil { showingSheet = true }
+            }
+            .onAppear {
+                if focusRequestId != nil { showingSheet = true }
             }
         }
     }
