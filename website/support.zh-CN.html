@@ -1,16 +1,204 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Cheers 支持</title><link rel="alternate" hreflang="en" href="./support.html"><style>body{max-width:760px;margin:0 auto;padding:40px 22px;font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033}h1{line-height:1.2}h2{margin-top:2em}a{color:#9a5a00}</style></head>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cheers · 支持</title>
+<meta name="description" content="联系 Cheers 获取账户、付费、无障碍或技术支持。" />
+<link rel="alternate" hreflang="en" href="./support.html" />
+<link rel="alternate" hreflang="zh-CN" href="./support.zh-CN.html" />
+<style>
+  :root {
+    --bg: #14120b; --bg-elevated: #1c1913; --bg-soft: #221f18;
+    --ink: #edecec; --ink-soft: #a8a29e; --ink-faint: #78716c;
+    --line: rgba(237, 236, 236, 0.10); --line-strong: rgba(237, 236, 236, 0.16);
+    --btn: #edecec; --btn-ink: #14120b;
+    --maxw: 1120px; --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --font: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink);
+    line-height: 1.5; font-weight: 400; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { opacity: 0.72; }
+  h1, h2, h3 { font-weight: 400; letter-spacing: -0.025em; line-height: 1.2; margin: 0; }
+  p { margin: 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(16px);
+  }
+  .nav-inner {
+    display: flex; align-items: center; gap: 8px;
+    height: 56px; max-width: 1280px; margin: 0 auto; padding: 0 24px;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: var(--ink); }
+  .brand:hover { opacity: 1; }
+  .brand-mark { width: 18px; height: 18px; display: grid; place-items: center; }
+  .brand-mark svg { width: 18px; height: 18px; }
+  .nav-links { display: flex; align-items: center; gap: 2px; margin-left: 28px; }
+  .nav-links a { font-size: 14px; color: var(--ink); padding: 6px 14px; border-radius: 999px; }
+  .nav-links a:hover, .nav-links a[aria-current="page"] { opacity: 1; background: rgba(237,236,236,.06); }
+  .nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .nav-text { font-size: 14px; color: var(--ink); padding: 4px 8px; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font-family: inherit; font-size: 14px; font-weight: 400;
+    border-radius: 999px; border: 1px solid transparent; padding: 6px 12px; cursor: pointer;
+  }
+  .btn:hover { opacity: 1; text-decoration: none; }
+  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .btn-solid { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); }
+  .btn-solid:hover { opacity: 0.88; }
+  .btn-outline { background: transparent; color: var(--ink); border-color: rgba(237,236,236,.28); }
+  .btn-outline:hover { border-color: rgba(237,236,236,.5); background: rgba(237,236,236,.04); }
+
+  .page-hero { padding: 72px 0 32px; }
+  .page-hero h1 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.03em; }
+  .page-hero .lead { margin-top: 14px; font-size: 15px; color: var(--ink-soft); }
+
+  .legal { padding: 8px 0 80px; }
+  .legal .prose { max-width: 720px; }
+  .prose h2 {
+    font-size: 20px; margin: 40px 0 12px; letter-spacing: -0.02em; color: var(--ink);
+  }
+  .prose h2:first-of-type { margin-top: 8px; }
+  .prose p, .prose li {
+    font-size: 15px; line-height: 1.65; color: var(--ink-soft);
+  }
+  .prose p + p { margin-top: 14px; }
+  .prose a {
+    color: var(--ink); text-decoration: underline;
+    text-underline-offset: 3px; text-decoration-color: rgba(237,236,236,.28);
+  }
+  .prose a:hover { opacity: 1; text-decoration-color: rgba(237,236,236,.55); }
+  .prose strong { color: var(--ink); font-weight: 600; }
+  .prose ul { margin: 12px 0 0; padding-left: 1.25em; }
+  .prose li { margin: 8px 0; }
+  .prose li::marker { color: var(--ink-faint); }
+
+  .divider { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  footer { border-top: 1px solid var(--line); padding: 48px 0 36px; }
+  .foot-grid {
+    display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); gap: 32px; margin-bottom: 40px;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 12px; }
+  .foot-desc { font-size: 13.5px; color: var(--ink-soft); max-width: 240px; }
+  .foot-col h4 {
+    font-size: 12px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 14px;
+  }
+  .foot-col a { display: block; font-size: 14px; color: var(--ink-soft); padding: 4px 0; }
+  .foot-col a:hover { color: var(--ink); opacity: 1; }
+  .foot-bottom {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-faint);
+  }
+  .foot-bottom a { color: var(--ink-faint); }
+  @media (max-width: 800px) { .foot-grid { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
 <body>
-  <p><a href="./index.zh-CN.html">← Cheers</a> · <a href="./support.html">English</a></p>
-  <h1>Cheers 支持</h1>
-  <p>账户、付费、无障碍或技术支持请联系 <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>。请勿在邮件中发送密码、访问令牌、私钥或敏感文件。</p>
-  <h2>请提供的信息</h2>
-  <p>请说明预期结果、实际结果、发生时间、App 版本、iOS 版本，以及仅提供服务器 URL 的域名。欢迎提供截图，但请先遮盖私密消息和凭证。</p>
-  <h2>账户与隐私请求</h2>
-  <p>可以正常访问的账户请直接在 iOS App 的“设置 → 删除账户”中注销，密码会话和“通过 Apple 登录”凭据都会被撤销。数据副本或无法访问账户时的协助请通过邮箱联系我们。详情见<a href="./privacy.zh-CN.html">隐私政策</a>。</p>
-  <h2>自托管实例</h2>
-  <p>若您的组织运营自己的 Cheers 服务器，请先联系该服务器管理员；其负责该实例的账户、数据保存和服务可用性。</p>
-  <h2>安全报告</h2>
-  <p>请不要通过普通支持邮箱报告安全漏洞；请使用 <a href="https://github.com/haowei2000/Cheers/security/advisories/new">私密漏洞报告</a>。</p>
-</body></html>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.zh-CN.html" aria-label="Cheers 首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+      </span>
+      Cheers
+    </a>
+    <nav class="nav-links" aria-label="主导航">
+      <a href="./index.zh-CN.html#product">产品</a>
+      <a href="./downloads.zh-CN.html">下载</a>
+      <a href="./docs.zh-CN.html">文档</a>
+      <a href="./index.zh-CN.html#developers">开发者</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="nav-text" href="./support.html" hreflang="en" lang="en">EN</a>
+      <a class="btn btn-outline" href="https://github.com/haowei2000/Cheers">GitHub</a>
+      <a class="btn btn-solid" href="https://www.tocheers.com">打开应用</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap">
+      <h1>支持</h1>
+      
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section class="legal">
+    <div class="wrap">
+      <div class="prose">
+        <p>账户、付费、无障碍或技术支持请联系 <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>。请勿在邮件中发送密码、访问令牌、私钥或敏感文件。</p>
+        <h2>请提供的信息</h2>
+        <p>请说明预期结果、实际结果、发生时间、App 版本、iOS 版本，以及仅提供服务器 URL 的域名。欢迎提供截图，但请先遮盖私密消息和凭证。</p>
+        <h2>账户与隐私请求</h2>
+        <p>可以正常访问的账户请直接在 iOS App 的“设置 → 删除账户”中注销，密码会话和“通过 Apple 登录”凭据都会被撤销。数据副本或无法访问账户时的协助请通过邮箱联系我们。详情见<a href="./privacy.zh-CN.html">隐私政策</a>。</p>
+        <h2>自托管实例</h2>
+        <p>若您的组织运营自己的 Cheers 服务器，请先联系该服务器管理员；其负责该实例的账户、数据保存和服务可用性。</p>
+        <h2>安全报告</h2>
+        <p>请不要通过普通支持邮箱报告安全漏洞；请使用 <a href="https://github.com/haowei2000/Cheers/security/advisories/new">私密漏洞报告</a>。</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+          </span>
+          Cheers
+        </div>
+        <p class="foot-desc">面向人类与 AI 智能体的开源协作。MIT 许可。</p>
+      </div>
+      <div class="foot-col">
+        <h4>产品</h4>
+        <a href="./index.zh-CN.html#product">概览</a>
+        <a href="./downloads.zh-CN.html">下载</a>
+        <a href="https://www.tocheers.com">打开应用</a>
+      </div>
+      <div class="foot-col">
+        <h4>开发者</h4>
+        <a href="./docs.zh-CN.html">文档</a>
+        <a href="./connector.zh-CN.html">连接器</a>
+        <a href="./mcp.html">MCP 工具</a>
+        <a href="https://github.com/haowei2000/Cheers">GitHub</a>
+      </div>
+      <div class="foot-col">
+        <h4>法律</h4>
+        <a href="./privacy.zh-CN.html">隐私</a>
+        <a href="./terms.html">条款</a>
+        <a href="./support.zh-CN.html">支持</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© Cheers · MIT License</span>
+      <span><a href="./support.html" hreflang="en" lang="en">EN</a></span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
