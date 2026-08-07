@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import toast from "react-hot-toast";
 import { MessageItem, type MessageActionHandlers } from "./MessageItem";
@@ -36,10 +36,8 @@ interface Props {
    *  view and flash it. `nonce` distinguishes repeat jumps to the same message.
    *  The sender (ChannelView) backfills history first, so the target is loaded. */
   focusMsg?: { msgId: string; nonce: number; requestId?: string | null } | null;
-  /** Message currently being replied to — hosts the inline composer slot. */
+  /** When set, scroll the reply target into view (composer stays at the bottom). */
   replyToId?: string | null;
-  /** Inline reply composer (and context bar) rendered under `replyToId`. */
-  inlineReply?: ReactNode;
 }
 
 export function MessageList({
@@ -55,7 +53,6 @@ export function MessageList({
   selectedIds,
   focusMsg,
   replyToId,
-  inlineReply,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -260,18 +257,34 @@ export function MessageList({
             <div
               className={
                 depth === 0
-                  ? "ml-12 mr-4 border-l border-zinc-800/80 pl-3 space-y-0.5"
-                  : "ml-4 border-l border-zinc-800/60 pl-2 space-y-0.5"
+                  ? "relative ml-12 mr-4 mt-0.5 space-y-0.5"
+                  : "relative ml-4 mt-0.5 space-y-0.5"
               }
             >
-              {kids.map((child) => renderNode(child, depth + 1, null))}
+              {kids.map((child, i) => {
+                const isLast = i === kids.length - 1;
+                return (
+                  <div key={child.msg_id} className="relative pl-4">
+                    {/* Thread rail: full height between siblings; stops at the elbow on the last. */}
+                    <span
+                      aria-hidden
+                      className={
+                        isLast
+                          ? "pointer-events-none absolute left-0 top-0 h-3 w-px bg-zinc-700"
+                          : "pointer-events-none absolute bottom-0 left-0 top-0 w-px bg-zinc-700"
+                      }
+                    />
+                    {/* Horizontal stub → L-corner into the nested row (no ↳ glyph). */}
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute left-0 top-3 w-3 border-t border-zinc-700"
+                    />
+                    {renderNode(child, depth + 1, null)}
+                  </div>
+                );
+              })}
             </div>
           )}
-          {replyToId === msg.msg_id && inlineReply ? (
-            <div className="ml-12 mr-4 mt-1 mb-2 rounded-lg border border-zinc-800 bg-zinc-950/80 px-2 py-2">
-              {inlineReply}
-            </div>
-          ) : null}
         </div>
       </div>
     );
