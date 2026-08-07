@@ -26,6 +26,15 @@ import { fetchMessageTrace } from "@/api/approval";
 import { FloatingPanel } from "@/components/ui/floating-panel";
 import type { Message, PermissionContentData, TraceEvent } from "@/types";
 import { DiffView } from "./DiffView";
+import {
+  aggregateDiffStats,
+  diffStats,
+  fileDiffPreview,
+  fileDiffsFromData,
+  formatDiffDelta,
+  pathBasename,
+  type FileDiff,
+} from "./fileEditDiff";
 import { PermissionCard } from "./PermissionCard";
 import { coalesceTraceEvents } from "./traceEvent";
 import {
@@ -42,6 +51,10 @@ interface Props {
   /** Pending permission messages anchored to this bot turn. */
   pendingApprovals?: Message[];
   currentUserId?: string;
+  /** True while the bot turn is still streaming / partial — show only the latest step. */
+  streaming?: boolean;
+  /** Deep-link: expand and focus the approval with this request_id. */
+  focusRequestId?: string | null;
 }
 
 type EventVisual = { Icon: LucideIcon; tone: string; label: string };
@@ -150,7 +163,7 @@ function GitStatusInspector({ presentation }: { presentation: ToolPresentation }
         <span className="font-mono text-[11px] text-zinc-400">{result.branch ?? "Working tree"}</span>
         {result.clean === true && <span className="text-emerald-400/80">Clean</span>}
         {countItems.length > 0 && (
-          <span className="text-[10px] text-zinc-500">
+          <span className="text-[10px] text-zinc-400">
             {countItems.map(([name, count]) => `${count} ${name}`).join(" · ")}
           </span>
         )}
@@ -171,7 +184,12 @@ function GitStatusInspector({ presentation }: { presentation: ToolPresentation }
           })}
         </div>
       )}
-      {result.truncated && <div className="mt-2 text-zinc-500">More files omitted.</div>}
+      {result.truncated && <div className="mt-2 text-zinc-400">More files omitted.</div>}
+      {presentation.compound && (
+        <div className="mt-2 text-[10px] text-zinc-400">
+          Status summary extracted from compound shell output.
+        </div>
+      )}
     </div>
   );
 }
@@ -183,8 +201,6 @@ function asRecord(value: unknown): JsonRecord | null {
 }
 
 const DETAIL_PREVIEW_LIMIT = 12_000;
-const DIFF_SOURCE_LIMIT = 8_000;
-const DIFF_LINE_LIMIT = 2_000;
 
 function formatJson(value: unknown, limit = DETAIL_PREVIEW_LIMIT): string {
   const formatted = JSON.stringify(value, null, 2) ?? String(value);
@@ -214,76 +230,6 @@ function stringField(record: JsonRecord | null, ...keys: string[]): string | nul
   return null;
 }
 
-interface FileDiff {
-  path: string;
-  oldText: string;
-  newText: string;
-}
-
-function fileDiffs(data: JsonRecord | null): FileDiff[] {
-  const blocks = Array.isArray(data?.content) ? data.content : [];
-  return blocks.flatMap((block, index) => {
-    const diff = asRecord(block);
-    if (diff?.type !== "diff") return [];
-    return [{
-      path: stringField(diff, "path") ?? `File ${index + 1}`,
-      oldText: stringField(diff, "oldText", "old_text") ?? "",
-      newText: stringField(diff, "newText", "new_text") ?? "",
-    }];
-  });
-}
-
-/** A real, bounded unified diff. For oversized files we deliberately decline
- * rendering rather than misrepresenting every unchanged line as a replacement. */
-function fileDiffPreview({ path, oldText, newText }: FileDiff): string {
-  const oldLines = oldText ? oldText.split("\n") : [];
-  const newLines = newText ? newText.split("\n") : [];
-  if (
-    oldText.length + newText.length > DIFF_SOURCE_LIMIT ||
-    oldLines.length + newLines.length > DIFF_LINE_LIMIT
-  ) {
-    return [
-      `diff --git a/${path} b/${path}`,
-      `--- a/${path}`,
-      `+++ b/${path}`,
-      "@@ diff omitted @@",
-      " Diff is too large to render safely in the inspector.",
-    ].join("\n");
-  }
-
-  const width = newLines.length + 1;
-  const lcs = new Uint16Array((oldLines.length + 1) * width);
-  for (let oldIndex = oldLines.length - 1; oldIndex >= 0; oldIndex--) {
-    for (let newIndex = newLines.length - 1; newIndex >= 0; newIndex--) {
-      const offset = oldIndex * width + newIndex;
-      lcs[offset] = oldLines[oldIndex] === newLines[newIndex]
-        ? lcs[(oldIndex + 1) * width + newIndex + 1] + 1
-        : Math.max(lcs[(oldIndex + 1) * width + newIndex], lcs[oldIndex * width + newIndex + 1]);
-    }
-  }
-
-  const lines: string[] = [];
-  let oldIndex = 0;
-  let newIndex = 0;
-  while (oldIndex < oldLines.length || newIndex < newLines.length) {
-    if (oldIndex < oldLines.length && newIndex < newLines.length && oldLines[oldIndex] === newLines[newIndex]) {
-      lines.push(` ${oldLines[oldIndex++]}`);
-      newIndex++;
-    } else if (newIndex < newLines.length && (oldIndex === oldLines.length || lcs[oldIndex * width + newIndex + 1] >= lcs[(oldIndex + 1) * width + newIndex])) {
-      lines.push(`+${newLines[newIndex++]}`);
-    } else {
-      lines.push(`-${oldLines[oldIndex++]}`);
-    }
-  }
-  return [
-    `diff --git a/${path} b/${path}`,
-    `--- a/${path}`,
-    `+++ b/${path}`,
-    `@@ -1,${oldLines.length} +1,${newLines.length} @@`,
-    ...lines,
-  ].join("\n");
-}
-
 function RawEventData({ metadata, data }: { metadata: JsonRecord; data: JsonRecord | null }) {
   const [open, setOpen] = useState(false);
   return (
@@ -298,43 +244,106 @@ function RawEventData({ metadata, data }: { metadata: JsonRecord; data: JsonReco
   );
 }
 
+function DiffDelta({ stats }: { stats: { additions: number; deletions: number } }) {
+  return (
+    <span className="shrink-0 font-mono text-[10px] tabular-nums">
+      <span className="text-emerald-400/90">+{stats.additions}</span>
+      {" "}
+      <span className="text-red-400/80">−{stats.deletions}</span>
+    </span>
+  );
+}
+
 function FileEditInspector({ diffs }: { diffs: FileDiff[] }) {
   const [selectedPath, setSelectedPath] = useState(diffs[0]?.path ?? "");
   const selected = diffs.find((diff) => diff.path === selectedPath) ?? diffs[0];
+  const total = aggregateDiffStats(diffs);
   if (!selected) return null;
+  const selectedStats = diffStats(selected);
   return (
-    <div className="grid min-h-64 grid-cols-[minmax(9rem,11rem)_minmax(0,1fr)] gap-3">
-      <div className="min-w-0 space-y-1 py-1">
-        {diffs.map((diff) => (
-          <button
-            key={diff.path}
-            type="button"
-            onClick={() => setSelectedPath(diff.path)}
-            className={cn(
-              "w-full truncate rounded-lg px-2 py-1.5 text-left font-mono text-[11px] text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200",
-              diff.path === selected.path && "bg-indigo-600/15 text-indigo-200",
-            )}
-            title={diff.path}
-          >
-            {diff.path}
-          </button>
-        ))}
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-0.5">
+        <span className="min-w-0 truncate font-mono text-[11px] text-zinc-300" title={selected.path}>
+          {pathBasename(selected.path)}
+        </span>
+        <DiffDelta stats={diffs.length === 1 ? selectedStats : total} />
       </div>
-      <DiffView diff={fileDiffPreview(selected)} className="max-h-80 rounded-lg bg-zinc-950" />
+      <div className="grid min-h-64 grid-cols-[minmax(9rem,12rem)_minmax(0,1fr)] gap-3">
+        <div className="min-w-0 space-y-1 py-1">
+          {diffs.map((diff) => {
+            const stats = diffStats(diff);
+            const active = diff.path === selected.path;
+            return (
+              <button
+                key={diff.path}
+                type="button"
+                onClick={() => setSelectedPath(diff.path)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-zinc-800",
+                  active ? "bg-indigo-600/15 text-indigo-200" : "text-zinc-400 hover:text-zinc-200",
+                )}
+                title={diff.path}
+              >
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
+                  {pathBasename(diff.path)}
+                </span>
+                <DiffDelta stats={stats} />
+              </button>
+            );
+          })}
+        </div>
+        <DiffView diff={fileDiffPreview(selected)} className="max-h-80 rounded-lg bg-zinc-950" />
+      </div>
+    </div>
+  );
+}
+
+function FileEditEmptyState({ path }: { path: string | null }) {
+  return (
+    <div className="rounded-lg bg-zinc-950/45 px-3 py-3">
+      <div className="text-[11px] text-zinc-300">No file changes</div>
+      {path && (
+        <div className="mt-1 truncate font-mono text-[11px] text-zinc-400" title={path}>
+          {path}
+        </div>
+      )}
+      <div className="mt-1 text-[10px] text-zinc-400">
+        The edit reported identical before/after content.
+      </div>
     </div>
   );
 }
 
 function eventPreview(event: TraceEvent): string | null {
   const presentation = toolPresentationFromTrace(event);
+  const data = asRecord(event.data);
+  const diffs = fileDiffsFromData(data);
+  if (presentation?.event_type === "file_edit") {
+    if (diffs.length > 0) {
+      const stats = aggregateDiffStats(diffs);
+      const label = diffs.length === 1
+        ? pathBasename(diffs[0].path)
+        : `${diffs.length} files`;
+      return `${label} · ${formatDiffDelta(stats)}`;
+    }
+    const path = presentation.path ?? presentation.target;
+    return path ? `${pathBasename(path)} · no changes` : "No file changes";
+  }
+  const gitStatus = parseGitStatusResult(presentation);
+  if (gitStatus) {
+    if (gitStatus.clean) {
+      return gitStatus.branch ? `${gitStatus.branch} · clean` : "Clean";
+    }
+    if (gitStatus.files.length > 0) {
+      return `${gitStatus.files.length} file${gitStatus.files.length === 1 ? "" : "s"} changed`;
+    }
+  }
   if (presentation) {
     return presentation.target ?? presentation.path ?? presentation.query ?? presentation.command ?? null;
   }
-  const data = asRecord(event.data);
   const input = asRecord(data?.input);
   const command = stringField(input, "command") ?? stringField(data, "command");
   const filePath = stringField(input, "path", "filePath", "file_path");
-  const diffs = fileDiffs(data);
   if (diffs.length) return `${diffs.length} file${diffs.length === 1 ? "" : "s"} changed`;
   if (command) return command;
   if (filePath) return filePath;
@@ -351,7 +360,7 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
   const input = asRecord(data?.input);
   const cwd = stringField(input, "cwd", "working_directory");
   const filePath = stringField(input, "path", "filePath", "file_path");
-  const diffs = fileDiffs(data);
+  const diffs = fileDiffsFromData(data);
   const planEntries = Array.isArray(data?.entries) ? data.entries : null;
   const output = data?.output;
   const presentation = toolPresentationFromTrace(event);
@@ -364,8 +373,9 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
     && outputText?.includes("diff --git ")
     ? outputText
     : null;
-  const hasGitStatus = presentation?.event_type === "git_status"
-    && asRecord(presentation.result)?.kind === "git_status";
+  const hasGitStatus = Boolean(parseGitStatusResult(presentation));
+  const isFileEdit = presentation?.event_type === "file_edit";
+  const showFileEditEmpty = isFileEdit && diffs.length === 0 && !outputDiff;
   const metadata = {
     phase: event.phase,
     kind: event.kind,
@@ -403,6 +413,9 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
         </div>
       )}
       {diffs.length > 0 && <FileEditInspector diffs={diffs} />}
+      {showFileEditEmpty && (
+        <FileEditEmptyState path={presentation?.path ?? presentation?.target ?? filePath} />
+      )}
       {outputDiff && <DiffView diff={outputDiff} className="max-h-80 rounded-lg bg-zinc-950" />}
       {presentation && hasGitStatus && <GitStatusInspector presentation={presentation} />}
       {planEntries && (
@@ -441,13 +454,13 @@ function TraceEventInspector({ event }: { event: TraceEvent }) {
           <div className="mt-1 font-mono text-zinc-200">{cwd}</div>
         </div>
       )}
-      {!diffs.length && filePath && (
+      {!diffs.length && !showFileEditEmpty && filePath && (
         <div>
           <div className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">File</div>
           <div className="mt-1 font-mono text-zinc-200">{filePath}</div>
         </div>
       )}
-      {output != null && !outputDiff && !hasGitStatus && (
+      {output != null && !outputDiff && !hasGitStatus && !showFileEditEmpty && (
         <div>
           <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-400">Output</div>
           <div className="max-h-56 overflow-auto rounded-lg bg-zinc-950 px-2.5 py-2 text-zinc-300"><DetailValue value={output} /></div>
@@ -742,13 +755,16 @@ export function BotTracePanel({
   liveEvents = [],
   pendingApprovals = [],
   currentUserId,
+  streaming = false,
+  focusRequestId = null,
 }: Props) {
   const [expanded, setExpanded] = useState(
     pendingApprovals.some(
       (message) =>
         !(message.content_data as PermissionContentData | null | undefined)?.resolved,
-    ),
+    ) || !!focusRequestId,
   );
+  const [showAll, setShowAll] = useState(false);
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
   const [events, setEvents] = useState<TraceEvent[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -802,10 +818,40 @@ export function BotTracePanel({
     ];
   }, [displayedEvents, orphanPending, msgId]);
 
+  // While the turn is running, only show the latest step (plus any actionable
+  // approval that isn't that step). Completed turns / explicit "Show all" keep
+  // the full timeline for auditability.
+  const visibleTimeline = useMemo(() => {
+    if (!streaming || showAll || timeline.length <= 1) return timeline;
+    const latest = timeline[timeline.length - 1]!;
+    const pendingExtras = timeline.filter((e) => {
+      if (e === latest || e.kind !== "approval" || !e.request_id) return false;
+      const approval = approvalByRequestId.get(e.request_id);
+      if (!approval) return false;
+      return !(approval.content_data as PermissionContentData | null | undefined)
+        ?.resolved;
+    });
+    return [...pendingExtras, latest];
+  }, [streaming, showAll, timeline, approvalByRequestId]);
+
   // Keep Agent steps open while something still needs a decision.
   useEffect(() => {
     if (hasActionable) setExpanded(true);
   }, [hasActionable]);
+
+  // Deep-link from ViewBoard: open panel and focus the matching approval row.
+  useEffect(() => {
+    if (!focusRequestId) return;
+    setExpanded(true);
+    setShowAll(true);
+    const match = timeline.find((e) => e.request_id === focusRequestId);
+    if (match) setActiveEventId(match.id);
+  }, [focusRequestId, timeline]);
+
+  // After the turn finishes, drop the "latest only" filter so history is full by default.
+  useEffect(() => {
+    if (!streaming) setShowAll(false);
+  }, [streaming]);
 
   async function load() {
     if (loading) return;
@@ -842,7 +888,8 @@ export function BotTracePanel({
 
   const approvalCount = timeline.filter((e) => e.kind === "approval").length;
   const pendingCount = actionableApprovals.length;
-  const hasRows = timeline.length > 0;
+  const hasRows = visibleTimeline.length > 0;
+  const latestOnly = streaming && !showAll && timeline.length > 1;
 
   return (
     <div className={cn("mt-1", hasActionable ? "max-w-lg" : "max-w-md")}>
@@ -860,9 +907,11 @@ export function BotTracePanel({
         )}
         <span>
           Agent steps
-          {events !== null || timeline.length > 0 || hasActionable
-            ? ` · ${timeline.length}`
-            : ""}
+          {latestOnly
+            ? " · latest"
+            : events !== null || timeline.length > 0 || hasActionable
+              ? ` · ${timeline.length}`
+              : ""}
         </span>
         {pendingCount > 0 ? (
           <span className="inline-flex items-center gap-0.5 text-amber-400/80">
@@ -880,7 +929,7 @@ export function BotTracePanel({
 
       {expanded && hasRows && (
         <div className="mt-2 flex flex-col gap-1">
-          {timeline.map((event) => {
+          {visibleTimeline.map((event) => {
             const approval =
               event.kind === "approval" && event.request_id
                 ? approvalByRequestId.get(event.request_id)
@@ -902,6 +951,24 @@ export function BotTracePanel({
               />
             );
           })}
+          {latestOnly && (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="self-start text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors mt-0.5"
+            >
+              Show all {timeline.length} steps
+            </button>
+          )}
+          {streaming && showAll && timeline.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(false)}
+              className="self-start text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors mt-0.5"
+            >
+              Show latest only
+            </button>
+          )}
         </div>
       )}
 

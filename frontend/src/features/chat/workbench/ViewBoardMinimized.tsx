@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, ClipboardList, Coins, Layers, ShieldCheck } from "lucide-react";
 import { listApprovalAudit, type AuditEvent } from "@/api/approval";
 import { GlanceRow, DetailLine } from "@/components/ui/glance-row";
+import { PopoverPanel, usePopoverDismiss } from "@/components/ui/popover";
+import { PermissionCard } from "@/features/chat/PermissionCard";
+import type { Message, PermissionContentData } from "@/types";
 import type { ViewBoardContext } from "./viewBoard";
+import { permissionSourceId } from "@/features/chat/messageTree";
 
 // Compact number formatting for the glance (never the full precision the boards show).
 function fmtTokens(n: number): string {
@@ -76,6 +80,134 @@ function classifyAudit(e: AuditEvent): "allowed" | "denied" | "expired" | "pendi
     return "denied";
   if (et.includes("expire")) return "expired";
   return "pending";
+}
+
+function approvalPreview(m: Message): string {
+  const data = m.content_data as PermissionContentData | null | undefined;
+  const tool = data?.tool as Record<string, unknown> | undefined;
+  if (tool) {
+    const ri = tool.raw_input;
+    const raw =
+      ri && typeof ri === "object" ? (ri as Record<string, unknown>) : null;
+    const cmd =
+      (typeof tool.command === "string" && tool.command) ||
+      (typeof raw?.command === "string" && raw.command) ||
+      (typeof raw?.file_path === "string" && raw.file_path) ||
+      (typeof raw?.path === "string" && raw.path) ||
+      (typeof tool.title === "string" && tool.title);
+    if (cmd) return cmd;
+  }
+  return (m.content ?? "Permission request").slice(0, 80);
+}
+
+function ApprovalsGlance({
+  ctx,
+  auditSummary,
+  auditCount,
+  onExpandAudit,
+}: {
+  ctx: ViewBoardContext;
+  auditSummary: string;
+  auditCount: string;
+  onExpandAudit: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  usePopoverDismiss(open, close, rootRef);
+
+  const pending = ctx.pendingApprovals ?? [];
+  const pendingCount = pending.length;
+
+  const jumpTo = (m: Message) => {
+    const data = m.content_data as PermissionContentData | null | undefined;
+    const target = permissionSourceId(m) ?? m.msg_id;
+    ctx.onJumpToMessage?.(target, data?.request_id ?? null);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <GlanceRow
+        Icon={ShieldCheck}
+        label="Approvals"
+        sub={pendingCount > 0 ? `${pendingCount} pending` : null}
+        value={pendingCount > 0 ? String(pendingCount) : auditCount}
+        title={
+          pendingCount > 0
+            ? "Show pending approvals"
+            : "Open Approvals audit"
+        }
+        onClick={() => {
+          if (pendingCount > 0) setOpen((v) => !v);
+          else onExpandAudit();
+        }}
+      >
+        {pendingCount > 0 ? (
+          <DetailLine name={`${pendingCount} need a decision`} />
+        ) : (
+          auditSummary && <DetailLine name={auditSummary} />
+        )}
+      </GlanceRow>
+      {open && pendingCount > 0 && (
+        <PopoverPanel
+          placement="down"
+          align="start"
+          className="z-50 w-[min(22rem,calc(100vw-2rem))] max-h-[70vh] overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 p-2 shadow-xl"
+        >
+          <div className="px-1.5 pb-1.5 text-[11px] font-medium text-zinc-400">
+            Pending approvals
+          </div>
+          <ul className="space-y-2">
+            {pending.map((m) => {
+              const data = m.content_data as PermissionContentData | null | undefined;
+              return (
+                <li
+                  key={m.msg_id}
+                  className="rounded-md border border-zinc-800/80 bg-zinc-900/60 p-2"
+                >
+                  <button
+                    type="button"
+                    onClick={() => jumpTo(m)}
+                    className="mb-1.5 block w-full truncate text-left text-[11px] text-zinc-300 hover:text-indigo-300"
+                    title="Open in message tracing"
+                  >
+                    {approvalPreview(m)}
+                  </button>
+                  <PermissionCard
+                    message={m}
+                    channelId={ctx.channelId}
+                    currentUserId={ctx.currentUserId}
+                    embedded
+                    onResolved={close}
+                  />
+                  {data?.request_id && (
+                    <button
+                      type="button"
+                      onClick={() => jumpTo(m)}
+                      className="mt-1 text-[10px] text-zinc-500 hover:text-zinc-300"
+                    >
+                      Open in chat
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onExpandAudit();
+            }}
+            className="mt-2 w-full rounded-md px-2 py-1.5 text-left text-[11px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+          >
+            Open full Audit board…
+          </button>
+        </PopoverPanel>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -259,7 +391,7 @@ export function ViewBoardMinimized({
     .map(([st, n]) => `${n} ${st}`)
     .join(" · ");
 
-  // ── Approvals: decision summary with the Audit board's classification. ──
+  // ── Approvals: prefer live pending; fall back to audit history counts. ──
   const audit = { allowed: 0, denied: 0, expired: 0, pending: 0 };
   for (const e of s.audit ?? []) audit[classifyAudit(e)]++;
   const permissionSummary = [
@@ -315,14 +447,12 @@ export function ViewBoardMinimized({
       >
         {sessionSummary && <DetailLine name={sessionSummary} />}
       </GlanceRow>
-      <GlanceRow
-        Icon={ShieldCheck}
-        label="Approvals"
-        value={s.audit ? String(s.audit.length) : "—"}
-        onClick={() => onExpand("audit")}
-      >
-        {permissionSummary && <DetailLine name={permissionSummary} />}
-      </GlanceRow>
+      <ApprovalsGlance
+        ctx={ctx}
+        auditSummary={permissionSummary}
+        auditCount={s.audit ? String(s.audit.length) : "—"}
+        onExpandAudit={() => onExpand("audit")}
+      />
       <GlanceRow
         Icon={Activity}
         label="Activity"

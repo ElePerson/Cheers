@@ -17,6 +17,7 @@ import { sessionTag } from "@/features/chat/sessionLabel";
 import type { SendResourceReq } from "./fsClient";
 import { getViewBoards, type ViewBoardContext } from "./viewBoard";
 import { ViewBoardMinimized } from "./ViewBoardMinimized";
+import type { Message } from "@/types";
 // Built-in boards register themselves on import (side effect).
 import "./panels/PlanBoardPanel";
 import "./panels/CostPanel";
@@ -39,7 +40,10 @@ interface Props {
   minimal?: boolean;
   onToggleMinimal?: () => void;
   /** Best-effort "jump the chat to this message" (scroll + flash when loaded). */
-  onJumpToMessage?: (msgId: string) => void;
+  onJumpToMessage?: (msgId: string, requestId?: string | null) => void;
+  /** Live pending permission cards for the minimal Approvals dropdown. */
+  pendingApprovals?: Message[];
+  currentUserId?: string;
   /** External "switch to this board" request (composer's "Manage sessions…").
    *  `nonce` lets a repeat request for the same board re-apply. */
   focusBoard?: { id: string; nonce: number };
@@ -74,6 +78,8 @@ function ViewBoardDrawerImpl({
   minimal,
   onToggleMinimal,
   onJumpToMessage,
+  pendingApprovals,
+  currentUserId,
   focusBoard,
 }: Props) {
   const boards = getViewBoards();
@@ -158,8 +164,18 @@ function ViewBoardDrawerImpl({
       selectedSessionId: scope || null,
       boardTick,
       onJumpToMessage,
+      pendingApprovals,
+      currentUserId,
     }),
-    [channelId, sendResourceReq, scope, boardTick, onJumpToMessage]
+    [
+      channelId,
+      sendResourceReq,
+      scope,
+      boardTick,
+      onJumpToMessage,
+      pendingApprovals,
+      currentUserId,
+    ],
   );
 
   const isMobile = useIsMobile();

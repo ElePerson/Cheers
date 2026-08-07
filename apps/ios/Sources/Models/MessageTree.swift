@@ -1,0 +1,68 @@
+import Foundation
+
+/// Client-side reply nesting helpers — mirrors
+/// `frontend/src/features/chat/messageTree.ts`.
+enum MessageTree {
+    /// Approvals anchored to a bot turn (`source_msg_id`) belong in that turn's
+    /// Agent steps on web; iOS still surfaces unresolved cards as system rows,
+    /// but we exclude them from the reply tree so they don't appear as roots.
+    static func isFoldedPermission(_ message: MessageDto) -> Bool {
+        guard message.msgType == "permission" else { return false }
+        return permissionSourceId(message) != nil
+    }
+
+    static func permissionSourceId(_ message: MessageDto) -> String? {
+        guard message.msgType == "permission" else { return nil }
+        if let sid = message.contentData?["source_msg_id"]?.stringValue, !sid.isEmpty {
+            return sid
+        }
+        return nil
+    }
+
+    /// Session stamped on a bot placeholder (`content_data.session_id`) for reply reuse.
+    static func messageSessionId(_ message: MessageDto) -> String? {
+        guard let sid = message.contentData?["session_id"]?.stringValue, !sid.isEmpty else {
+            return nil
+        }
+        return sid
+    }
+
+    struct Grouped {
+        var roots: [MessageDto]
+        var childrenByParent: [String: [MessageDto]]
+        var byId: [String: MessageDto]
+    }
+
+    /// Split a loaded window into top-level roots and children keyed by parent.
+    /// A message with `replyToMsgId` pointing at another loaded (non-folded)
+    /// message is a sub-message; otherwise it stays a root.
+    static func groupByReply(_ messages: [MessageDto]) -> Grouped {
+        var byId: [String: MessageDto] = [:]
+        byId.reserveCapacity(messages.count)
+        for message in messages where !isFoldedPermission(message) {
+            byId[message.msgId] = message
+        }
+
+        var childrenByParent: [String: [MessageDto]] = [:]
+        var roots: [MessageDto] = []
+        roots.reserveCapacity(messages.count)
+
+        for message in messages {
+            if isFoldedPermission(message) { continue }
+            if let parentId = message.replyToMsgId,
+               parentId != message.msgId,
+               byId[parentId] != nil
+            {
+                childrenByParent[parentId, default: []].append(message)
+            } else {
+                roots.append(message)
+            }
+        }
+
+        for key in childrenByParent.keys {
+            childrenByParent[key]?.sort { ($0.channelSeq ?? 0) < ($1.channelSeq ?? 0) }
+        }
+
+        return Grouped(roots: roots, childrenByParent: childrenByParent, byId: byId)
+    }
+}

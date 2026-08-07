@@ -11,6 +11,8 @@ struct BotTracePanelView: View {
     let msgId: String
     var liveEvents: [TraceEventDto] = []
     var isRunning = false
+    /// When set, auto-open the steps sheet (ViewBoard Approval deep-link).
+    var focusRequestId: String? = nil
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -82,6 +84,12 @@ struct BotTracePanelView: View {
                     durableEvents = TraceEventContract.coalesce(durableEvents ?? [], latest)
                 }
             }
+            .onChange(of: focusRequestId) { _, requestId in
+                if requestId != nil { showingSheet = true }
+            }
+            .onAppear {
+                if focusRequestId != nil { showingSheet = true }
+            }
         }
     }
 
@@ -129,6 +137,7 @@ struct BotTracePanelView: View {
 
     private var summaryDetail: String? {
         guard let result = singleGitStatus else { return nil }
+        if result.clean { return String(localized: "Clean") }
         return String(localized: "\(result.files.count) files changed")
     }
 

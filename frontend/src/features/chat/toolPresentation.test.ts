@@ -83,4 +83,27 @@ describe("ToolPresentation v1", () => {
       files: [{ path: "frontend/src/App.tsx", state: "staged" }],
     });
   });
+
+  it("reads status summaries attached to compound git_command events", () => {
+    const presentation = parseToolPresentation({
+      v: 2,
+      event_type: "git_command",
+      family: "git",
+      operation: "command",
+      compound: true,
+      result: {
+        kind: "git_status",
+        branch: "fix/website-mcp-companion-download...origin/fix/website-mcp-companion-download",
+        clean: true,
+        counts: { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 },
+        files: [],
+        truncated: false,
+      },
+    });
+    expect(parseGitStatusResult(presentation)).toMatchObject({
+      clean: true,
+      branch: "fix/website-mcp-companion-download...origin/fix/website-mcp-companion-download",
+      files: [],
+    });
+  });
 });

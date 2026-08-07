@@ -3,7 +3,12 @@ import { Spinner } from "@/components/ui/spinner";
 import toast from "react-hot-toast";
 import { MessageItem, type MessageActionHandlers } from "./MessageItem";
 import { formatDayLabel, sameDay } from "@/lib/format";
-import type { Message, PermissionContentData } from "@/types";
+import type { Message } from "@/types";
+import {
+  groupMessagesByReply,
+  isFoldedPermission,
+  permissionSourceId,
+} from "./messageTree";
 
 // Skip layout/paint for off-screen rows during frequent streaming re-renders while
 // keeping every row in the DOM — the data-msg-id jump, native scroll anchoring on
@@ -13,23 +18,6 @@ const ROW_CONTENT_VISIBILITY: CSSProperties = {
   contentVisibility: "auto",
   containIntrinsicSize: "auto 80px",
 };
-
-// Approvals anchored to a bot turn (`source_msg_id`) render inside that turn's
-// Agent steps panel — both pending (actionable PermissionCard) and resolved
-// (trace row). Orphans without an anchor stay as their own channel row.
-// Filtering these out up front keeps day-label / consecutive grouping correct.
-function isFoldedPermission(m: Message): boolean {
-  if (m.msg_type !== "permission") return false;
-  const source = (m.content_data as PermissionContentData | null | undefined)
-    ?.source_msg_id;
-  return typeof source === "string" && source.length > 0;
-}
-
-function permissionSourceId(m: Message): string | null {
-  const source = (m.content_data as PermissionContentData | null | undefined)
-    ?.source_msg_id;
-  return typeof source === "string" && source.length > 0 ? source : null;
-}
 
 interface Props {
   messages: Message[];
@@ -47,7 +35,9 @@ interface Props {
   /** Jump request from outside (ViewBoard history items): scroll the message into
    *  view and flash it. `nonce` distinguishes repeat jumps to the same message.
    *  The sender (ChannelView) backfills history first, so the target is loaded. */
-  focusMsg?: { msgId: string; nonce: number } | null;
+  focusMsg?: { msgId: string; nonce: number; requestId?: string | null } | null;
+  /** When set, scroll the reply target into view (composer stays at the bottom). */
+  replyToId?: string | null;
 }
 
 export function MessageList({
@@ -62,6 +52,7 @@ export function MessageList({
   selectMode,
   selectedIds,
   focusMsg,
+  replyToId,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -83,6 +74,11 @@ export function MessageList({
     return map;
   }, [messages]);
 
+  const { roots, childrenByParent, byId } = useMemo(
+    () => groupMessagesByReply(messages),
+    [messages],
+  );
+
   // External jump (ViewBoard history rows): scroll to the anchored row + flash.
   // ChannelView backfills older pages before focusing, so by the time focusMsg
   // lands the message is loaded — no anchor now means the row exists but isn't
@@ -96,10 +92,13 @@ export function MessageList({
         ? permissionSourceId(folded) ?? focusMsg.msgId
         : focusMsg.msgId;
     const el = containerRef.current?.querySelector(
-      `[data-msg-id="${CSS.escape(targetId)}"]`
+      `[data-msg-id="${CSS.escape(targetId)}"]`,
     );
     if (!el) {
-      toast("This message isn't shown in the channel view", { icon: "🔍", id: "jump-hidden" });
+      toast("This message isn't shown in the channel view", {
+        icon: "🔍",
+        id: "jump-hidden",
+      });
       return;
     }
     el.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -119,28 +118,24 @@ export function MessageList({
     };
   }, [focusMsg, messages]);
 
-  // Anchored approvals are folded into each bot turn's Agent steps, not shown as their own rows.
-  const visible = useMemo(
-    () => messages.filter((m) => !isFoldedPermission(m)),
-    [messages]
+  const nameOf = useMemo(
+    () => (senderId: string) =>
+      senderNames?.get(senderId) ?? senderId.slice(0, 8),
+    [senderNames],
   );
 
-  // msg_id → message, to resolve each reply's quoted original from the loaded window.
-  const byId = useMemo(() => {
-    const m = new Map<string, Message>();
-    for (const msg of messages) m.set(msg.msg_id, msg);
-    return m;
+  // Count every rendered message (roots + nested) for auto-scroll growth.
+  const renderedCount = useMemo(() => {
+    let n = 0;
+    for (const m of messages) {
+      if (!isFoldedPermission(m)) n += 1;
+    }
+    return n;
   }, [messages]);
-  const nameOf = useMemo(
-    () => (senderId: string) => senderNames?.get(senderId) ?? senderId.slice(0, 8),
-    [senderNames]
-  );
-  const prevLenRef = useRef(visible.length);
+  const prevLenRef = useRef(renderedCount);
 
   // Channel switch: the next content commit is a whole new timeline (cache seed
   // or cold reload), not an append — jump straight to the bottom instantly.
-  // Flagged at render time and consumed by the auto-scroll effect below, which
-  // only fires once `visible` actually changes identity (the seeded commit).
   const lastChannelRef = useRef(channelId);
   const channelSwitchScrollRef = useRef(false);
   if (lastChannelRef.current !== channelId) {
@@ -149,22 +144,19 @@ export function MessageList({
     isAtBottomRef.current = true;
   }
 
-  // Track scroll position
   function handleScroll() {
     const el = containerRef.current;
     if (!el) return;
     isAtBottomRef.current =
       el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 
-    // Load more when near top
     if (el.scrollTop < 120 && hasMore && onLoadMore && !loading) {
       onLoadMore();
     }
   }
 
-  // Auto-scroll on new messages
   useEffect(() => {
-    const newLen = visible.length;
+    const newLen = renderedCount;
     const grew = newLen > prevLenRef.current;
     prevLenRef.current = newLen;
 
@@ -176,17 +168,124 @@ export function MessageList({
     if (grew && isAtBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [visible]);
+  }, [renderedCount]);
 
-  // Initial scroll to bottom
   useEffect(() => {
     bottomRef.current?.scrollIntoView();
   }, []);
 
-  if (!loading && visible.length === 0) {
+  // Scroll inline reply into view when reply target changes.
+  useEffect(() => {
+    if (!replyToId) return;
+    const el = containerRef.current?.querySelector(
+      `[data-msg-id="${CSS.escape(replyToId)}"]`,
+    );
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [replyToId]);
+
+  if (!loading && roots.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-zinc-400 text-sm">
         No messages yet. Start the conversation!
+      </div>
+    );
+  }
+
+  function renderNode(msg: Message, depth: number, prevRoot: Message | null) {
+    const kids = childrenByParent.get(msg.msg_id) ?? [];
+    const showDayLabel =
+      depth === 0 &&
+      (!prevRoot || !sameDay(prevRoot.created_at, msg.created_at));
+    const isConsecutive =
+      depth === 0 &&
+      !showDayLabel &&
+      !!prevRoot &&
+      prevRoot.sender_id === msg.sender_id &&
+      prevRoot.sender_type === msg.sender_type &&
+      !prevRoot.is_deleted;
+    const parentInView = !!(
+      msg.reply_to_msg_id && byId.has(msg.reply_to_msg_id)
+    );
+    const focusRequestId =
+      focusMsg &&
+      (focusMsg.msgId === msg.msg_id ||
+        (approvalsBySource.get(msg.msg_id) ?? []).some(
+          (a) => a.msg_id === focusMsg.msgId,
+        ))
+        ? focusMsg.requestId ?? null
+        : null;
+
+    return (
+      <div key={msg.msg_id}>
+        {showDayLabel && (
+          <div className="flex justify-center px-4 pt-8 pb-2">
+            <span className="text-xs text-zinc-400 font-medium">
+              {formatDayLabel(msg.created_at)}
+            </span>
+          </div>
+        )}
+        <div
+          data-msg-id={msg.msg_id}
+          style={ROW_CONTENT_VISIBILITY}
+          className={
+            msg.msg_id === highlightId
+              ? "rounded-lg bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/40 transition-colors duration-700"
+              : "transition-colors duration-700"
+          }
+        >
+          <MessageItem
+            message={msg}
+            isConsecutive={!!isConsecutive}
+            nested={depth > 0}
+            hideReplyQuote={parentInView}
+            currentUserId={currentUserId}
+            channelId={channelId}
+            senderName={senderNames?.get(msg.sender_id)}
+            actions={actions}
+            selectMode={selectMode}
+            selected={selectedIds?.has(msg.msg_id) ?? false}
+            repliedTo={
+              msg.reply_to_msg_id
+                ? byId.get(msg.reply_to_msg_id) ?? null
+                : null
+            }
+            nameOf={nameOf}
+            pendingApprovals={approvalsBySource.get(msg.msg_id)}
+            focusRequestId={focusRequestId}
+          />
+          {kids.length > 0 && (
+            <div
+              className={
+                depth === 0
+                  ? "relative ml-12 mr-4 mt-0.5 space-y-0.5"
+                  : "relative ml-4 mt-0.5 space-y-0.5"
+              }
+            >
+              {kids.map((child, i) => {
+                const isLast = i === kids.length - 1;
+                return (
+                  <div key={child.msg_id} className="relative pl-4">
+                    {/* Thread rail: full height between siblings; stops at the elbow on the last. */}
+                    <span
+                      aria-hidden
+                      className={
+                        isLast
+                          ? "pointer-events-none absolute left-0 top-0 h-3 w-px bg-zinc-700"
+                          : "pointer-events-none absolute bottom-0 left-0 top-0 w-px bg-zinc-700"
+                      }
+                    />
+                    {/* Horizontal stub → L-corner into the nested row (no ↳ glyph). */}
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute left-0 top-3 w-3 border-t border-zinc-700"
+                    />
+                    {renderNode(child, depth + 1, null)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -203,58 +302,8 @@ export function MessageList({
         </div>
       )}
 
-      {visible.map((msg, i) => {
-        const prev = visible[i - 1];
-        const showDayLabel = !prev || !sameDay(prev.created_at, msg.created_at);
-        const isConsecutive =
-          !showDayLabel &&
-          prev &&
-          prev.sender_id === msg.sender_id &&
-          prev.sender_type === msg.sender_type &&
-          !prev.is_deleted;
-
-        return (
-          <div key={msg.msg_id}>
-            {showDayLabel && (
-              /* Day boundary reads by distance, not a rule: the space above
-                 (separating the previous day) is deliberately larger than the
-                 space below, so proximity binds the label to the day it opens. */
-              <div className="flex justify-center px-4 pt-8 pb-2">
-                <span className="text-xs text-zinc-400 font-medium">
-                  {formatDayLabel(msg.created_at)}
-                </span>
-              </div>
-            )}
-            <div
-              data-msg-id={msg.msg_id}
-              style={ROW_CONTENT_VISIBILITY}
-              className={
-                msg.msg_id === highlightId
-                  ? "rounded-lg bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/40 transition-colors duration-700"
-                  : "transition-colors duration-700"
-              }
-            >
-              <MessageItem
-                message={msg}
-                isConsecutive={!!isConsecutive}
-                currentUserId={currentUserId}
-                channelId={channelId}
-                senderName={senderNames?.get(msg.sender_id)}
-                actions={actions}
-                selectMode={selectMode}
-                selected={selectedIds?.has(msg.msg_id) ?? false}
-                repliedTo={
-                  msg.reply_to_msg_id ? byId.get(msg.reply_to_msg_id) ?? null : null
-                }
-                nameOf={nameOf}
-                pendingApprovals={approvalsBySource.get(msg.msg_id)}
-              />
-            </div>
-          </div>
-        );
-      })}
-
-      <div ref={bottomRef} className="h-4" />
+      {roots.map((msg, i) => renderNode(msg, 0, i > 0 ? roots[i - 1]! : null))}
+      <div ref={bottomRef} />
     </div>
   );
 }

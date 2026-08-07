@@ -20,7 +20,6 @@ import {
   FolderTree,
   Settings,
   LayoutDashboard,
-  Reply,
   X,
   Copy,
   Forward,
@@ -31,6 +30,7 @@ import { listMessages, sendMessage } from "@/api/messages";
 import {
   useContextPickStore,
   toBundle,
+  messageContextItem,
   type ContextItem,
 } from "./context/contextPick";
 import { ContextPickBar } from "./context/ContextPickBar";
@@ -106,6 +106,7 @@ import type {
   TraceEvent,
   VoiceTranscriptSegment,
 } from "@/types";
+import { messageSessionId } from "./messageTree";
 
 // In-flight bot placeholders arrive with `channel_seq: null`; they are the
 // newest thing in the channel until finalized, so order them last. Stable sort
@@ -1025,6 +1026,7 @@ export function ChannelView({
   const [focusMsg, setFocusMsg] = useState<{
     msgId: string;
     nonce: number;
+    requestId?: string | null;
   } | null>(null);
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
@@ -1032,9 +1034,13 @@ export function ChannelView({
   // × 50/page — comfortably covers the Activity board's 200-event window.
   const JUMP_BACKFILL_PAGES = 8;
   const jumpToMessage = useCallback(
-    async (msgId: string) => {
+    async (msgId: string, requestId?: string | null) => {
       const focus = () =>
-        setFocusMsg((prev) => ({ msgId, nonce: (prev?.nonce ?? 0) + 1 }));
+        setFocusMsg((prev) => ({
+          msgId,
+          requestId: requestId ?? null,
+          nonce: (prev?.nonce ?? 0) + 1,
+        }));
       if (messagesRef.current.some((m) => m.msg_id === msgId)) return focus();
       if (!channel || jumpBackfillRef.current) return;
       jumpBackfillRef.current = true;
@@ -1503,18 +1509,75 @@ export function ChannelView({
     [messages, selectedIds],
   );
 
+  // Live pending ACP permission cards — feeds the ViewBoard minimal Approvals dropdown.
+  const pendingPermissionMessages = useMemo(
+    () =>
+      messages.filter((m) => {
+        if (m.msg_type !== "permission") return false;
+        return !(m.content_data as PermissionContentData | null | undefined)
+          ?.resolved;
+      }),
+    [messages],
+  );
+
+  // Reply uses the same bottom composer as a normal send. The only difference is
+  // defaults copied from the source turn: session target, @bot, and message context.
+  // `reply_to_msg_id` still nests the outgoing message under the source.
+  const applyReplyDefaults = useCallback(
+    (m: Message) => {
+      let bot: Message | null = null;
+      if (m.sender_type === "bot") {
+        bot = m;
+      } else {
+        // Prefer the latest bot child under this message (the turn being continued).
+        const botKids = messages
+          .filter(
+            (x) =>
+              x.reply_to_msg_id === m.msg_id &&
+              x.sender_type === "bot" &&
+              !x.is_deleted,
+          )
+          .sort((a, b) => (a.channel_seq ?? 0) - (b.channel_seq ?? 0));
+        bot = botKids[botKids.length - 1] ?? null;
+      }
+
+      if (bot) {
+        setSelectedSessionBotId(bot.sender_id);
+        setSelectedSessionId(messageSessionId(bot) ?? "");
+        const label =
+          bot.sender_name ||
+          mentionables.find((x) => x.id === bot!.sender_id)?.label;
+        if (label) {
+          setComposePrefill((p) => ({
+            text: `@${label} `,
+            seq: (p?.seq ?? 0) + 1,
+          }));
+        }
+      }
+
+      if (channel?.channel_id) {
+        const ctx = messageContextItem(m);
+        if (ctx) useContextPickStore.getState().add(channel.channel_id, ctx);
+      }
+    },
+    [messages, mentionables, channel?.channel_id],
+  );
+
   // Stable identity: selection state deliberately NOT captured here (it travels
   // as scalar props), so a selection toggle only re-renders the affected rows
   // instead of defeating memo(MessageItem) list-wide.
   const messageActions: MessageActionHandlers = useMemo(
     () => ({
-      onReply: (m) => setReplyTo(m),
+      onReply: (m) => {
+        setReplyTo(m);
+        applyReplyDefaults(m);
+      },
       onForward: (m) =>
         setForward({ content: buildForwardContent([m]), count: 1 }),
       onToggleSelect: (m) => {
         setSelectMode(true);
-        // Entering select mode hides the reply banner — disarm the reply too so
-        // the next send can't silently become a reply to an invisible target.
+        // Entering select mode — disarm reply so the next send can't silently
+        // nest under an invisible target.
         setReplyTo(null);
         setSelectedIds((prev) => {
           const next = new Set(prev);
@@ -1525,7 +1588,7 @@ export function ChannelView({
       },
       onRetry: retryMessage,
     }),
-    [buildForwardContent, retryMessage],
+    [buildForwardContent, retryMessage, applyReplyDefaults],
   );
 
   const clearSelection = () => {
@@ -1876,6 +1939,7 @@ export function ChannelView({
                     selectMode={selectMode}
                     selectedIds={selectedIds}
                     focusMsg={focusMsg}
+                    replyToId={replyTo && !selectMode ? replyTo.msg_id : null}
                   />
                 </ResolveRefContext.Provider>
               )}
@@ -1924,60 +1988,34 @@ export function ChannelView({
                 </div>
               )}
 
-              {/* Reply banner — the composer's next send answers this message. */}
-              {replyTo && !selectMode && (
-                <div className="mx-4 mt-2 flex items-center gap-2 rounded-lg bg-zinc-900/60 px-3 py-1.5 text-xs">
-                  <Reply className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-                  <span className="text-zinc-400 flex-shrink-0">
-                    Replying to
-                  </span>
-                  <span className="text-zinc-300 font-medium flex-shrink-0">
-                    {displayName(replyTo)}
-                  </span>
-                  <span className="text-zinc-400 truncate italic">
-                    {(replyTo.content ?? "")
-                      .replace(/<#file:[^>]+>/g, "")
-                      .trim()
-                      .slice(0, 120)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setReplyTo(null)}
-                    title="Cancel reply"
-                    className="ml-auto text-zinc-500 hover:text-zinc-200 flex-shrink-0"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-
-              {/* Attached resource context (docs/design/RESOURCE_CONTEXT.md) */}
+              {/* Same composer for root sends and replies — reply only pre-fills
+                  session / @ / context (and sets reply_to on send). Esc clears nesting. */}
               {!selectMode && (
-                <ContextPickBar
-                  channelId={channel.channel_id}
-                  replyTo={replyTo}
-                  draftText={draftText}
-                  files={channelFiles}
-                  onBrowseWorkbench={browseWorkbench}
-                  onBrowseWorkspace={browseWorkspace}
-                  onJumpToSource={jumpToContextSource}
-                />
+                <>
+                  <ContextPickBar
+                    channelId={channel.channel_id}
+                    replyTo={replyTo}
+                    draftText={draftText}
+                    files={channelFiles}
+                    onBrowseWorkbench={browseWorkbench}
+                    onBrowseWorkspace={browseWorkspace}
+                    onJumpToSource={jumpToContextSource}
+                  />
+                  <MessageComposer
+                    channelId={channel.channel_id}
+                    channelName={channel.name}
+                    mentionables={mentionables}
+                    commands={commands}
+                    toolbar={composerToolbar}
+                    onMentionsChange={setMentionedBots}
+                    onTextChange={setDraftText}
+                    prefill={composePrefill}
+                    streamingCount={streamingIds.length}
+                    onStopStreaming={stopStreaming}
+                    onSend={handleSend}
+                  />
+                </>
               )}
-
-              {/* Composer */}
-              <MessageComposer
-                channelId={channel.channel_id}
-                channelName={channel.name}
-                mentionables={mentionables}
-                commands={commands}
-                toolbar={composerToolbar}
-                onMentionsChange={setMentionedBots}
-                onTextChange={setDraftText}
-                prefill={composePrefill}
-                streamingCount={streamingIds.length}
-                onStopStreaming={stopStreaming}
-                onSend={handleSend}
-              />
             </div>
           </div>
 
@@ -2049,6 +2087,8 @@ export function ChannelView({
                 minimal={vbMinimal}
                 onToggleMinimal={toggleViewBoardMinimal}
                 onJumpToMessage={jumpToMessage}
+                pendingApprovals={pendingPermissionMessages}
+                currentUserId={user?.user_id}
                 focusBoard={focusBoard ?? undefined}
               />
 

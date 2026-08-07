@@ -10,6 +10,7 @@
 // not workbench panels.
 import { type ReactNode, useCallback, useEffect, useRef } from "react";
 import { RefreshCw, type LucideIcon } from "lucide-react";
+import type { Message } from "@/types";
 import type { SendResourceReq } from "./fsClient";
 import { useResourceQuery } from "./useResourceQuery";
 
@@ -27,10 +28,12 @@ export interface ViewBoardContext {
   /** False when the board is kept mounted but hidden (its tab isn't active). Boards
    *  defer tick-driven refetches while hidden and catch up on reveal. */
   visible?: boolean;
-  /** Jump the chat to a message (scroll + flash). Lightweight/best-effort: only
-   *  works when the message is in the currently loaded window — otherwise a no-op.
-   *  Boards use it to make history items (activity rows, audit cards) clickable. */
-  onJumpToMessage?: (msgId: string) => void;
+  /** Jump the chat to a message (scroll + flash). Optional `requestId` deep-links
+   *  into that turn's Agent steps Approval row. */
+  onJumpToMessage?: (msgId: string, requestId?: string | null) => void;
+  /** Live pending permission messages in this channel (minimal Approvals glance). */
+  pendingApprovals?: Message[];
+  currentUserId?: string;
 }
 
 // Trailing-coalesce window for tick-driven refetches. A user↔bot exchange or a

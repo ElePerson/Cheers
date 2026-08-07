@@ -96,14 +96,20 @@ pub async fn dispatch(
     let placeholder_id = derive_placeholder_id(params.trigger_msg_id, params.bot_id);
     let task_id = Uuid::new_v4();
 
+    // Nest the bot turn under its trigger so clients render it as a sub-message
+    // (not an independent top-level row). Persist session_id on content_data so
+    // a human Reply can reuse the same session/model without a separate lookup.
+    let content_data = params.session_id.map(|sid| json!({ "session_id": sid }));
     match create_placeholder(
         db,
         placeholder_id,
         params.channel_id,
         params.bot_id,
+        params.trigger_msg_id,
         params.depth,
         params.chain_id.as_deref(),
         params.context_bundle.as_ref(),
+        content_data.as_ref(),
     )
     .await
     {
@@ -138,10 +144,11 @@ pub async fn dispatch(
             "content": "",
             "msg_type": "text",
             "is_partial": true,
-            "reply_to_msg_id": null,
+            "reply_to_msg_id": params.trigger_msg_id,
             "file_ids": [],
             "mentions": [],
             "files": [],
+            "content_data": content_data,
             // F2 handoff card: the assembled bundle rides the placeholder so the
             // chat shows "received a handoff" the moment the bot starts working.
             "context_bundle": params.context_bundle,
@@ -243,20 +250,25 @@ fn derive_placeholder_id(trigger_msg_id: Uuid, bot_id: Uuid) -> Uuid {
 /// 原子创建占位。返回 `true` 表示本次 INSERT 胜出（rows_affected == 1）；
 /// `false` 表示占位已存在（并发双触发的败者，或同一触发的重投）——调用方据此
 /// 放弃派发，避免 bot 重复跑同一任务（R5）。
+///
+/// `trigger_msg_id` is stored as `in_reply_to_msg_id` so the bot turn nests under
+/// the human (or prior-bot) trigger in the channel timeline.
 async fn create_placeholder(
     db: &PgPool,
     placeholder_id: Uuid,
     channel_id: Uuid,
     bot_id: Uuid,
+    trigger_msg_id: Uuid,
     depth: i32,
     chain_id: Option<&str>,
     context_bundle: Option<&Value>,
+    content_data: Option<&Value>,
 ) -> Result<bool, String> {
     let result = sqlx::query(
         "INSERT INTO messages
             (msg_id, channel_id, sender_type, sender_id, content, is_partial, depth, chain_id,
-             context_bundle)
-         VALUES ($1, $2, 'bot', $3, '', TRUE, $4, $5, $6)
+             context_bundle, in_reply_to_msg_id, content_data)
+         VALUES ($1, $2, 'bot', $3, '', TRUE, $4, $5, $6, $7, $8)
          ON CONFLICT (msg_id) DO NOTHING",
     )
     .bind(placeholder_id.to_string())
@@ -265,6 +277,8 @@ async fn create_placeholder(
     .bind(depth)
     .bind(chain_id)
     .bind(context_bundle)
+    .bind(trigger_msg_id.to_string())
+    .bind(content_data)
     .execute(db)
     .await
     .map_err(|e| e.to_string())?;

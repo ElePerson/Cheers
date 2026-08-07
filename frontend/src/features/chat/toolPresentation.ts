@@ -144,10 +144,9 @@ export function toolPresentationFromTrace(
 export function parseGitStatusResult(
   presentation: ToolPresentation | null,
 ): GitStatusResult | null {
-  if (presentation?.event_type !== "git_status") {
-    return null;
-  }
-  const raw = asRecord(presentation.result);
+  // Structured status may ride on `git_status` or on compound `git_command`
+  // probes that mixed `status -sb` into a shell pipeline.
+  const raw = asRecord(presentation?.result);
   const rawCounts = asRecord(raw?.counts);
   if (raw?.kind !== "git_status" || !rawCounts || !Array.isArray(raw.files)) return null;
 
