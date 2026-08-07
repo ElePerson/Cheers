@@ -359,7 +359,8 @@ export const MessageItem = memo(function MessageItem({
       <div
         className={cn(
           "group relative flex items-start gap-3 hover:z-20 focus-within:z-20 hover:bg-zinc-900/40 transition-colors",
-          nested ? "px-1 py-0.5" : "px-4 py-0.5",
+          // Outer gaps (MessageList) own inter-message spacing; keep row chrome tight.
+          nested ? "px-1 py-0" : "px-4 py-0",
           selectable && "cursor-pointer",
           selected && "bg-indigo-950/30 hover:bg-indigo-950/40",
         )}
@@ -395,9 +396,10 @@ export const MessageItem = memo(function MessageItem({
             />
           </button>
         )}
-        <div className="flex-1 min-w-0">
+        {/* Tight gap: body ↔ status ↔ Agent steps within one message. */}
+        <div className="flex-1 min-w-0 flex flex-col gap-1">
           {nested && (
-            <div className="flex items-baseline gap-1.5 mb-0.5">
+            <div className="flex items-baseline gap-1.5">
               <button
                 type="button"
                 onClick={(e) => {
@@ -449,7 +451,8 @@ export const MessageItem = memo(function MessageItem({
   return (
     <div
       className={cn(
-        "group relative flex items-start gap-3 px-4 py-1.5 hover:z-20 focus-within:z-20 hover:bg-zinc-900/40 transition-colors",
+        // Outer gaps (MessageList) own inter-message spacing; keep row chrome tight.
+        "group relative flex items-start gap-3 px-4 py-0 hover:z-20 focus-within:z-20 hover:bg-zinc-900/40 transition-colors",
         isOwn && "flex-row-reverse",
         selectable && "cursor-pointer",
         selected && "bg-indigo-950/30 hover:bg-indigo-950/40",
@@ -479,8 +482,14 @@ export const MessageItem = memo(function MessageItem({
         />
       </button>
 
-      <div className={cn("flex-1 min-w-0", isOwn && "flex flex-col items-end")}>
-        <div className="flex items-baseline gap-2 mb-0.5">
+      {/* Tight gap: header/body ↔ status ↔ Agent steps within one message. */}
+      <div
+        className={cn(
+          "flex-1 min-w-0 flex flex-col gap-1",
+          isOwn && "items-end",
+        )}
+      >
+        <div className="flex items-baseline gap-2">
           <button
             type="button"
             onClick={(e) => openProfile(e.currentTarget)}
@@ -651,8 +660,8 @@ function MessageBody({
           <StopButton channelId={channelId} msgId={message.msg_id} />
         </div>
       )}
-      <FileGrid files={files} className="mt-1.5" />
-      <MessageContextChips bundle={message.context_bundle} className="mt-1.5" />
+      <FileGrid files={files} className="mt-1" />
+      <MessageContextChips bundle={message.context_bundle} className="mt-1" />
     </div>
   );
 }

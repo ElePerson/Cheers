@@ -21,10 +21,14 @@ enum Theme {
     static let hitMin: CGFloat = 44
     /// Comfortable list-row vertical inset (beyond default List insets).
     static let rowVertical: CGFloat = 10
-    /// Separation after a complete message group (including its agent trace).
-    /// This is deliberately larger than `space2` so adjacent messages remain
-    /// visually distinct without loosening the sender/content relationship.
-    static let messageGroupGap: CGFloat = 20
+    /// Separation after a complete top-level message group (including nested
+    /// replies). Wide tier of the chat spacing scale — larger than medium
+    /// (`space2`) so roots stay visually distinct from parent↔reply gaps.
+    static let messageGroupGap: CGFloat = 16
+    /// Medium tier: parent ↔ reply / sibling replies.
+    static let messageReplyGap: CGFloat = 8
+    /// Tight tier: within one message (body ↔ Agent steps). Alias of `space1`.
+    static let messageInnerGap: CGFloat = 4
     /// Avatar size for primary list rows (friends / conversations).
     static let avatarList: CGFloat = 40
 

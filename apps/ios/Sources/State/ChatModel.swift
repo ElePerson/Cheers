@@ -76,6 +76,8 @@ final class ChatModel {
     /// lives outside ChatModel while typing, so model text changes must not be
     /// observed on every keystroke; this increments only after a confirmed send.
     private(set) var composerClearTick = 0
+    /// Inject / replace composer text from outside (e.g. Reply prefill `@bot`).
+    private(set) var composerPrefillTick = 0
     /// Message being replied to (set by the bubble context menu); sent as
     /// reply_to_msg_id and cleared on success.
     var replyTo: MessageDto?
@@ -454,25 +456,58 @@ final class ChatModel {
 
     // MARK: Reply
 
-    /// Start a reply under `message`, pinning bot/session from the target (or its
-    /// latest bot child) so model/session/bot match the original turn.
+    /// Start a reply under `message`. Same bottom composer as a normal send —
+    /// only defaults are copied: session, `@bot`, and source message context.
     func beginReply(to message: MessageDto) {
         replyTo = message
+
+        var bot: MessageDto?
         if message.isBot {
-            selectedSessionBotId = message.senderId
-            selectedSessionId = MessageTree.messageSessionId(message)
-            return
+            bot = message
+        } else {
+            let botKids = messages
+                .filter {
+                    $0.replyToMsgId == message.msgId
+                        && $0.isBot
+                        && $0.isPartial != true
+                }
+                .sorted { ($0.channelSeq ?? 0) < ($1.channelSeq ?? 0) }
+            bot = botKids.last
         }
-        let botKids = messages
-            .filter {
-                $0.replyToMsgId == message.msgId
-                    && $0.isBot
-                    && $0.isPartial != true
+
+        if let bot {
+            selectedSessionBotId = bot.senderId
+            selectedSessionId = MessageTree.messageSessionId(bot)
+            let label = bot.senderName
+                ?? mentionPool.first(where: { $0.id == bot.senderId })?.label
+            if let label {
+                let token = "@\(label) "
+                let trimmed = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    composerText = token
+                } else if !composerText.contains("@\(label)") {
+                    composerText = token + composerText
+                }
+                if let candidate = mentionPool.first(where: { $0.id == bot.senderId }),
+                   !pickedMentions.contains(candidate)
+                {
+                    pickedMentions.append(candidate)
+                }
+                composerPrefillTick += 1
             }
-            .sorted { ($0.channelSeq ?? 0) < ($1.channelSeq ?? 0) }
-        if let latest = botKids.last {
-            selectedSessionBotId = latest.senderId
-            selectedSessionId = MessageTree.messageSessionId(latest)
+        }
+
+        if let seq = message.channelSeq {
+            addContext(ResourceContextItem(
+                id: "msg:\(seq)",
+                verb: "channel.messages.by-seq",
+                params: [
+                    "min_seq": .number(Double(seq)),
+                    "max_seq": .number(Double(seq)),
+                ],
+                label: message.senderName.map { "Reply to \($0)" } ?? "Message #\(seq)",
+                kind: "message"
+            ))
         }
     }
 

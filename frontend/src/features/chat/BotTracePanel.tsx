@@ -892,7 +892,7 @@ export function BotTracePanel({
   const latestOnly = streaming && !showAll && timeline.length > 1;
 
   return (
-    <div className={cn("mt-1", hasActionable ? "max-w-lg" : "max-w-md")}>
+    <div className={cn(hasActionable ? "max-w-lg" : "max-w-md")}>
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
