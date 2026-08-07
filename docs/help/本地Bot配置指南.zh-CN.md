@@ -40,22 +40,29 @@
 
 直接从项目的 [GitHub Releases](https://github.com/haowei2000/Cheers/releases/latest)
 下载对应平台的二进制，无需 Rust 工具链（`release-connector` workflow 按 tag 发布
-`cce-acp-connector-{darwin,linux}-{arm64,amd64}` 四个产物）：
+`cce-acp-connector-{darwin,linux}-{arm64,amd64}` 以及配套的
+`cheers-mcp-server-*`）：
 
 ```bash
 os=$(uname -s | tr 'A-Z' 'a-z'); arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 mkdir -p ~/.cheers/bin
 curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
-  "https://github.com/haowei2000/Cheers/releases/latest/download/cce-acp-connector-$os-$arch"
-chmod +x ~/.cheers/bin/cce-acp-connector
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
+curl -fsSL -o ~/.cheers/bin/cheers-mcp-server \
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-$os-$arch"
+chmod +x ~/.cheers/bin/cce-acp-connector ~/.cheers/bin/cheers-mcp-server
 export PATH="$HOME/.cheers/bin:$PATH"   # 写进 shell profile 长期生效
 cce-acp-connector --help
 ```
 
-需要固定版本时，把 `latest/download` 换成 `download/connector-v<版本号>`
-（例如 `download/connector-v0.1.22`）。仓库还是**私有**时匿名 curl 会 404，
+两个二进制要装到同一目录：默认 `inject_cheers = true` 时，连接器会在自己旁边
+查找 `cheers-mcp-server`，以便把 Cheers 工具暴露给智能体。
+
+需要固定版本时，改上面的 `connector-v0.1.36` 标签。请优先使用 `connector-v*`
+标签——`releases/latest` 指向桌面应用。仓库还是**私有**时匿名 curl 会 404，
 有权限的用户改用 GitHub CLI 认证下载：
-`gh release download connector-v0.1.22 -R haowei2000/Cheers -p "cce-acp-connector-$os-$arch" -O ~/.cheers/bin/cce-acp-connector`。
+`gh release download connector-v0.1.36 -R haowei2000/Cheers -p "cce-acp-connector-$os-$arch" -p "cheers-mcp-server-$os-$arch" -D ~/.cheers/bin`，
+再 `chmod +x ~/.cheers/bin/cce-acp-connector ~/.cheers/bin/cheers-mcp-server`。
 开发连接器本身的同学仍可用源码构建
 （`cargo build` → `target/debug/cce-acp-connector`）；下文命令默认
 `cce-acp-connector` 已在 `PATH` 上，两种方式均可。
@@ -68,6 +75,9 @@ cce-acp-connector --help
 
 ```
 ~/.cheers/
+├─ bin/
+│   ├─ cce-acp-connector         # 连接器守护进程
+│   └─ cheers-mcp-server         # MCP 伴生（同版本）
 ├─ cheers-daemon.codex.toml      # bot：codex（一个文件一个 bot）
 ├─ cheers-daemon.claude.toml     # bot：claude
 ├─ secrets/
