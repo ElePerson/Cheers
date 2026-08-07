@@ -48,8 +48,11 @@ type Mode = "manual" | "script" | "agent";
 /** Where prebuilt connector binaries are published (release-connector workflow).
  * Keep in sync with the default in server/assets/install.sh. */
 const CONNECTOR_RELEASES_REPO = "haowei2000/Cheers";
+/** Pin GitHub fallbacks to a connector-v* tag — releases/latest is the desktop app. */
+const CONNECTOR_RELEASE_TAG = "connector-v0.1.36";
 /** Same-origin download (gateway proxies the GitHub release): works from hosts
- * that can reach this server but not GitHub. GitHub stays the fallback. */
+ * that can reach this server but not GitHub. GitHub stays the fallback.
+ * Stages cheers-mcp-server beside the connector — inject_cheers resolves it there. */
 // serverOrigin(), not window.location.origin: the snippet must name the
 // GATEWAY the target host can reach — in the desktop shell the window origin
 // is tauri://localhost, useless in a curl command.
@@ -58,8 +61,12 @@ mkdir -p ~/.cheers/bin
 curl -fsSL -o ~/.cheers/bin/cce-acp-connector \\
   "${serverOrigin()}/api/v1/connector/download/cce-acp-connector-$os-$arch" \\
   || curl -fsSL -o ~/.cheers/bin/cce-acp-connector \\
-  "https://github.com/${CONNECTOR_RELEASES_REPO}/releases/latest/download/cce-acp-connector-$os-$arch"
-chmod +x ~/.cheers/bin/cce-acp-connector
+  "https://github.com/${CONNECTOR_RELEASES_REPO}/releases/download/${CONNECTOR_RELEASE_TAG}/cce-acp-connector-$os-$arch"
+curl -fsSL -o ~/.cheers/bin/cheers-mcp-server \\
+  "${serverOrigin()}/api/v1/connector/download/cheers-mcp-server-$os-$arch" \\
+  || curl -fsSL -o ~/.cheers/bin/cheers-mcp-server \\
+  "https://github.com/${CONNECTOR_RELEASES_REPO}/releases/download/${CONNECTOR_RELEASE_TAG}/cheers-mcp-server-$os-$arch"
+chmod +x ~/.cheers/bin/cce-acp-connector ~/.cheers/bin/cheers-mcp-server
 export PATH="$HOME/.cheers/bin:$PATH"`;
 
 const FALLBACK_AGENTS: AcpAgentInfo[] = [
@@ -766,7 +773,10 @@ cce-acp-connector status --name ${accountId}`}
         </div>
         <div className="space-y-1.5 pt-1">
           <p className="text-xs text-zinc-400">
-            Need the connector binary? Download the prebuilt release (no Rust toolchain needed):
+            Need the connector binary? Download the prebuilt release plus the sibling{" "}
+            <code className="text-zinc-400">cheers-mcp-server</code> (no Rust toolchain needed;
+            default <code className="text-zinc-400">inject_cheers</code> resolves the MCP companion
+            next to the connector):
           </p>
           <div className="rounded-lg bg-zinc-950 p-3">
             <pre className="text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap break-all">
@@ -775,7 +785,7 @@ cce-acp-connector status --name ${accountId}`}
           </div>
           <div className="flex items-center justify-between">
             <a
-              href={`https://github.com/${CONNECTOR_RELEASES_REPO}/releases/latest`}
+              href={`https://github.com/${CONNECTOR_RELEASES_REPO}/releases/tag/${CONNECTOR_RELEASE_TAG}`}
               target="_blank"
               rel="noreferrer"
               className="text-xs text-indigo-300 hover:text-indigo-200 underline underline-offset-2"

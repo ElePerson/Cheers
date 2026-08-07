@@ -39,25 +39,31 @@ Three rules:
 
 ### 1.1 Get the connector binary (prebuilt release)
 
-Download the platform binary from the project's
-[GitHub Releases](https://github.com/haowei2000/Cheers/releases/latest) — no Rust
+Download the platform binaries from the project's
+[GitHub Releases](https://github.com/haowei2000/Cheers/releases) — no Rust
 toolchain needed (`release-connector` publishes
-`cce-acp-connector-{darwin,linux}-{arm64,amd64}` per tag):
+`cce-acp-connector-{darwin,linux}-{arm64,amd64}` and matching
+`cheers-mcp-server-*` assets per `connector-v*` tag):
 
 ```bash
 os=$(uname -s | tr 'A-Z' 'a-z'); arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 mkdir -p ~/.cheers/bin
 curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
-  "https://github.com/haowei2000/Cheers/releases/latest/download/cce-acp-connector-$os-$arch"
-chmod +x ~/.cheers/bin/cce-acp-connector
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
+curl -fsSL -o ~/.cheers/bin/cheers-mcp-server \
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cheers-mcp-server-$os-$arch"
+chmod +x ~/.cheers/bin/cce-acp-connector ~/.cheers/bin/cheers-mcp-server
 export PATH="$HOME/.cheers/bin:$PATH"   # add to your shell profile to keep it
 cce-acp-connector --help
 ```
 
-To pin a version, replace `latest/download` with `download/connector-v<version>`
-(e.g. `download/connector-v0.1.22`). While the repository is **private**, plain curl
-returns 404 — download with the authenticated GitHub CLI instead:
-`gh release download connector-v0.1.22 -R haowei2000/Cheers -p "cce-acp-connector-$os-$arch" -O ~/.cheers/bin/cce-acp-connector`.
+Pin a different version by swapping `connector-v0.1.36` for another `connector-v*` tag
+(do **not** use `releases/latest` — that points at the desktop app). While the repository is
+**private**, plain curl returns 404 — download with the authenticated GitHub CLI instead:
+`gh release download connector-v0.1.36 -R haowei2000/Cheers -p "cce-acp-connector-$os-$arch" -O ~/.cheers/bin/cce-acp-connector`
+and
+`gh release download connector-v0.1.36 -R haowei2000/Cheers -p "cheers-mcp-server-$os-$arch" -O ~/.cheers/bin/cheers-mcp-server`.
+The MCP companion must sit next to the connector — default `inject_cheers = true` resolves it there.
 Developers hacking on the connector itself can
 keep using the source build (`cargo build` → `target/debug/cce-acp-connector`);
 the commands below assume `cce-acp-connector` is on `PATH` either way.
@@ -70,6 +76,9 @@ Keep **runtime config + secrets outside the repo** (`~/.cheers/`); treat the rep
 
 ```
 ~/.cheers/
+├─ bin/
+│   ├─ cce-acp-connector
+│   └─ cheers-mcp-server         # sibling required by inject_cheers
 ├─ cheers-daemon.codex.toml      # bot: codex (one file = one bot)
 ├─ cheers-daemon.claude.toml     # bot: claude
 ├─ secrets/
