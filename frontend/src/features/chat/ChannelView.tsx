@@ -20,7 +20,6 @@ import {
   FolderTree,
   Settings,
   LayoutDashboard,
-  Reply,
   X,
   Copy,
   Forward,
@@ -31,6 +30,7 @@ import { listMessages, sendMessage } from "@/api/messages";
 import {
   useContextPickStore,
   toBundle,
+  messageContextItem,
   type ContextItem,
 } from "./context/contextPick";
 import { ContextPickBar } from "./context/ContextPickBar";
@@ -1520,33 +1520,47 @@ export function ChannelView({
     [messages],
   );
 
-  // Apply bot/session (model rides the session) from the reply target so the
-  // follow-up continues the same turn configuration.
-  const applyReplyConfig = useCallback(
+  // Reply uses the same bottom composer as a normal send. The only difference is
+  // defaults copied from the source turn: session target, @bot, and message context.
+  // `reply_to_msg_id` still nests the outgoing message under the source.
+  const applyReplyDefaults = useCallback(
     (m: Message) => {
+      let bot: Message | null = null;
       if (m.sender_type === "bot") {
-        setSelectedSessionBotId(m.sender_id);
-        const sid = messageSessionId(m);
-        setSelectedSessionId(sid ?? "");
-        return;
+        bot = m;
+      } else {
+        // Prefer the latest bot child under this message (the turn being continued).
+        const botKids = messages
+          .filter(
+            (x) =>
+              x.reply_to_msg_id === m.msg_id &&
+              x.sender_type === "bot" &&
+              !x.is_deleted,
+          )
+          .sort((a, b) => (a.channel_seq ?? 0) - (b.channel_seq ?? 0));
+        bot = botKids[botKids.length - 1] ?? null;
       }
-      // Prefer the latest bot child under this message (the turn being continued).
-      const botKids = messages
-        .filter(
-          (x) =>
-            x.reply_to_msg_id === m.msg_id &&
-            x.sender_type === "bot" &&
-            !x.is_deleted,
-        )
-        .sort((a, b) => (a.channel_seq ?? 0) - (b.channel_seq ?? 0));
-      const latest = botKids[botKids.length - 1];
-      if (latest) {
-        setSelectedSessionBotId(latest.sender_id);
-        const sid = messageSessionId(latest);
-        setSelectedSessionId(sid ?? "");
+
+      if (bot) {
+        setSelectedSessionBotId(bot.sender_id);
+        setSelectedSessionId(messageSessionId(bot) ?? "");
+        const label =
+          bot.sender_name ||
+          mentionables.find((x) => x.id === bot!.sender_id)?.label;
+        if (label) {
+          setComposePrefill((p) => ({
+            text: `@${label} `,
+            seq: (p?.seq ?? 0) + 1,
+          }));
+        }
+      }
+
+      if (channel?.channel_id) {
+        const ctx = messageContextItem(m);
+        if (ctx) useContextPickStore.getState().add(channel.channel_id, ctx);
       }
     },
-    [messages],
+    [messages, mentionables, channel?.channel_id],
   );
 
   // Stable identity: selection state deliberately NOT captured here (it travels
@@ -1556,14 +1570,14 @@ export function ChannelView({
     () => ({
       onReply: (m) => {
         setReplyTo(m);
-        applyReplyConfig(m);
+        applyReplyDefaults(m);
       },
       onForward: (m) =>
         setForward({ content: buildForwardContent([m]), count: 1 }),
       onToggleSelect: (m) => {
         setSelectMode(true);
-        // Entering select mode hides the reply banner — disarm the reply too so
-        // the next send can't silently become a reply to an invisible target.
+        // Entering select mode — disarm reply so the next send can't silently
+        // nest under an invisible target.
         setReplyTo(null);
         setSelectedIds((prev) => {
           const next = new Set(prev);
@@ -1574,7 +1588,7 @@ export function ChannelView({
       },
       onRetry: retryMessage,
     }),
-    [buildForwardContent, retryMessage, applyReplyConfig],
+    [buildForwardContent, retryMessage, applyReplyDefaults],
   );
 
   const clearSelection = () => {
@@ -1926,49 +1940,6 @@ export function ChannelView({
                     selectedIds={selectedIds}
                     focusMsg={focusMsg}
                     replyToId={replyTo && !selectMode ? replyTo.msg_id : null}
-                    inlineReply={
-                      replyTo && !selectMode ? (
-                        <>
-                          <div className="mb-1.5 flex items-center gap-2 px-1 text-xs">
-                            <Reply className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-                            <span className="text-zinc-400">Replying under</span>
-                            <span className="text-zinc-300 font-medium truncate">
-                              {displayName(replyTo)}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setReplyTo(null)}
-                              className="ml-auto text-zinc-500 hover:text-zinc-200 p-0.5"
-                              title="Cancel reply (Esc)"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                          <ContextPickBar
-                            channelId={channel.channel_id}
-                            replyTo={replyTo}
-                            draftText={draftText}
-                            files={channelFiles}
-                            onBrowseWorkbench={browseWorkbench}
-                            onBrowseWorkspace={browseWorkspace}
-                            onJumpToSource={jumpToContextSource}
-                          />
-                          <MessageComposer
-                            channelId={channel.channel_id}
-                            channelName={channel.name}
-                            mentionables={mentionables}
-                            commands={commands}
-                            toolbar={composerToolbar}
-                            onMentionsChange={setMentionedBots}
-                            onTextChange={setDraftText}
-                            prefill={composePrefill}
-                            streamingCount={streamingIds.length}
-                            onStopStreaming={stopStreaming}
-                            onSend={handleSend}
-                          />
-                        </>
-                      ) : null
-                    }
                   />
                 </ResolveRefContext.Provider>
               )}
@@ -2017,40 +1988,19 @@ export function ChannelView({
                 </div>
               )}
 
-              {/* Bottom composer is for new root messages. When replying, the
-                  inline composer under the parent owns send — avoid two editors. */}
-              {replyTo && !selectMode ? (
-                <div className="mx-4 mt-2 mb-2 flex items-center gap-2 rounded-lg bg-zinc-900/60 px-3 py-1.5 text-xs">
-                  <Reply className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-                  <span className="text-zinc-400">
-                    Replying under{" "}
-                    <span className="text-zinc-300 font-medium">
-                      {displayName(replyTo)}
-                    </span>
-                    {" · "}use the composer above · Esc to cancel
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setReplyTo(null)}
-                    title="Cancel reply"
-                    className="ml-auto text-zinc-500 hover:text-zinc-200 flex-shrink-0"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
+              {/* Same composer for root sends and replies — reply only pre-fills
+                  session / @ / context (and sets reply_to on send). Esc clears nesting. */}
+              {!selectMode && (
                 <>
-                  {!selectMode && (
-                    <ContextPickBar
-                      channelId={channel.channel_id}
-                      replyTo={replyTo}
-                      draftText={draftText}
-                      files={channelFiles}
-                      onBrowseWorkbench={browseWorkbench}
-                      onBrowseWorkspace={browseWorkspace}
-                      onJumpToSource={jumpToContextSource}
-                    />
-                  )}
+                  <ContextPickBar
+                    channelId={channel.channel_id}
+                    replyTo={replyTo}
+                    draftText={draftText}
+                    files={channelFiles}
+                    onBrowseWorkbench={browseWorkbench}
+                    onBrowseWorkspace={browseWorkspace}
+                    onJumpToSource={jumpToContextSource}
+                  />
                   <MessageComposer
                     channelId={channel.channel_id}
                     channelName={channel.name}
