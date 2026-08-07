@@ -210,7 +210,11 @@ private enum ChatTimelineItem: Identifiable, Hashable {
         traceEvents: [TraceEventDto],
         isOwn: Bool,
         showAvatar: Bool,
-        isLast: Bool,
+        /// Among siblings at this depth (roots or reply children): last one
+        /// gets the wide trailing gap / L-rail stop.
+        isLastSibling: Bool,
+        /// True when this message has nested reply children in the timeline.
+        hasReplyChildren: Bool,
         formattedTime: String,
         repliedTo: MessageDto?,
         /// Nesting depth under a reply parent (0 = top-level root).
@@ -224,7 +228,7 @@ private enum ChatTimelineItem: Identifiable, Hashable {
         case .loadOlder: return "load-older"
         case .day(_, let key): return "day-\(key)"
         case .system(let message): return "sys-\(message.msgId)"
-        case .bubble(let message, _, _, _, _, _, _, _, _): return message.msgId
+        case .bubble(let message, _, _, _, _, _, _, _, _, _): return message.msgId
         }
     }
 }
@@ -416,9 +420,6 @@ struct ChatView: View {
 
     private var composerDock: some View {
         VStack(spacing: 0) {
-            if let reply = model.replyTo {
-                replyBar(reply)
-            }
             if let error = model.errorMessage {
                 errorBanner(error)
             }
@@ -426,6 +427,8 @@ struct ChatView: View {
             ComposerView(
                 initialText: model.composerText,
                 clearTick: model.composerClearTick,
+                prefillTick: model.composerPrefillTick,
+                prefillText: model.composerText,
                 placeholder: composerPlaceholder,
                 isSending: model.isSending,
                 onSend: { draft in await model.send(draft: draft) },
@@ -537,36 +540,6 @@ struct ChatView: View {
             params: ["file_id": .string(file.fileId)],
             label: file.originalFilename ?? "File", kind: "file"
         )
-    }
-
-    private func replyBar(_ reply: MessageDto) -> some View {
-        HStack(spacing: 9) {
-            Image(systemName: "arrowshape.turn.up.left")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.link)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Replying under \(reply.senderName ?? (reply.isBot ? "Bot" : "message"))")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(reply.content.replacingOccurrences(of: "\n", with: " "))
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Button {
-                model.cancelReply()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.leading, 14)
-        .background(Theme.bgSurface)
     }
 
     private var composerPlaceholder: String {
@@ -863,7 +836,7 @@ struct ChatView: View {
             }
 
             let isFirstInGroup = depth > 0 || !groupable(prevSibling)
-            let isLastInGroup = kids.isEmpty && (depth > 0 || !groupable(nextSibling))
+            let isLastSibling = nextSibling == nil
             let parentInView = message.replyToMsgId.flatMap { tree.byId[$0] } != nil
 
             result.append(.bubble(
@@ -871,7 +844,8 @@ struct ChatView: View {
                 traceEvents: model.traceEvents(for: message.msgId),
                 isOwn: isOwn,
                 showAvatar: depth > 0 ? true : (!isOwn && isFirstInGroup),
-                isLast: isLastInGroup,
+                isLastSibling: isLastSibling,
+                hasReplyChildren: !kids.isEmpty,
                 formattedTime: TimeFormat.time(message.createdDate),
                 repliedTo: parentInView ? nil : message.replyToMsgId.flatMap { tree.byId[$0] },
                 depth: depth,
@@ -1189,8 +1163,27 @@ private struct ChatTimelineRow: View {
             } else {
                 SystemMessageView(message: message)
             }
-        case .bubble(let message, let traceEvents, let isOwn, let showAvatar, let isLast, let time, let repliedTo, let depth, let hideReplyQuote):
-            VStack(alignment: isOwn ? .trailing : .leading, spacing: 0) {
+        case .bubble(
+            let message,
+            let traceEvents,
+            let isOwn,
+            let showAvatar,
+            let isLastSibling,
+            let hasReplyChildren,
+            let time,
+            let repliedTo,
+            let depth,
+            let hideReplyQuote
+        ):
+            // Spacing scale: tight inside the unit, medium before replies,
+            // wide after a finished root/thread.
+            let trailingGap: CGFloat = {
+                if depth == 0 {
+                    return hasReplyChildren ? Theme.messageReplyGap : Theme.messageGroupGap
+                }
+                return isLastSibling ? Theme.messageGroupGap : Theme.messageReplyGap
+            }()
+            VStack(alignment: isOwn ? .trailing : .leading, spacing: Theme.messageInnerGap) {
                 MessageBubbleView(
                     message: message,
                     isOwn: isOwn,
@@ -1219,22 +1212,43 @@ private struct ChatTimelineRow: View {
                 if message.msgType == "task_claim_confirmation" {
                     TaskClaimConfirmationFooter(message: message, channelId: channelId)
                         .padding(.leading, 58 + CGFloat(depth) * 16)
-                        .padding(.top, 2)
                 }
             }
-            .padding(.leading, CGFloat(depth) * 16)
+            .padding(.leading, depth > 0 ? 16 + CGFloat(depth - 1) * 16 : 0)
             .overlay(alignment: .leading) {
                 if depth > 0 {
-                    Rectangle()
-                        .fill(Theme.border.opacity(0.7))
-                        .frame(width: 2)
-                        .padding(.leading, CGFloat(depth - 1) * 16 + 8)
+                    ThreadCornerRail(isLastSibling: isLastSibling)
+                        .frame(width: 14)
+                        .padding(.leading, CGFloat(depth - 1) * 16 + 6)
                 }
             }
-            // Keep the trace visually attached to its message, then create a
-            // clear boundary before the next sender/content/trace unit.
-            .padding(.bottom, isLast ? Theme.messageGroupGap : Theme.space1)
+            .padding(.bottom, trailingGap)
         }
+    }
+}
+
+/// L-shaped reply connector (web MessageList parity): vertical rail + stub
+/// into the nested row. Last sibling stops the rail at the elbow.
+private struct ThreadCornerRail: View {
+    let isLastSibling: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            let x: CGFloat = 0.5
+            let elbowY = min(16, size.height * 0.35)
+            var path = Path()
+            path.move(to: CGPoint(x: x, y: 0))
+            path.addLine(to: CGPoint(x: x, y: isLastSibling ? elbowY : size.height))
+            path.move(to: CGPoint(x: x, y: elbowY))
+            path.addLine(to: CGPoint(x: size.width, y: elbowY))
+            context.stroke(
+                path,
+                with: .color(Theme.border),
+                style: StrokeStyle(lineWidth: 1, lineCap: .square)
+            )
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

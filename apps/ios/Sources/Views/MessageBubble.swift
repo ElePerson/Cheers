@@ -76,10 +76,7 @@ struct MessageBubbleView: View {
     var onBlock: (() -> Void)? = nil
     var onStop: (() -> Void)? = nil
     var body: some View {
-        // Sender, content and the optional trace are one message unit. Keep
-        // this relationship compact; ChatTimelineRow supplies the larger gap
-        // after the whole unit instead of stacking padding around each part.
-        VStack(alignment: isOwn ? .trailing : .leading, spacing: Theme.space1) {
+        VStack(alignment: isOwn ? .trailing : .leading, spacing: Theme.messageInnerGap) {
             if !isOwn, showAvatar {
                 senderHeader
             }
@@ -110,8 +107,9 @@ struct MessageBubbleView: View {
                 }
             }
         }
+        // Outer ChatTimelineRow owns inter-message gaps; keep chrome tight.
         .padding(.horizontal, nested ? Theme.space3 : Theme.space5)
-        .padding(.top, nested ? Theme.space1 : (showAvatar ? Theme.space3 : Theme.space1))
+        .padding(.top, 0)
     }
 
     private var senderHeader: some View {
