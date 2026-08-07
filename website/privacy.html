@@ -1,31 +1,211 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cheers Privacy Policy</title>
-  <link rel="alternate" hreflang="zh-CN" href="./privacy.zh-CN.html">
-  <style>body{max-width:760px;margin:0 auto;padding:40px 22px;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033}h1{line-height:1.2}h2{margin-top:2em}a{color:#9a5a00}small{color:#5f6876}</style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cheers · Privacy Policy</title>
+<meta name="description" content="How the official Cheers service handles personal data." />
+<link rel="alternate" hreflang="zh-CN" href="./privacy.zh-CN.html" />
+<link rel="alternate" hreflang="en" href="./privacy.html" />
+<style>
+  :root {
+    --bg: #14120b; --bg-elevated: #1c1913; --bg-soft: #221f18;
+    --ink: #edecec; --ink-soft: #a8a29e; --ink-faint: #78716c;
+    --line: rgba(237, 236, 236, 0.10); --line-strong: rgba(237, 236, 236, 0.16);
+    --btn: #edecec; --btn-ink: #14120b;
+    --maxw: 1120px; --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --font: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink);
+    line-height: 1.5; font-weight: 400; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { opacity: 0.72; }
+  h1, h2, h3 { font-weight: 400; letter-spacing: -0.025em; line-height: 1.2; margin: 0; }
+  p { margin: 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(16px);
+  }
+  .nav-inner {
+    display: flex; align-items: center; gap: 8px;
+    height: 56px; max-width: 1280px; margin: 0 auto; padding: 0 24px;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: var(--ink); }
+  .brand:hover { opacity: 1; }
+  .brand-mark { width: 18px; height: 18px; display: grid; place-items: center; }
+  .brand-mark svg { width: 18px; height: 18px; }
+  .nav-links { display: flex; align-items: center; gap: 2px; margin-left: 28px; }
+  .nav-links a { font-size: 14px; color: var(--ink); padding: 6px 14px; border-radius: 999px; }
+  .nav-links a:hover, .nav-links a[aria-current="page"] { opacity: 1; background: rgba(237,236,236,.06); }
+  .nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .nav-text { font-size: 14px; color: var(--ink); padding: 4px 8px; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font-family: inherit; font-size: 14px; font-weight: 400;
+    border-radius: 999px; border: 1px solid transparent; padding: 6px 12px; cursor: pointer;
+  }
+  .btn:hover { opacity: 1; text-decoration: none; }
+  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .btn-solid { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); }
+  .btn-solid:hover { opacity: 0.88; }
+  .btn-outline { background: transparent; color: var(--ink); border-color: rgba(237,236,236,.28); }
+  .btn-outline:hover { border-color: rgba(237,236,236,.5); background: rgba(237,236,236,.04); }
+
+  .page-hero { padding: 72px 0 32px; }
+  .page-hero h1 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.03em; }
+  .page-hero .lead { margin-top: 14px; font-size: 15px; color: var(--ink-soft); }
+
+  .legal { padding: 8px 0 80px; }
+  .legal .prose { max-width: 720px; }
+  .prose h2 {
+    font-size: 20px; margin: 40px 0 12px; letter-spacing: -0.02em; color: var(--ink);
+  }
+  .prose h2:first-of-type { margin-top: 8px; }
+  .prose p, .prose li {
+    font-size: 15px; line-height: 1.65; color: var(--ink-soft);
+  }
+  .prose p + p { margin-top: 14px; }
+  .prose a {
+    color: var(--ink); text-decoration: underline;
+    text-underline-offset: 3px; text-decoration-color: rgba(237,236,236,.28);
+  }
+  .prose a:hover { opacity: 1; text-decoration-color: rgba(237,236,236,.55); }
+  .prose strong { color: var(--ink); font-weight: 600; }
+  .prose ul { margin: 12px 0 0; padding-left: 1.25em; }
+  .prose li { margin: 8px 0; }
+  .prose li::marker { color: var(--ink-faint); }
+
+  .divider { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  footer { border-top: 1px solid var(--line); padding: 48px 0 36px; }
+  .foot-grid {
+    display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); gap: 32px; margin-bottom: 40px;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 12px; }
+  .foot-desc { font-size: 13.5px; color: var(--ink-soft); max-width: 240px; }
+  .foot-col h4 {
+    font-size: 12px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 14px;
+  }
+  .foot-col a { display: block; font-size: 14px; color: var(--ink-soft); padding: 4px 0; }
+  .foot-col a:hover { color: var(--ink); opacity: 1; }
+  .foot-bottom {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-faint);
+  }
+  .foot-bottom a { color: var(--ink-faint); }
+  @media (max-width: 800px) { .foot-grid { grid-template-columns: 1fr 1fr; } }
+</style>
 </head>
 <body>
-  <p><a href="./index.html">← Cheers</a> · <a href="./privacy.zh-CN.html">简体中文</a></p>
-  <h1>Cheers Privacy Policy</h1>
-  <p><small>Effective date: July 29, 2026</small></p>
-  <p>Cheers is a collaboration service for people and AI agents. This policy explains how the official Cheers service at <a href="https://www.tocheers.com">www.tocheers.com</a> handles personal data. A separately self-hosted Cheers instance is operated by its own administrator, who is responsible for that instance’s policy and data practices.</p>
-  <h2>Data we process</h2>
-  <p>We process account details (email address, username, display name and role); content you choose to provide (messages, attachments, photos or videos, profile images, voice-channel audio, dictated audio and bot or workspace configuration); technical records needed to secure and operate the service (account ID, IP-derived rate-limit/security data, session information, and service logs); and, only when you enable notifications, an APNs device token and your device name.</p>
-  <p>Microphone access is requested only when you start a voice channel or composer dictation. Voice-channel audio is transmitted to the other participants through the configured realtime service. Dictated audio is processed by the configured Cheers speech-to-text service or, when that service is unavailable and you allow it, Apple Speech Recognition. Cheers does not retain the raw composer dictation after transcription.</p>
-  <p>Passwords are transmitted only over encrypted connections and stored by the service as password hashes, not as readable passwords. If you use Sign in with Apple, we process Apple’s stable account identifier, the name and email or private relay address you choose to share, and encrypted refresh credentials needed to maintain or revoke the connection. We do not receive your Apple Account password. The iOS app stores its Cheers access token in the Apple Keychain.</p>
-  <h2>Why we use data</h2>
-  <p>We use this data to authenticate you, provide conversations and workspace features, deliver requested notifications, prevent abuse and security incidents, operate and improve reliability, and comply with legal obligations. We do not sell personal data or use it to track you across apps and websites owned by other companies.</p>
-  <h2>When data is shared</h2>
-  <p>Data is available to the people, bots, and workspace administrators authorized for the relevant workspace or channel. Before a message is first sent to an external AI agent, Cheers identifies the agent and provider, explains the data use, links the provider’s privacy policy, and asks the sender for channel-specific permission. Declining does not prevent ordinary person-to-person chat. Permission can be revoked in Settings and is requested again if the provider disclosure changes. We use infrastructure providers only to host, store, transmit, authenticate, or deliver the service (including Apple for Sign in with Apple and push notifications). We do not share data with advertising networks.</p>
-  <p>External AI agents are not enabled by default. Their providers may have separate terms, retention practices, and geographic processing locations; review those terms before sending personal, confidential, regulated, or credential-bearing data to an agent.</p>
-  <h2>Retention and deletion</h2>
-  <p>We keep account and workspace data while the account or workspace remains active, subject to operational backups and legal requirements. You can delete your account directly in iOS Settings after confirming your password or Apple identity. Deletion revokes sessions, push registrations and linked Apple credentials, anonymizes the profile, disables owned bots, and transfers or archives shared spaces. Historical messages remain attributed to “Deleted User” where needed for other participants’ conversation integrity. Limited records may remain in encrypted backups until normal rotation. For a data copy or help with an inaccessible account, email <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>.</p>
-  <h2>Security</h2>
-  <p>We use access controls, encrypted transport, scoped authentication tokens, and security logging designed to protect the service. No internet service can guarantee absolute security; please use a strong, unique password and contact us promptly if you believe your account is compromised.</p>
-  <h2>Contact and changes</h2>
-  <p>For privacy questions or requests, contact <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>. For product support, use <a href="./support.html">Cheers Support</a>. See also the <a href="./terms.html">Terms of Service</a> and <a href="./account-deletion.html">Account Deletion</a> page. We will post material policy changes on this page and update the effective date.</p>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.html" aria-label="Cheers home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+      </span>
+      Cheers
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="./index.html#product">Product</a>
+      <a href="./downloads.html">Download</a>
+      <a href="./docs.html">Docs</a>
+      <a href="./index.html#developers">Developers</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="nav-text" href="./privacy.zh-CN.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+      <a class="btn btn-outline" href="https://github.com/haowei2000/Cheers">GitHub</a>
+      <a class="btn btn-solid" href="https://www.tocheers.com">Open app</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap">
+      <h1>Privacy Policy</h1>
+      <p class="lead">Effective date: July 29, 2026</p>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section class="legal">
+    <div class="wrap">
+      <div class="prose">
+        <p>Cheers is a collaboration service for people and AI agents. This policy explains how the official Cheers service at <a href="https://www.tocheers.com">www.tocheers.com</a> handles personal data. A separately self-hosted Cheers instance is operated by its own administrator, who is responsible for that instance’s policy and data practices.</p>
+        <h2>Data we process</h2>
+        <p>We process account details (email address, username, display name and role); content you choose to provide (messages, attachments, photos or videos, profile images, voice-channel audio, dictated audio and bot or workspace configuration); technical records needed to secure and operate the service (account ID, IP-derived rate-limit/security data, session information, and service logs); and, only when you enable notifications, an APNs device token and your device name.</p>
+        <p>Microphone access is requested only when you start a voice channel or composer dictation. Voice-channel audio is transmitted to the other participants through the configured realtime service. Dictated audio is processed by the configured Cheers speech-to-text service or, when that service is unavailable and you allow it, Apple Speech Recognition. Cheers does not retain the raw composer dictation after transcription.</p>
+        <p>Passwords are transmitted only over encrypted connections and stored by the service as password hashes, not as readable passwords. If you use Sign in with Apple, we process Apple’s stable account identifier, the name and email or private relay address you choose to share, and encrypted refresh credentials needed to maintain or revoke the connection. We do not receive your Apple Account password. The iOS app stores its Cheers access token in the Apple Keychain.</p>
+        <h2>Why we use data</h2>
+        <p>We use this data to authenticate you, provide conversations and workspace features, deliver requested notifications, prevent abuse and security incidents, operate and improve reliability, and comply with legal obligations. We do not sell personal data or use it to track you across apps and websites owned by other companies.</p>
+        <h2>When data is shared</h2>
+        <p>Data is available to the people, bots, and workspace administrators authorized for the relevant workspace or channel. Before a message is first sent to an external AI agent, Cheers identifies the agent and provider, explains the data use, links the provider’s privacy policy, and asks the sender for channel-specific permission. Declining does not prevent ordinary person-to-person chat. Permission can be revoked in Settings and is requested again if the provider disclosure changes. We use infrastructure providers only to host, store, transmit, authenticate, or deliver the service (including Apple for Sign in with Apple and push notifications). We do not share data with advertising networks.</p>
+        <p>External AI agents are not enabled by default. Their providers may have separate terms, retention practices, and geographic processing locations; review those terms before sending personal, confidential, regulated, or credential-bearing data to an agent.</p>
+        <h2>Retention and deletion</h2>
+        <p>We keep account and workspace data while the account or workspace remains active, subject to operational backups and legal requirements. You can delete your account directly in iOS Settings after confirming your password or Apple identity. Deletion revokes sessions, push registrations and linked Apple credentials, anonymizes the profile, disables owned bots, and transfers or archives shared spaces. Historical messages remain attributed to “Deleted User” where needed for other participants’ conversation integrity. Limited records may remain in encrypted backups until normal rotation. For a data copy or help with an inaccessible account, email <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>.</p>
+        <h2>Security</h2>
+        <p>We use access controls, encrypted transport, scoped authentication tokens, and security logging designed to protect the service. No internet service can guarantee absolute security; please use a strong, unique password and contact us promptly if you believe your account is compromised.</p>
+        <h2>Contact and changes</h2>
+        <p>For privacy questions or requests, contact <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>. For product support, use <a href="./support.html">Cheers Support</a>. See also the <a href="./terms.html">Terms of Service</a> and <a href="./account-deletion.html">Account Deletion</a> page. We will post material policy changes on this page and update the effective date.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+          </span>
+          Cheers
+        </div>
+        <p class="foot-desc">Open-source collaboration for humans and AI agents. MIT licensed.</p>
+      </div>
+      <div class="foot-col">
+        <h4>Product</h4>
+        <a href="./index.html#product">Overview</a>
+        <a href="./downloads.html">Download</a>
+        <a href="https://www.tocheers.com">Open app</a>
+      </div>
+      <div class="foot-col">
+        <h4>Developers</h4>
+        <a href="./docs.html">Docs</a>
+        <a href="./connector.html">Connector</a>
+        <a href="./mcp.html">MCP tools</a>
+        <a href="https://github.com/haowei2000/Cheers">GitHub</a>
+      </div>
+      <div class="foot-col">
+        <h4>Legal</h4>
+        <a href="./privacy.html">Privacy</a>
+        <a href="./terms.html">Terms</a>
+        <a href="./support.html">Support</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© Cheers · MIT License</span>
+      <span><a href="./privacy.zh-CN.html" hreflang="zh-CN" lang="zh-CN">中文</a></span>
+    </div>
+  </div>
+</footer>
 </body>
 </html>

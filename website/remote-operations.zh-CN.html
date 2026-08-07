@@ -1,10 +1,214 @@
-<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Cheers 远程操作安全政策</title><link rel="alternate" hreflang="en" href="./remote-operations.html"><style>body{max-width:760px;margin:0 auto;padding:40px 22px;font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033}h1{line-height:1.2}h2{margin-top:2em}a{color:#9a5a00}strong{color:#8b1e1e}</style></head><body>
-<p><a href="./index.zh-CN.html">← Cheers</a> · <a href="./remote-operations.html">English</a></p><h1>远程操作安全政策</h1><p><small>生效日期：2026 年 7 月 21 日</small></p>
-<p>Cheers 可连接到由工作区所有者选择的计算机或服务上运行的外部 AI 智能体。Cheers 是协作与审批界面；它不会使外部智能体天然安全，也不能替代智能体服务商的条款或安全控制。</p>
-<h2>智能体可能执行的操作</h2><p>取决于智能体、本地配置和主机操作者授予的权限，智能体可能读取或修改已批准工作区根目录中的文件、运行命令、访问网络服务、创建提交或其他外部变更，并将输出发送回频道。某些请求可能不可逆、产生费用，或会被第三方看到。</p>
-<h2>必须采取的防护措施</h2><ul><li>只连接你控制或信任的智能体和主机。</li><li>使用专用且最小权限的操作系统账户、受限工作区根目录和最小环境变量白名单。</li><li>除非经过专门批准的工作流确有必要，否则不要在提示、附件或可访问目录中放入凭证、私钥、生产数据、受监管数据或其他机密。</li><li>对写入、命令、网络、凭证和破坏性操作保持审批。iOS 通知保留紧急请求的直接 Approve / Deny，并要求设备认证；由于通知不会显示完整命令或 diff，只有在你能独立确认该请求时才可直接批准。否则先打开请求，审阅准确命令、路径和 diff。</li><li>对接近生产的任务使用测试环境，审阅审计记录；行为异常时撤销 bot token 或断开 connector。</li></ul>
-<h2>不得草率批准的操作</h2><p><strong>不要批准</strong>删除或覆盖大范围路径、变更访问控制、安装未知软件、暴露端口、导出数据、修改云资源、发布/部署代码、花费资金或传输密钥的命令，除非你已独立核验完整影响且有相应授权。</p>
-<h2>数据与参与者告知</h2><p>将外部 AI 智能体加入频道前，工作区所有者必须告知参与者智能体/服务商身份、预期范围、其是否可访问文件或执行命令以及服务商的数据条款。对包含个人、机密或受监管信息的频道，未完成所需告知和同意前不得加入第三方 AI 智能体。</p>
-<h2>审批与责任</h2><p>只有 bot 所有者或指定审批人可以裁决请求。iOS 中，Approve / Deny 操作要求设备认证，服务端会在转发决定前校验审批人身份和请求仍处于待处理状态。通知会提示这是远程操作，但出于最小化内容原则不会展示完整细节；不确定时请打开 App 审阅。审批记录将保留以供审计。你需对自己授权的行为，以及组织政策和适用法律的合规性负责。</p>
-<h2>紧急响应</h2><p>如怀疑被滥用，请立即断开 connector、轮换 bot token 和受影响凭证、撤销访问、保留审计记录，并联系 <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>。产品漏洞请通过<a href="https://github.com/haowei2000/Cheers/security/advisories/new">私密安全通道</a>报告。</p></body></html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cheers · 远程操作安全政策</title>
+<meta name="description" content="连接外部 AI 智能体与审批远程操作的安全政策。" />
+<link rel="alternate" hreflang="en" href="./remote-operations.html" />
+<link rel="alternate" hreflang="zh-CN" href="./remote-operations.zh-CN.html" />
+<style>
+  :root {
+    --bg: #14120b; --bg-elevated: #1c1913; --bg-soft: #221f18;
+    --ink: #edecec; --ink-soft: #a8a29e; --ink-faint: #78716c;
+    --line: rgba(237, 236, 236, 0.10); --line-strong: rgba(237, 236, 236, 0.16);
+    --btn: #edecec; --btn-ink: #14120b;
+    --maxw: 1120px; --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --font: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink);
+    line-height: 1.5; font-weight: 400; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { opacity: 0.72; }
+  h1, h2, h3 { font-weight: 400; letter-spacing: -0.025em; line-height: 1.2; margin: 0; }
+  p { margin: 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(16px);
+  }
+  .nav-inner {
+    display: flex; align-items: center; gap: 8px;
+    height: 56px; max-width: 1280px; margin: 0 auto; padding: 0 24px;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: var(--ink); }
+  .brand:hover { opacity: 1; }
+  .brand-mark { width: 18px; height: 18px; display: grid; place-items: center; }
+  .brand-mark svg { width: 18px; height: 18px; }
+  .nav-links { display: flex; align-items: center; gap: 2px; margin-left: 28px; }
+  .nav-links a { font-size: 14px; color: var(--ink); padding: 6px 14px; border-radius: 999px; }
+  .nav-links a:hover, .nav-links a[aria-current="page"] { opacity: 1; background: rgba(237,236,236,.06); }
+  .nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .nav-text { font-size: 14px; color: var(--ink); padding: 4px 8px; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font-family: inherit; font-size: 14px; font-weight: 400;
+    border-radius: 999px; border: 1px solid transparent; padding: 6px 12px; cursor: pointer;
+  }
+  .btn:hover { opacity: 1; text-decoration: none; }
+  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .btn-solid { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); }
+  .btn-solid:hover { opacity: 0.88; }
+  .btn-outline { background: transparent; color: var(--ink); border-color: rgba(237,236,236,.28); }
+  .btn-outline:hover { border-color: rgba(237,236,236,.5); background: rgba(237,236,236,.04); }
+
+  .page-hero { padding: 72px 0 32px; }
+  .page-hero h1 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.03em; }
+  .page-hero .lead { margin-top: 14px; font-size: 15px; color: var(--ink-soft); }
+
+  .legal { padding: 8px 0 80px; }
+  .legal .prose { max-width: 720px; }
+  .prose h2 {
+    font-size: 20px; margin: 40px 0 12px; letter-spacing: -0.02em; color: var(--ink);
+  }
+  .prose h2:first-of-type { margin-top: 8px; }
+  .prose p, .prose li {
+    font-size: 15px; line-height: 1.65; color: var(--ink-soft);
+  }
+  .prose p + p { margin-top: 14px; }
+  .prose a {
+    color: var(--ink); text-decoration: underline;
+    text-underline-offset: 3px; text-decoration-color: rgba(237,236,236,.28);
+  }
+  .prose a:hover { opacity: 1; text-decoration-color: rgba(237,236,236,.55); }
+  .prose strong { color: var(--ink); font-weight: 600; }
+  .prose ul { margin: 12px 0 0; padding-left: 1.25em; }
+  .prose li { margin: 8px 0; }
+  .prose li::marker { color: var(--ink-faint); }
+
+  .divider { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  footer { border-top: 1px solid var(--line); padding: 48px 0 36px; }
+  .foot-grid {
+    display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); gap: 32px; margin-bottom: 40px;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 12px; }
+  .foot-desc { font-size: 13.5px; color: var(--ink-soft); max-width: 240px; }
+  .foot-col h4 {
+    font-size: 12px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 14px;
+  }
+  .foot-col a { display: block; font-size: 14px; color: var(--ink-soft); padding: 4px 0; }
+  .foot-col a:hover { color: var(--ink); opacity: 1; }
+  .foot-bottom {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-faint);
+  }
+  .foot-bottom a { color: var(--ink-faint); }
+  @media (max-width: 800px) { .foot-grid { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.zh-CN.html" aria-label="Cheers 首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+      </span>
+      Cheers
+    </a>
+    <nav class="nav-links" aria-label="主导航">
+      <a href="./index.zh-CN.html#product">产品</a>
+      <a href="./downloads.zh-CN.html">下载</a>
+      <a href="./docs.zh-CN.html">文档</a>
+      <a href="./index.zh-CN.html#developers">开发者</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="nav-text" href="./remote-operations.html" hreflang="en" lang="en">EN</a>
+      <a class="btn btn-outline" href="https://github.com/haowei2000/Cheers">GitHub</a>
+      <a class="btn btn-solid" href="https://www.tocheers.com">打开应用</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap">
+      <h1>远程操作安全政策</h1>
+      <p class="lead">生效日期：2026 年 7 月 21 日</p>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section class="legal">
+    <div class="wrap">
+      <div class="prose">
+        <p>Cheers 可连接到由工作区所有者选择的计算机或服务上运行的外部 AI 智能体。Cheers 是协作与审批界面；它不会使外部智能体天然安全，也不能替代智能体服务商的条款或安全控制。</p>
+        <h2>智能体可能执行的操作</h2>
+        <p>取决于智能体、本地配置和主机操作者授予的权限，智能体可能读取或修改已批准工作区根目录中的文件、运行命令、访问网络服务、创建提交或其他外部变更，并将输出发送回频道。某些请求可能不可逆、产生费用，或会被第三方看到。</p>
+        <h2>必须采取的防护措施</h2>
+        <ul>
+          <li>只连接你控制或信任的智能体和主机。</li>
+          <li>使用专用且最小权限的操作系统账户、受限工作区根目录和最小环境变量白名单。</li>
+          <li>除非经过专门批准的工作流确有必要，否则不要在提示、附件或可访问目录中放入凭证、私钥、生产数据、受监管数据或其他机密。</li>
+          <li>对写入、命令、网络、凭证和破坏性操作保持审批。iOS 通知保留紧急请求的直接 Approve / Deny，并要求设备认证；由于通知不会显示完整命令或 diff，只有在你能独立确认该请求时才可直接批准。否则先打开请求，审阅准确命令、路径和 diff。</li>
+          <li>对接近生产的任务使用测试环境，审阅审计记录；行为异常时撤销 bot token 或断开 connector。</li>
+        </ul>
+        <h2>不得草率批准的操作</h2>
+        <p><strong>不要批准</strong>删除或覆盖大范围路径、变更访问控制、安装未知软件、暴露端口、导出数据、修改云资源、发布/部署代码、花费资金或传输密钥的命令，除非你已独立核验完整影响且有相应授权。</p>
+        <h2>数据与参与者告知</h2>
+        <p>将外部 AI 智能体加入频道前，工作区所有者必须告知参与者智能体/服务商身份、预期范围、其是否可访问文件或执行命令以及服务商的数据条款。对包含个人、机密或受监管信息的频道，未完成所需告知和同意前不得加入第三方 AI 智能体。</p>
+        <h2>审批与责任</h2>
+        <p>只有 bot 所有者或指定审批人可以裁决请求。iOS 中，Approve / Deny 操作要求设备认证，服务端会在转发决定前校验审批人身份和请求仍处于待处理状态。通知会提示这是远程操作，但出于最小化内容原则不会展示完整细节；不确定时请打开 App 审阅。审批记录将保留以供审计。你需对自己授权的行为，以及组织政策和适用法律的合规性负责。</p>
+        <h2>紧急响应</h2>
+        <p>如怀疑被滥用，请立即断开 connector、轮换 bot token 和受影响凭证、撤销访问、保留审计记录，并联系 <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>。产品漏洞请通过<a href="https://github.com/haowei2000/Cheers/security/advisories/new">私密安全通道</a>报告。</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+          </span>
+          Cheers
+        </div>
+        <p class="foot-desc">面向人类与 AI 智能体的开源协作。MIT 许可。</p>
+      </div>
+      <div class="foot-col">
+        <h4>产品</h4>
+        <a href="./index.zh-CN.html#product">概览</a>
+        <a href="./downloads.zh-CN.html">下载</a>
+        <a href="https://www.tocheers.com">打开应用</a>
+      </div>
+      <div class="foot-col">
+        <h4>开发者</h4>
+        <a href="./docs.zh-CN.html">文档</a>
+        <a href="./connector.zh-CN.html">连接器</a>
+        <a href="./mcp.html">MCP 工具</a>
+        <a href="https://github.com/haowei2000/Cheers">GitHub</a>
+      </div>
+      <div class="foot-col">
+        <h4>法律</h4>
+        <a href="./privacy.zh-CN.html">隐私</a>
+        <a href="./terms.html">条款</a>
+        <a href="./support.zh-CN.html">支持</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© Cheers · MIT License</span>
+      <span><a href="./remote-operations.html" hreflang="en" lang="en">EN</a></span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
