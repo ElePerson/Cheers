@@ -543,13 +543,12 @@ async fn flow4_done_finalizes_and_second_done_is_idempotent(db: PgPool) {
     };
 
     // Nested under trigger + session stamped before finalize.
-    let pre = sqlx::query(
-        "SELECT in_reply_to_msg_id, content_data FROM messages WHERE msg_id = $1",
-    )
-    .bind(placeholder.to_string())
-    .fetch_one(&db)
-    .await
-    .unwrap();
+    let pre =
+        sqlx::query("SELECT in_reply_to_msg_id, content_data FROM messages WHERE msg_id = $1")
+            .bind(placeholder.to_string())
+            .fetch_one(&db)
+            .await
+            .unwrap();
     let reply_to: Option<String> = pre.try_get("in_reply_to_msg_id").unwrap();
     assert_eq!(
         reply_to.as_deref(),

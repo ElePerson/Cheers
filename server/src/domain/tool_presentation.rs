@@ -275,7 +275,10 @@ fn output_text(data: &Value) -> Option<&str> {
 
 fn git_status_xy_char(ch: char) -> bool {
     // Porcelain short status XY codes (see `git status --short` docs).
-    matches!(ch, ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!' | 'T' | 'X' | 'P')
+    matches!(
+        ch,
+        ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!' | 'T' | 'X' | 'P'
+    )
 }
 
 fn git_status_result(data: &Value) -> Option<Value> {
@@ -437,9 +440,7 @@ fn git_presentation(
     // Pure `git status` always gets a structured result. Compound/`git_command`
     // probes often mix `status -sb` with `ls`/`fetch` — still surface a status
     // summary when porcelain lines are present so clients do not dump raw stdout.
-    if event_type == ToolEventType::GitStatus
-        || compound
-        || event_type == ToolEventType::GitCommand
+    if event_type == ToolEventType::GitStatus || compound || event_type == ToolEventType::GitCommand
     {
         presentation.result = git_status_result(data);
     }

@@ -323,7 +323,9 @@ pub async fn handle_done(
     .bind(msg_id.to_string())
     .fetch_optional(&mut *tx)
     .await
-    .map_err(crate::gateway::log_db_err("stream.done: finalize message update"))?
+    .map_err(crate::gateway::log_db_err(
+        "stream.done: finalize message update",
+    ))?
     .ok_or("message not found")?;
     mentions::replace_batch(&mut tx, msg_id, &mentions)
         .await
