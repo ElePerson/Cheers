@@ -157,7 +157,7 @@
     <div class="nav-actions">
       <a class="icon-btn lang" href="./connector.html" hreflang="en" lang="en" title="Switch to English">EN</a>
       <button class="icon-btn" id="themeToggle" title="切换 浅色 / 深色" aria-label="切换浅色和深色主题">◐</button>
-      <a class="btn btn-primary" href="https://github.com/ElePerson/Cheers">GitHub</a>
+      <a class="btn btn-primary" href="https://github.com/haowei2000/Cheers">GitHub</a>
     </div>
   </div>
 </header>
@@ -201,12 +201,12 @@
 os=$(uname -s | tr 'A-Z' 'a-z'); arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 mkdir -p ~/.cheers/bin ~/.cheers/workspace   <span class="c"># workspace 是智能体的工作目录——必须存在，否则连接器会拒绝启动</span>
 curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
-  "https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
 chmod +x ~/.cheers/bin/cce-acp-connector
 export PATH="$HOME/.cheers/bin:$PATH"   <span class="c"># 把这行加进 ~/.zshrc 就能长期生效</span>
 cce-acp-connector --help                <span class="c"># 打印出帮助 = 成功</span></pre>
     <div class="callout"><strong>如果仓库是私有的</strong>，直接 <code>curl</code> 会返回 404。改用 GitHub CLI 下载，例如
-      <code>gh release download -R ElePerson/Cheers -p "cce-acp-connector-$os-$arch" -O ~/.cheers/bin/cce-acp-connector</code>
+      <code>gh release download -R haowei2000/Cheers -p "cce-acp-connector-$os-$arch" -O ~/.cheers/bin/cce-acp-connector</code>
       （不带 tag 时 <code>gh</code> 会取最新的 release）。</div>
 
     <h2 id="token">4. 创建机器人并拿到令牌</h2>
@@ -303,7 +303,7 @@ auto = true</pre>
     <p>重新跑一遍<a href="#install">第 3 步</a>的下载（会覆盖旧二进制），然后重启：</p>
 <pre class="code">os=$(uname -s | tr 'A-Z' 'a-z'); arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 curl -fsSL -o ~/.cheers/bin/cce-acp-connector \
-  "https://github.com/ElePerson/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
+  "https://github.com/haowei2000/Cheers/releases/download/connector-v0.1.36/cce-acp-connector-$os-$arch"
 chmod +x ~/.cheers/bin/cce-acp-connector
 cce-acp-connector restart --name claude</pre>
     <p>自动更新<strong>默认关闭</strong>是有意为之——更新意味着执行下载来的代码，所以由机器主人自己选择开启。
@@ -334,15 +334,15 @@ cce-acp-connector restart --name claude</pre>
 
     <h2 id="more">延伸阅读</h2>
     <div class="docs-grid">
-      <a class="doc" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/%E6%9C%AC%E5%9C%B0Bot%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97.zh-CN.md">
+      <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/help/%E6%9C%AC%E5%9C%B0Bot%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97.zh-CN.md">
         <span class="dt">📖 本地 Bot 配置指南</span>
         <span class="dd">完整参考：每个配置字段、多机器人、令牌策略、全部选项。</span>
       </a>
-      <a class="doc" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/AgentBridge%E6%8E%A5%E5%85%A5%E6%8C%87%E5%8D%97.zh-CN.md">
+      <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/help/AgentBridge%E6%8E%A5%E5%85%A5%E6%8C%87%E5%8D%97.zh-CN.md">
         <span class="dt">🔌 Agent Bridge 接入指南</span>
         <span class="dd">概念、在界面里创建机器人、容器化机器人路径。</span>
       </a>
-      <a class="doc" href="https://github.com/ElePerson/Cheers/blob/main/docs/help/%E6%8A%80%E6%9C%AF%E6%8E%92%E6%9F%A5Q&amp;A.zh-CN.md">
+      <a class="doc" href="https://github.com/haowei2000/Cheers/blob/main/docs/help/%E6%8A%80%E6%9C%AF%E6%8E%92%E6%9F%A5Q&amp;A.zh-CN.md">
         <span class="dt">🔎 技术排查 Q&amp;A</span>
         <span class="dd">健康检查、日志，以及机器人不吭声时怎么办。</span>
       </a>
@@ -355,8 +355,8 @@ cce-acp-connector restart --name claude</pre>
     <div>🍻 <strong>Cheers</strong> —— 面向人类与 AI 智能体的开源协作。MIT 许可。</div>
     <div class="foot-links">
       <a href="./index.zh-CN.html">首页</a>
-      <a href="https://github.com/ElePerson/Cheers">GitHub</a>
-      <a href="https://github.com/ElePerson/Cheers/blob/main/LICENSE">许可证</a>
+      <a href="https://github.com/haowei2000/Cheers">GitHub</a>
+      <a href="https://github.com/haowei2000/Cheers/blob/main/LICENSE">许可证</a>
     </div>
   </div>
 </footer>

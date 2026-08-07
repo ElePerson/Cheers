@@ -37,7 +37,7 @@ describe("codemap lens parser", () => {
   it("normalizes nodes, edges, focus, and status metadata", () => {
     const parsed = parseCodemap({
       codemap: 1,
-      repo: "ElePerson/Cheers",
+      repo: "haowei2000/Cheers",
       focus: ["gateway.fs"],
       nodes: {
         "gateway.fs": {
@@ -51,7 +51,7 @@ describe("codemap lens parser", () => {
       edges: [{ from: "gateway.fs", to: "web", kind: "data", label: "fs.patch" }],
     });
 
-    expect(parsed?.repo).toBe("ElePerson/Cheers");
+    expect(parsed?.repo).toBe("haowei2000/Cheers");
     expect(parsed?.focus).toEqual(new Set(["gateway.fs"]));
     expect(parsed?.nodes[0]).toMatchObject({ id: "gateway.fs", status: "explored" });
     expect(parsed?.edges[0]).toEqual({ from: "gateway.fs", to: "web", kind: "data", label: "fs.patch" });

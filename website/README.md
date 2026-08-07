@@ -39,7 +39,7 @@ python3 -m http.server -d website 8080   # → http://localhost:8080
 [`.github/workflows/pages.yml`](../.github/workflows/pages.yml) publishes
 `website/` on every push to `main` that touches it (or on manual
 `workflow_dispatch`). One-time setup: repo Settings → Pages → Source =
-**"GitHub Actions"**. Live site: <https://eleperson.github.io/Cheers/>
+**"GitHub Actions"**. Live site: <https://haowei2000.github.io/Cheers/>
 
 Any other static host also works — the site is a handful of self-contained
 HTML files plus the `imgs/` screenshots, with no build step.
@@ -56,7 +56,7 @@ as its build context.
 - The homepage is dark-first (Cursor-like marketing style): warm near-black
   background, off-white type, pill CTAs. Subpages may still use their own
   light/dark toggle where present.
-- Documentation and repo links point at `https://github.com/ElePerson/Cheers`
+- Documentation and repo links point at `https://github.com/haowei2000/Cheers`
   — update them if the canonical repo URL changes.
 - Content is intentionally kept in sync with `README.md` (and
   `README.zh-CN.md` for the Chinese page); when features or the stack change,

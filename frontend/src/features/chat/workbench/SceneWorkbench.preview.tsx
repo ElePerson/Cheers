@@ -13,7 +13,7 @@ const files: Record<string, string> = {
   "dev/progress.yaml": "series:\n  - name: tests passing\n    points: [[1, 88], [2, 104], [3, 121]]\n",
   "dev/todo.md": "# Todo\n\n- [x] Scene navigation\n- [x] Native Codemap\n- [ ] Visual QA\n",
   "codemap/map.yaml": `codemap: 1
-repo: ElePerson/Cheers
+repo: haowei2000/Cheers
 updated: 2026-08-04T11:45:00Z
 focus: [gateway.fs]
 edges:

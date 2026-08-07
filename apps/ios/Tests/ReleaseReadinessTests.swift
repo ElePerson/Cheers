@@ -35,7 +35,7 @@ final class ReleaseReadinessTests: XCTestCase {
     func testCodemapParserPreservesGraphAndFocusState() throws {
         let document = try XCTUnwrap(parseCodemap(.object([
             "codemap": .number(1),
-            "repo": .string("ElePerson/Cheers"),
+            "repo": .string("haowei2000/Cheers"),
             "focus": .array([.string("gateway.fs")]),
             "nodes": .object([
                 "gateway.fs": .object([
@@ -57,7 +57,7 @@ final class ReleaseReadinessTests: XCTestCase {
             ])]),
         ])))
 
-        XCTAssertEqual(document.repository, "ElePerson/Cheers")
+        XCTAssertEqual(document.repository, "haowei2000/Cheers")
         XCTAssertEqual(document.nodes.map(\.id), ["ios", "gateway.fs"])
         XCTAssertEqual(document.focus, ["gateway.fs"])
         XCTAssertEqual(document.edges, [CodemapEdge(from: "ios", to: "gateway.fs", kind: "calls", label: nil)])
