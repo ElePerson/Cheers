@@ -45,7 +45,7 @@
     },
     "updater": {
       "endpoints": [
-        "https://github.com/ElePerson/Cheers/releases/latest/download/latest.json"
+        "https://github.com/haowei2000/Cheers/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVFREExMTc2QjA2NkIwMTIKUldRU3NHYXdkaEhhWGhVREVPSGZJZ2VGMEszM1lCZWx2WTBoWjFwY28vY0VCTmVodkFUMlNrMXAK"
     }

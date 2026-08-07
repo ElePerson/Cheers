@@ -83,15 +83,15 @@ F0 foundation → F1 human picker → F2 bot handoff → F3 suggested context.
 
 Product focus after the Passkey / iOS friends / desktop updater wave:
 
-1. **iOS App hardening** (native `apps/ios` is shipped; no longer deferred behind PWA) — tracking [#318](https://github.com/ElePerson/Cheers/issues/318)
+1. **iOS App hardening** (native `apps/ios` is shipped; no longer deferred behind PWA) — tracking [#318](https://github.com/haowei2000/Cheers/issues/318)
    - [ ] **UI** — spacing-first / HIG alignment, localization gaps, dense-list and decorative-divider cleanup.
    - [ ] **Tracing** — end-to-end client/gateway correlation for login, push, realtime reconnect, and approval deep-links (so mobile regressions are diagnosable).
    - [ ] **Policy & security** — App Store / privacy disclosures, remote-operations copy, AI-consent surfaces, session/trusted-device behavior parity with web/desktop.
-2. **macOS desktop — security & policy polish** — tracking [#319](https://github.com/ElePerson/Cheers/issues/319)
+2. **macOS desktop — security & policy polish** — tracking [#319](https://github.com/haowei2000/Cheers/issues/319)
    - [ ] Ship and keep in sync the same policy surfaces as web (privacy, support, remote operations, account deletion) inside the Tauri shell / About / Settings.
    - [ ] Harden updater + signing UX (Gatekeeper notes, trusted feed, Settings → About → Check for updates).
    - [ ] Connector/daemon security defaults (least privilege, clear remote-ops warnings).
-3. **Plugin / Workbench mechanism — integration tests & optimization** — tracking [#320](https://github.com/ElePerson/Cheers/issues/320)
+3. **Plugin / Workbench mechanism — integration tests & optimization** — tracking [#320](https://github.com/haowei2000/Cheers/issues/320)
    - [ ] Integration-test matrix for official plugins + template installs (load, fs bridge, save/reload, permission denials).
    - [ ] Performance / reliability pass (cold start, large boards, failure recovery).
    - [ ] Document the plugin contract for third-party authors and keep examples green in CI.

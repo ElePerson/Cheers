@@ -47,7 +47,7 @@ type Mode = "manual" | "script" | "agent";
 
 /** Where prebuilt connector binaries are published (release-connector workflow).
  * Keep in sync with the default in server/assets/install.sh. */
-const CONNECTOR_RELEASES_REPO = "ElePerson/Cheers";
+const CONNECTOR_RELEASES_REPO = "haowei2000/Cheers";
 /** Same-origin download (gateway proxies the GitHub release): works from hosts
  * that can reach this server but not GitHub. GitHub stays the fallback. */
 // serverOrigin(), not window.location.origin: the snippet must name the

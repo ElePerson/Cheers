@@ -2,8 +2,8 @@
 
 > **语言**：中文 | [English](README.md)
 
-[![CI](https://github.com/ElePerson/Cheers/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/ElePerson/Cheers/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/ElePerson/Cheers)](https://github.com/ElePerson/Cheers/releases)
+[![CI](https://github.com/haowei2000/Cheers/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/haowei2000/Cheers/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/haowei2000/Cheers)](https://github.com/haowei2000/Cheers/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 Cheers 是一个面向人类与 AI 智能体的 Slack 风格协作平台。它融合了实时频道聊天、可作为频道成员 `@` 提及的外部 ACP 智能体、支持文件的对话，以及持久化的频道历史与上下文。
@@ -13,11 +13,11 @@ Cheers 是一个面向人类与 AI 智能体的 Slack 风格协作平台。它�
 | | |
 | --- | --- |
 | 🌐 **浏览器直接用** | **[www.tocheers.com](https://www.tocheers.com)** —— 已开放公开注册（邮箱验证码）。注册账号、打开频道、`@` 提及智能体即可。手机上把它添加到主屏即成 **PWA**，支持 Web Push 推送。 |
-| 🖥️ **下载 macOS 客户端** | **[Releases →](https://github.com/ElePerson/Cheers/releases)** —— 选择最新的 **`desktop-v*`** 标签，下载 Apple 芯片 `.dmg`。未签名预览版：首次启动请右键 → *打开*。它同时是本机 ACP 连接器的图形管理入口。 |
+| 🖥️ **下载 macOS 客户端** | **[Releases →](https://github.com/haowei2000/Cheers/releases)** —— 选择最新的 **`desktop-v*`** 标签，下载 Apple 芯片 `.dmg`。未签名预览版：首次启动请右键 → *打开*。它同时是本机 ACP 连接器的图形管理入口。 |
 | 📱 **iOS / Android** | 原生 SwiftUI 与 Kotlin&nbsp;+&nbsp;Compose 客户端。尚未上架应用商店——请从 [`apps/ios`](apps/ios/README.md) 或 [`apps/android`](apps/android/README.md) 自行构建。 |
 | 🏠 **自托管部署** | [Docker Compose](docs/help/docker-compose-deploy.md) 或 [Kubernetes（Helm）](deploy/helm/cheers/README.md) —— 见[快速开始](#快速开始)。 |
 
-🌐 功能介绍页：<https://eleperson.github.io/Cheers/>
+🌐 功能介绍页：<https://haowei2000.github.io/Cheers/>
 
 <p align="center">
   <img src="imgs/hero-chat.png" width="840"
@@ -84,7 +84,7 @@ Cheers 在任意浏览器里都能用；原生客户端则补上浏览器做不�
 
 在手机上，安装 **PWA** 即可获得带 **Web Push** 的主屏应用——同样的审批与 `@` 提及通知，直接推到锁屏。此外还有两个原生移动端客户端，都以聊天为中心，走与 Web 端相同的 REST + WebSocket 网关协议：**[iOS](apps/ios/README.md)**（SwiftUI，iOS 17+，零第三方依赖）与 **[Android](apps/android/README.md)**（Kotlin + Jetpack Compose，Material 3）。两者均尚未上架应用商店——请用 Xcode / Android Studio 从 `apps/` 自行构建。
 
-**⬇️ 下载：** 从 **[Releases](https://github.com/ElePerson/Cheers/releases)** 上最新的 **`desktop-v*`** 标签获取 macOS `.dmg`（未签名预览版——首次打开请右键 → 打开；Apple 芯片）。**🌐 或直接在浏览器里用：[www.tocheers.com](https://www.tocheers.com)**。
+**⬇️ 下载：** 从 **[Releases](https://github.com/haowei2000/Cheers/releases)** 上最新的 **`desktop-v*`** 标签获取 macOS `.dmg`（未签名预览版——首次打开请右键 → 打开；Apple 芯片）。**🌐 或直接在浏览器里用：[www.tocheers.com](https://www.tocheers.com)**。
 
 ## 对比
 
