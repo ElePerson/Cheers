@@ -11,6 +11,9 @@ struct ComposerView: View {
     /// invalidates only the composer subtree, never the chat timeline.
     @State private var text: String
     let clearTick: Int
+    /// Bumped when an external prefill should replace the draft (Reply `@bot`).
+    let prefillTick: Int
+    let prefillText: String
     let placeholder: String
     let isSending: Bool
     let onSend: (String) async -> Bool
@@ -34,6 +37,8 @@ struct ComposerView: View {
     init(
         initialText: String,
         clearTick: Int,
+        prefillTick: Int = 0,
+        prefillText: String = "",
         placeholder: String,
         isSending: Bool,
         onSend: @escaping (String) async -> Bool,
@@ -49,6 +54,8 @@ struct ComposerView: View {
     ) {
         _text = State(initialValue: initialText)
         self.clearTick = clearTick
+        self.prefillTick = prefillTick
+        self.prefillText = prefillText
         self.placeholder = placeholder
         self.isSending = isSending
         self.onSend = onSend
@@ -102,6 +109,16 @@ struct ComposerView: View {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) { text = "" }
+        }
+        .onChange(of: prefillTick) {
+            guard prefillTick > 0 else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { text = prefillText }
+            Task { @MainActor in
+                await Task.yield()
+                isFocused = true
+            }
         }
         .onChange(of: text) { oldValue, newValue in
             guard newValue != oldValue,

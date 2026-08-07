@@ -10,6 +10,11 @@ import {
   permissionSourceId,
 } from "./messageTree";
 
+// Chat timeline spacing (3 levels):
+//   tight  — within one message (body ↔ files ↔ Agent steps): gap-1
+//   medium — parent ↔ reply / sibling replies: gap-2 + mt-2
+//   wide   — root ↔ root: gap-4
+
 // Skip layout/paint for off-screen rows during frequent streaming re-renders while
 // keeping every row in the DOM — the data-msg-id jump, native scroll anchoring on
 // prepend, day labels, and auto-scroll all keep working. `auto` in contain-intrinsic-size
@@ -254,11 +259,12 @@ export function MessageList({
             focusRequestId={focusRequestId}
           />
           {kids.length > 0 && (
+            // Medium gap: parent ↔ replies, and sibling replies.
             <div
               className={
                 depth === 0
-                  ? "relative ml-12 mr-4 mt-0.5 space-y-0.5"
-                  : "relative ml-4 mt-0.5 space-y-0.5"
+                  ? "relative ml-12 mr-4 mt-2 flex flex-col gap-2"
+                  : "relative ml-4 mt-2 flex flex-col gap-2"
               }
             >
               {kids.map((child, i) => {
@@ -302,7 +308,10 @@ export function MessageList({
         </div>
       )}
 
-      {roots.map((msg, i) => renderNode(msg, 0, i > 0 ? roots[i - 1]! : null))}
+      {/* Wide gap: root message ↔ root message. */}
+      <div className="flex flex-col gap-4">
+        {roots.map((msg, i) => renderNode(msg, 0, i > 0 ? roots[i - 1]! : null))}
+      </div>
       <div ref={bottomRef} />
     </div>
   );
