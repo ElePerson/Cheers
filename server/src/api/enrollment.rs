@@ -490,19 +490,22 @@ pub async fn connector_download(
     if !is_known_connector_asset(&asset) {
         return Err(AppError::NotFound);
     }
-    let repo = &state.config.connector_release_repo;
-    let url = match &state.config.connector_release_version {
-        Some(v) => {
-            format!("https://github.com/{repo}/releases/download/connector-v{v}/{asset}")
-        }
-        None => format!("https://github.com/{repo}/releases/latest/download/{asset}"),
-    };
     let client = DOWNLOAD_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
     });
+    let repo = &state.config.connector_release_repo;
+    let url = match &state.config.connector_release_version {
+        Some(v) => {
+            format!("https://github.com/{repo}/releases/download/connector-v{v}/{asset}")
+        }
+        // Do NOT use /releases/latest — that pointer is owned by the desktop
+        // app (connector tags publish with make_latest:false). When unset, resolve
+        // the newest connector-v* tag via the GitHub Releases API.
+        None => resolve_latest_connector_asset_url(client, repo, &asset).await?,
+    };
     let upstream = client
         .get(&url)
         .send()
@@ -527,6 +530,57 @@ pub async fn connector_download(
         .map_err(|e| AppError::Internal(format!("stream response: {e}")))
 }
 
+/// Pick `https://github.com/{repo}/releases/download/connector-vX.Y.Z/{asset}`
+/// for the newest non-draft, non-prerelease `connector-v*` tag. Avoids GitHub's
+/// `releases/latest`, which tracks the desktop app.
+async fn resolve_latest_connector_asset_url(
+    client: &reqwest::Client,
+    repo: &str,
+    asset: &str,
+) -> Result<String, AppError> {
+    let api = format!("https://api.github.com/repos/{repo}/releases?per_page=40");
+    let resp = client
+        .get(&api)
+        .header(header::USER_AGENT, "cheers-gateway-connector-download")
+        .header(header::ACCEPT, "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| AppError::Internal(format!("connector release list failed: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(AppError::Internal(format!(
+            "connector release list returned HTTP {} — set CHEERS_CONNECTOR_RELEASE_VERSION",
+            resp.status()
+        )));
+    }
+    let releases: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Internal(format!("connector release list parse failed: {e}")))?;
+    for rel in releases {
+        if rel.get("draft").and_then(|v| v.as_bool()) == Some(true) {
+            continue;
+        }
+        if rel.get("prerelease").and_then(|v| v.as_bool()) == Some(true) {
+            continue;
+        }
+        let Some(tag) = rel.get("tag_name").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(ver) = tag.strip_prefix("connector-v") else {
+            continue;
+        };
+        if ver.is_empty() {
+            continue;
+        }
+        return Ok(format!(
+            "https://github.com/{repo}/releases/download/connector-v{ver}/{asset}"
+        ));
+    }
+    Err(AppError::Internal(
+        "no connector-v* GitHub release found — set CHEERS_CONNECTOR_RELEASE_VERSION".into(),
+    ))
+}
+
 /// Natural-language prompt handed to a user's own agent (mode 1). `{INSTALL_URL}`
 /// is filled server-side; `{ENROLL_CODE}` is filled client-side from a minted
 /// code so the secret never rides in this GET. Mode 1 is honestly mode 2 driven
@@ -537,7 +591,11 @@ const GUIDANCE_TEMPLATE: &str = r#"You are being connected to a Cheers chat work
 
    CHEERS_ENROLL_CODE='{ENROLL_CODE}' bash <(curl -fsSL {INSTALL_URL})
 
-2. The script finds `cce-acp-connector` on PATH, or downloads the prebuilt binary — first from this Cheers server itself (no GitHub access needed), then from the GitHub release (https://github.com/ElePerson/Cheers/releases). Only if no downloaded binary runs on this platform, build it once from the Cheers repo (packages/cheers-acp-connector-rs: `cargo build --release`), then re-run with CHEERS_CONNECTOR_BIN=/path/to/target/release/cce-acp-connector.
+   For headless Claude/Codex API-key auth (no browser login), export the vendor key in the SAME command so install.sh wires it into the systemd/launchd unit — interactive shell exports alone will NOT reach the connector:
+
+   ANTHROPIC_API_KEY='…' CHEERS_ENROLL_CODE='{ENROLL_CODE}' bash <(curl -fsSL {INSTALL_URL})
+
+2. The script finds `cce-acp-connector` on PATH, or downloads the prebuilt binary — first from this Cheers server itself (no GitHub access needed), then from the GitHub connector-v* release. Only if no downloaded binary runs on this platform, build it once from the Cheers repo (packages/cheers-acp-connector-rs: `cargo build --release`), then re-run with CHEERS_CONNECTOR_BIN=/path/to/target/release/cce-acp-connector.
 
 3. The bot's agent adapter (e.g. `claude-agent-acp` for Claude) must be installed too — the script auto-installs it via npm when missing (needs node/npm). If the script reports the adapter missing, install it (`npm install -g @agentclientprotocol/claude-agent-acp`) and run the finish command the script printed — do NOT re-run the one-liner, the code is single-use.
 
