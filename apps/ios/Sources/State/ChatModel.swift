@@ -82,6 +82,8 @@ final class ChatModel {
     /// Composer session target: nil = Auto (route by @mention to each bot's
     /// primary), else pins delivery to one bot session.
     var selectedSessionId: String?
+    /// Owning bot of the pinned session (nil for Auto) — used by model settings.
+    var selectedSessionBotId: String?
     /// Bot members of this channel — the session/model picker's candidate bots.
     private(set) var botMembers: [ChannelMemberDto] = []
     private(set) var channelMembers: [ChannelMemberDto] = []
@@ -448,6 +450,34 @@ final class ChatModel {
         } catch {
             // Non-fatal; next reconnect retries.
         }
+    }
+
+    // MARK: Reply
+
+    /// Start a reply under `message`, pinning bot/session from the target (or its
+    /// latest bot child) so model/session/bot match the original turn.
+    func beginReply(to message: MessageDto) {
+        replyTo = message
+        if message.isBot {
+            selectedSessionBotId = message.senderId
+            selectedSessionId = MessageTree.messageSessionId(message)
+            return
+        }
+        let botKids = messages
+            .filter {
+                $0.replyToMsgId == message.msgId
+                    && $0.isBot
+                    && $0.isPartial != true
+            }
+            .sorted { ($0.channelSeq ?? 0) < ($1.channelSeq ?? 0) }
+        if let latest = botKids.last {
+            selectedSessionBotId = latest.senderId
+            selectedSessionId = MessageTree.messageSessionId(latest)
+        }
+    }
+
+    func cancelReply() {
+        replyTo = nil
     }
 
     // MARK: Sending

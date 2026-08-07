@@ -33,6 +33,10 @@ export interface MessageActionHandlers {
 interface Props {
   message: Message;
   isConsecutive?: boolean;
+  /** True when rendered as a sub-message under a parent (compact chrome). */
+  nested?: boolean;
+  /** Parent is in the loaded window — skip the quote strip (parent is above). */
+  hideReplyQuote?: boolean;
   currentUserId?: string;
   channelId?: string;
   /** Channel-membership display label, used when the message has no sender_name. */
@@ -46,6 +50,8 @@ interface Props {
   nameOf?: (senderId: string) => string;
   /** Pending permission cards anchored to this bot turn (rendered in Agent steps). */
   pendingApprovals?: Message[];
+  /** Deep-link into Agent steps Approval (from ViewBoard jump). */
+  focusRequestId?: string | null;
 }
 
 const SYSTEM_TYPES = new Set([
@@ -215,6 +221,8 @@ function SelectBox({ selected, className }: { selected: boolean; className?: str
 export const MessageItem = memo(function MessageItem({
   message,
   isConsecutive,
+  nested = false,
+  hideReplyQuote = false,
   currentUserId,
   channelId,
   senderName,
@@ -224,6 +232,7 @@ export const MessageItem = memo(function MessageItem({
   repliedTo,
   nameOf,
   pendingApprovals,
+  focusRequestId,
 }: Props) {
   if (message.is_deleted) {
     return (
@@ -296,8 +305,13 @@ export const MessageItem = memo(function MessageItem({
       liveEvents={message._trace_events}
       pendingApprovals={pendingApprovals}
       currentUserId={currentUserId}
+      streaming={!!active}
+      focusRequestId={focusRequestId}
     />
   ) : null;
+  const quote = hideReplyQuote ? null : (
+    <ReplyQuote message={message} repliedTo={repliedTo} nameOf={nameOf} />
+  );
   // A failed/sending placeholder isn't a real server message — no reply/forward/select.
   const showActions = actions && !active && !selectMode && !message._status;
   const selectable = Boolean(actions && selectMode);
@@ -340,13 +354,14 @@ export const MessageItem = memo(function MessageItem({
       }
     : {};
 
-  if (isConsecutive) {
+  if (isConsecutive || nested) {
     return (
       <div
         className={cn(
-          "group relative flex items-start gap-3 px-4 py-0.5 hover:z-20 focus-within:z-20 hover:bg-zinc-900/40 transition-colors",
+          "group relative flex items-start gap-3 hover:z-20 focus-within:z-20 hover:bg-zinc-900/40 transition-colors",
+          nested ? "px-1 py-0.5" : "px-4 py-0.5",
           selectable && "cursor-pointer",
-          selected && "bg-indigo-950/30 hover:bg-indigo-950/40"
+          selected && "bg-indigo-950/30 hover:bg-indigo-950/40",
         )}
         {...rowSelectProps}
         ref={rowRef}
@@ -355,13 +370,55 @@ export const MessageItem = memo(function MessageItem({
         onFocusCapture={showActionBar}
       >
         {selectable && <SelectBox selected={selected} />}
-        <div className="w-9 flex-shrink-0 flex items-center justify-end pt-1">
-          <span className="text-[11px] text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity select-none">
-            {formatTime(message.created_at)}
-          </span>
-        </div>
+        {!nested && (
+          <div className="w-9 flex-shrink-0 flex items-center justify-end pt-1">
+            <span className="text-[11px] text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity select-none">
+              {formatTime(message.created_at)}
+            </span>
+          </div>
+        )}
+        {nested && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              openProfile(e.currentTarget);
+            }}
+            className="mt-0.5 w-7 flex-shrink-0 rounded-full hover:opacity-80 transition-opacity"
+            title="View profile"
+          >
+            <Avatar
+              name={name}
+              src={profileCard?.memberOf(message.sender_id)?.avatar_url ?? undefined}
+              id={message.sender_id}
+              size="xs"
+            />
+          </button>
+        )}
         <div className="flex-1 min-w-0">
-          <ReplyQuote message={message} repliedTo={repliedTo} nameOf={nameOf} />
+          {nested && (
+            <div className="flex items-baseline gap-1.5 mb-0.5">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openProfile(e.currentTarget);
+                }}
+                className="text-[11px] font-medium text-zinc-300 hover:underline truncate"
+              >
+                {name}
+              </button>
+              {isBot && (
+                <span className="text-[9px] px-1 py-0.5 rounded bg-indigo-900/60 text-indigo-300 font-medium">
+                  BOT
+                </span>
+              )}
+              <span className="text-[10px] text-zinc-500 tabular-nums">
+                {formatTime(message.created_at)}
+              </span>
+            </div>
+          )}
+          {quote}
           <MessageBody message={message} channelId={channelId} isBot={isBot} />
           {message.msg_type === "task_claim_confirmation" && (
             <TaskClaimConfirmationCard
@@ -375,7 +432,16 @@ export const MessageItem = memo(function MessageItem({
           )}
           {tracePanel}
         </div>
-        {showActions && <ActionBar message={message} actions={actions} anchorRef={rowRef} visible={actionsVisible} onEnter={showActionBar} onLeave={hideActionBar} />}
+        {showActions && (
+          <ActionBar
+            message={message}
+            actions={actions}
+            anchorRef={rowRef}
+            visible={actionsVisible}
+            onEnter={showActionBar}
+            onLeave={hideActionBar}
+          />
+        )}
       </div>
     );
   }
@@ -386,16 +452,18 @@ export const MessageItem = memo(function MessageItem({
         "group relative flex items-start gap-3 px-4 py-1.5 hover:z-20 focus-within:z-20 hover:bg-zinc-900/40 transition-colors",
         isOwn && "flex-row-reverse",
         selectable && "cursor-pointer",
-        selected && "bg-indigo-950/30 hover:bg-indigo-950/40"
+        selected && "bg-indigo-950/30 hover:bg-indigo-950/40",
       )}
-        {...rowSelectProps}
+      {...rowSelectProps}
       ref={rowRef}
       onMouseEnter={showActionBar}
       onMouseLeave={hideActionBar}
       onFocusCapture={showActionBar}
     >
       {/* order-last on reversed (own) rows keeps the checkbox column visually left. */}
-      {selectable && <SelectBox selected={selected} className={isOwn ? "order-last" : undefined} />}
+      {selectable && (
+        <SelectBox selected={selected} className={isOwn ? "order-last" : undefined} />
+      )}
       {/* Avatar — click to open the sender's profile card */}
       <button
         type="button"
@@ -403,8 +471,6 @@ export const MessageItem = memo(function MessageItem({
         className="mt-0.5 flex-shrink-0 rounded-full hover:opacity-80 transition-opacity"
         title="View profile"
       >
-        {/* avatar_url resolves via the profile-card member map (live-updated);
-            fallback is the brand glyph for known agents, then initials. */}
         <Avatar
           name={name}
           src={profileCard?.memberOf(message.sender_id)?.avatar_url ?? undefined}
@@ -414,14 +480,13 @@ export const MessageItem = memo(function MessageItem({
       </button>
 
       <div className={cn("flex-1 min-w-0", isOwn && "flex flex-col items-end")}>
-        {/* Header */}
         <div className="flex items-baseline gap-2 mb-0.5">
           <button
             type="button"
             onClick={(e) => openProfile(e.currentTarget)}
             className={cn(
               "text-sm font-semibold text-zinc-100 hover:underline",
-              isOwn && "order-2"
+              isOwn && "order-2",
             )}
             title={hasName ? "View profile" : message.sender_id}
           >
@@ -437,8 +502,7 @@ export const MessageItem = memo(function MessageItem({
           </span>
         </div>
 
-        {/* Body */}
-        <ReplyQuote message={message} repliedTo={repliedTo} nameOf={nameOf} />
+        {quote}
         <MessageBody message={message} channelId={channelId} isBot={isBot} />
         {message.msg_type === "task_claim_confirmation" && (
           <TaskClaimConfirmationCard
@@ -452,7 +516,17 @@ export const MessageItem = memo(function MessageItem({
         )}
         {tracePanel}
       </div>
-      {showActions && <ActionBar message={message} actions={actions} reversed={isOwn} anchorRef={rowRef} visible={actionsVisible} onEnter={showActionBar} onLeave={hideActionBar} />}
+      {showActions && (
+        <ActionBar
+          message={message}
+          actions={actions}
+          reversed={isOwn}
+          anchorRef={rowRef}
+          visible={actionsVisible}
+          onEnter={showActionBar}
+          onLeave={hideActionBar}
+        />
+      )}
     </div>
   );
 });

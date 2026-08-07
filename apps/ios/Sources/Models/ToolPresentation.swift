@@ -143,8 +143,8 @@ struct GitStatusResult: Hashable {
     let truncated: Bool
 
     static func parse(_ presentation: ToolPresentation?) -> GitStatusResult? {
-        guard presentation?.eventType == .gitStatus,
-              let raw = presentation?.result?.objectValue,
+        // Structured status may ride on `git_status` or compound `git_command`.
+        guard let raw = presentation?.result?.objectValue,
               raw["kind"]?.stringValue == "git_status",
               let counts = raw["counts"]?.objectValue,
               let rawFiles = raw["files"]?.arrayValue

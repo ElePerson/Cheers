@@ -67,6 +67,8 @@ struct MessageBubbleView: View {
     /// The message this one replies to (resolved by the caller), rendered as a
     /// compact quote block above the content — mirrors the web's ReplyQuote.
     var repliedTo: MessageDto? = nil
+    /// Compact chrome when rendered as a sub-message under a parent.
+    var nested: Bool = false
     var onReply: (() -> Void)? = nil
     var onForward: (() -> Void)? = nil
     var onTapFile: ((MessageFileRef) -> Void)? = nil
@@ -108,8 +110,8 @@ struct MessageBubbleView: View {
                 }
             }
         }
-        .padding(.horizontal, Theme.space5)
-        .padding(.top, showAvatar ? Theme.space3 : Theme.space1)
+        .padding(.horizontal, nested ? Theme.space3 : Theme.space5)
+        .padding(.top, nested ? Theme.space1 : (showAvatar ? Theme.space3 : Theme.space1))
     }
 
     private var senderHeader: some View {
@@ -117,11 +119,11 @@ struct MessageBubbleView: View {
             AvatarView(
                 seedId: message.senderId ?? message.msgId,
                 name: message.senderName,
-                size: 32,
+                size: nested ? 24 : 32,
                 monochrome: true
             )
             Text(message.senderName ?? (message.isBot ? String(localized: "Bot") : String(localized: "Unknown")))
-                .font(.subheadline.weight(.semibold))
+                .font(nested ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
             if message.isBot {
@@ -136,7 +138,7 @@ struct MessageBubbleView: View {
             Spacer(minLength: 0)
             timeLabel
         }
-        .frame(minHeight: 32)
+        .frame(minHeight: nested ? 24 : 32)
     }
 
     private var bubble: some View {

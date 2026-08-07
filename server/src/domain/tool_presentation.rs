@@ -273,6 +273,14 @@ fn output_text(data: &Value) -> Option<&str> {
         .or_else(|| non_empty_string(output, &["text", "stdout", "output"]))
 }
 
+fn git_status_xy_char(ch: char) -> bool {
+    // Porcelain short status XY codes (see `git status --short` docs).
+    matches!(
+        ch,
+        ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!' | 'T' | 'X' | 'P'
+    )
+}
+
 fn git_status_result(data: &Value) -> Option<Value> {
     let output = output_text(data)?;
     let mut files = Vec::new();
@@ -293,6 +301,10 @@ fn git_status_result(data: &Value) -> Option<Value> {
         }
         let index = bytes[0] as char;
         let worktree = bytes[1] as char;
+        // Reject fetch/log noise like ` * branch … -> FETCH_HEAD`.
+        if !git_status_xy_char(index) || !git_status_xy_char(worktree) {
+            continue;
+        }
         let path = line[3..].trim();
         if path.is_empty() {
             continue;
@@ -335,10 +347,13 @@ fn git_status_result(data: &Value) -> Option<Value> {
     if files.is_empty() && branch.is_none() && !clean_text && !output.trim().is_empty() {
         return None;
     }
+    // `git status -sb` prints only `## branch` when clean. Compound shells often
+    // append unrelated stdout after that — ignore the noise for `clean`.
+    let clean = files.is_empty() && (clean_text || branch.is_some() || output.trim().is_empty());
     Some(json!({
         "kind": "git_status",
         "branch": branch,
-        "clean": files.is_empty() && (clean_text || output.trim().is_empty()),
+        "clean": clean,
         "counts": {
             "staged": staged,
             "unstaged": unstaged,
@@ -422,7 +437,11 @@ fn git_presentation(
     if let Some(cwd) = cwd_from(data) {
         presentation.cwd = Some(cwd.to_string());
     }
-    if event_type == ToolEventType::GitStatus {
+    // Pure `git status` always gets a structured result. Compound/`git_command`
+    // probes often mix `status -sb` with `ls`/`fetch` — still surface a status
+    // summary when porcelain lines are present so clients do not dump raw stdout.
+    if event_type == ToolEventType::GitStatus || compound || event_type == ToolEventType::GitCommand
+    {
         presentation.result = git_status_result(data);
     }
     presentation
@@ -661,6 +680,45 @@ mod tests {
         assert_eq!(result["event_type"], "git_command");
         assert_eq!(result["compound"], true);
         assert_eq!(result["command"], "git status --short && git diff --stat");
+    }
+
+    #[test]
+    fn compound_status_probe_extracts_clean_summary_from_mixed_stdout() {
+        let result = classify(&json!({
+            "input": {
+                "command": "git fetch origin develop 2>&1 | tail -5; git status -sb; ls /tmp/worktrees 2>/dev/null"
+            },
+            "output": {
+                "exitCode": 0,
+                "stderr": "",
+                "stdout": "From github.com:haowei2000/Cheers\n * branch              develop    -> FETCH_HEAD\n## fix/website-mcp-companion-download...origin/fix/website-mcp-companion-download\ne2hy\nki7d\nw7u7\nAEditor\nCheers\n"
+            }
+        }))
+        .unwrap();
+        assert_eq!(result["event_type"], "git_command");
+        assert_eq!(result["compound"], true);
+        assert_eq!(
+            result["result"]["branch"],
+            "fix/website-mcp-companion-download...origin/fix/website-mcp-companion-download"
+        );
+        assert_eq!(result["result"]["clean"], true);
+        assert_eq!(result["result"]["files"], json!([]));
+    }
+
+    #[test]
+    fn compound_status_probe_keeps_dirty_files_and_ignores_ls_noise() {
+        let result = classify(&json!({
+            "input": {
+                "command": "git status -sb; ls /tmp"
+            },
+            "output": "## main...origin/main\n M frontend/App.tsx\n?? new.swift\ne2hy\nCheers\n"
+        }))
+        .unwrap();
+        assert_eq!(result["event_type"], "git_command");
+        assert_eq!(result["result"]["clean"], false);
+        assert_eq!(result["result"]["counts"]["unstaged"], 1);
+        assert_eq!(result["result"]["counts"]["untracked"], 1);
+        assert_eq!(result["result"]["files"].as_array().unwrap().len(), 2);
     }
 
     #[test]

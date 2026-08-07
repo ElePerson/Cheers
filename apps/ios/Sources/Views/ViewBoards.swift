@@ -12,6 +12,8 @@ struct ViewBoardSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let channelId: String
+    /// Jump the chat to a message (and optional approval request) then dismiss.
+    var onJumpToMessage: ((String, String?) -> Void)? = nil
 
     private enum Board: String, CaseIterable {
         case plan = "Plan", cost = "Cost", sessions = "Sessions", audit = "Audit", activity = "Activity"
@@ -30,7 +32,7 @@ struct ViewBoardSheet: View {
                 case .plan:     PlanBoardView(channelId: channelId, memberNames: memberNames, refreshTick: refreshTick)
                 case .cost:     CostBoardView(channelId: channelId, memberNames: memberNames, refreshTick: refreshTick)
                 case .sessions: SessionsBoardView(channelId: channelId, memberNames: memberNames)
-                case .audit:    AuditBoardView(channelId: channelId, memberNames: memberNames)
+                case .audit:    AuditBoardView(channelId: channelId, memberNames: memberNames, onJumpToMessage: onJumpToMessage)
                 case .activity: ActivityBoardView(channelId: channelId, memberNames: memberNames)
                 }
             }
@@ -448,6 +450,7 @@ private struct AuditBoardView: View {
     @Environment(AppModel.self) private var app
     let channelId: String
     let memberNames: [String: String]
+    var onJumpToMessage: ((String, String?) -> Void)? = nil
 
     @State private var events: [AuditEvent] = []
     @State private var isLoading = true
@@ -483,7 +486,11 @@ private struct AuditBoardView: View {
     /// information, since every row says that.
     private func auditRow(_ event: AuditEvent) -> some View {
         Button {
-            detailEvent = event
+            if let msgId = event.msgId, let onJumpToMessage {
+                onJumpToMessage(msgId, event.requestId)
+            } else {
+                detailEvent = event
+            }
         } label: {
             HStack(spacing: 11) {
                 Rectangle()

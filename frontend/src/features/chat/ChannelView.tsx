@@ -106,6 +106,7 @@ import type {
   TraceEvent,
   VoiceTranscriptSegment,
 } from "@/types";
+import { messageSessionId } from "./messageTree";
 
 // In-flight bot placeholders arrive with `channel_seq: null`; they are the
 // newest thing in the channel until finalized, so order them last. Stable sort
@@ -1025,6 +1026,7 @@ export function ChannelView({
   const [focusMsg, setFocusMsg] = useState<{
     msgId: string;
     nonce: number;
+    requestId?: string | null;
   } | null>(null);
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
@@ -1032,9 +1034,13 @@ export function ChannelView({
   // × 50/page — comfortably covers the Activity board's 200-event window.
   const JUMP_BACKFILL_PAGES = 8;
   const jumpToMessage = useCallback(
-    async (msgId: string) => {
+    async (msgId: string, requestId?: string | null) => {
       const focus = () =>
-        setFocusMsg((prev) => ({ msgId, nonce: (prev?.nonce ?? 0) + 1 }));
+        setFocusMsg((prev) => ({
+          msgId,
+          requestId: requestId ?? null,
+          nonce: (prev?.nonce ?? 0) + 1,
+        }));
       if (messagesRef.current.some((m) => m.msg_id === msgId)) return focus();
       if (!channel || jumpBackfillRef.current) return;
       jumpBackfillRef.current = true;
@@ -1503,12 +1509,55 @@ export function ChannelView({
     [messages, selectedIds],
   );
 
+  // Live pending ACP permission cards — feeds the ViewBoard minimal Approvals dropdown.
+  const pendingPermissionMessages = useMemo(
+    () =>
+      messages.filter((m) => {
+        if (m.msg_type !== "permission") return false;
+        return !(m.content_data as PermissionContentData | null | undefined)
+          ?.resolved;
+      }),
+    [messages],
+  );
+
+  // Apply bot/session (model rides the session) from the reply target so the
+  // follow-up continues the same turn configuration.
+  const applyReplyConfig = useCallback(
+    (m: Message) => {
+      if (m.sender_type === "bot") {
+        setSelectedSessionBotId(m.sender_id);
+        const sid = messageSessionId(m);
+        setSelectedSessionId(sid ?? "");
+        return;
+      }
+      // Prefer the latest bot child under this message (the turn being continued).
+      const botKids = messages
+        .filter(
+          (x) =>
+            x.reply_to_msg_id === m.msg_id &&
+            x.sender_type === "bot" &&
+            !x.is_deleted,
+        )
+        .sort((a, b) => (a.channel_seq ?? 0) - (b.channel_seq ?? 0));
+      const latest = botKids[botKids.length - 1];
+      if (latest) {
+        setSelectedSessionBotId(latest.sender_id);
+        const sid = messageSessionId(latest);
+        setSelectedSessionId(sid ?? "");
+      }
+    },
+    [messages],
+  );
+
   // Stable identity: selection state deliberately NOT captured here (it travels
   // as scalar props), so a selection toggle only re-renders the affected rows
   // instead of defeating memo(MessageItem) list-wide.
   const messageActions: MessageActionHandlers = useMemo(
     () => ({
-      onReply: (m) => setReplyTo(m),
+      onReply: (m) => {
+        setReplyTo(m);
+        applyReplyConfig(m);
+      },
       onForward: (m) =>
         setForward({ content: buildForwardContent([m]), count: 1 }),
       onToggleSelect: (m) => {
@@ -1525,7 +1574,7 @@ export function ChannelView({
       },
       onRetry: retryMessage,
     }),
-    [buildForwardContent, retryMessage],
+    [buildForwardContent, retryMessage, applyReplyConfig],
   );
 
   const clearSelection = () => {
@@ -1876,6 +1925,50 @@ export function ChannelView({
                     selectMode={selectMode}
                     selectedIds={selectedIds}
                     focusMsg={focusMsg}
+                    replyToId={replyTo && !selectMode ? replyTo.msg_id : null}
+                    inlineReply={
+                      replyTo && !selectMode ? (
+                        <>
+                          <div className="mb-1.5 flex items-center gap-2 px-1 text-xs">
+                            <Reply className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                            <span className="text-zinc-400">Replying under</span>
+                            <span className="text-zinc-300 font-medium truncate">
+                              {displayName(replyTo)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setReplyTo(null)}
+                              className="ml-auto text-zinc-500 hover:text-zinc-200 p-0.5"
+                              title="Cancel reply (Esc)"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <ContextPickBar
+                            channelId={channel.channel_id}
+                            replyTo={replyTo}
+                            draftText={draftText}
+                            files={channelFiles}
+                            onBrowseWorkbench={browseWorkbench}
+                            onBrowseWorkspace={browseWorkspace}
+                            onJumpToSource={jumpToContextSource}
+                          />
+                          <MessageComposer
+                            channelId={channel.channel_id}
+                            channelName={channel.name}
+                            mentionables={mentionables}
+                            commands={commands}
+                            toolbar={composerToolbar}
+                            onMentionsChange={setMentionedBots}
+                            onTextChange={setDraftText}
+                            prefill={composePrefill}
+                            streamingCount={streamingIds.length}
+                            onStopStreaming={stopStreaming}
+                            onSend={handleSend}
+                          />
+                        </>
+                      ) : null
+                    }
                   />
                 </ResolveRefContext.Provider>
               )}
@@ -1924,21 +2017,17 @@ export function ChannelView({
                 </div>
               )}
 
-              {/* Reply banner — the composer's next send answers this message. */}
-              {replyTo && !selectMode && (
-                <div className="mx-4 mt-2 flex items-center gap-2 rounded-lg bg-zinc-900/60 px-3 py-1.5 text-xs">
+              {/* Bottom composer is for new root messages. When replying, the
+                  inline composer under the parent owns send — avoid two editors. */}
+              {replyTo && !selectMode ? (
+                <div className="mx-4 mt-2 mb-2 flex items-center gap-2 rounded-lg bg-zinc-900/60 px-3 py-1.5 text-xs">
                   <Reply className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-                  <span className="text-zinc-400 flex-shrink-0">
-                    Replying to
-                  </span>
-                  <span className="text-zinc-300 font-medium flex-shrink-0">
-                    {displayName(replyTo)}
-                  </span>
-                  <span className="text-zinc-400 truncate italic">
-                    {(replyTo.content ?? "")
-                      .replace(/<#file:[^>]+>/g, "")
-                      .trim()
-                      .slice(0, 120)}
+                  <span className="text-zinc-400">
+                    Replying under{" "}
+                    <span className="text-zinc-300 font-medium">
+                      {displayName(replyTo)}
+                    </span>
+                    {" · "}use the composer above · Esc to cancel
                   </span>
                   <button
                     type="button"
@@ -1949,35 +2038,34 @@ export function ChannelView({
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
+              ) : (
+                <>
+                  {!selectMode && (
+                    <ContextPickBar
+                      channelId={channel.channel_id}
+                      replyTo={replyTo}
+                      draftText={draftText}
+                      files={channelFiles}
+                      onBrowseWorkbench={browseWorkbench}
+                      onBrowseWorkspace={browseWorkspace}
+                      onJumpToSource={jumpToContextSource}
+                    />
+                  )}
+                  <MessageComposer
+                    channelId={channel.channel_id}
+                    channelName={channel.name}
+                    mentionables={mentionables}
+                    commands={commands}
+                    toolbar={composerToolbar}
+                    onMentionsChange={setMentionedBots}
+                    onTextChange={setDraftText}
+                    prefill={composePrefill}
+                    streamingCount={streamingIds.length}
+                    onStopStreaming={stopStreaming}
+                    onSend={handleSend}
+                  />
+                </>
               )}
-
-              {/* Attached resource context (docs/design/RESOURCE_CONTEXT.md) */}
-              {!selectMode && (
-                <ContextPickBar
-                  channelId={channel.channel_id}
-                  replyTo={replyTo}
-                  draftText={draftText}
-                  files={channelFiles}
-                  onBrowseWorkbench={browseWorkbench}
-                  onBrowseWorkspace={browseWorkspace}
-                  onJumpToSource={jumpToContextSource}
-                />
-              )}
-
-              {/* Composer */}
-              <MessageComposer
-                channelId={channel.channel_id}
-                channelName={channel.name}
-                mentionables={mentionables}
-                commands={commands}
-                toolbar={composerToolbar}
-                onMentionsChange={setMentionedBots}
-                onTextChange={setDraftText}
-                prefill={composePrefill}
-                streamingCount={streamingIds.length}
-                onStopStreaming={stopStreaming}
-                onSend={handleSend}
-              />
             </div>
           </div>
 
@@ -2049,6 +2137,8 @@ export function ChannelView({
                 minimal={vbMinimal}
                 onToggleMinimal={toggleViewBoardMinimal}
                 onJumpToMessage={jumpToMessage}
+                pendingApprovals={pendingPermissionMessages}
+                currentUserId={user?.user_id}
                 focusBoard={focusBoard ?? undefined}
               />
 

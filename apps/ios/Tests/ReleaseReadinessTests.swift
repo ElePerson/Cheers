@@ -405,6 +405,59 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(result.files.first?.state, .unstaged)
     }
 
+    func testMessageTreeNestsRepliesUnderParent() {
+        let root = MessageDto(
+            msgId: "root", channelId: "c1", channelSeq: 1,
+            senderType: "user", senderId: "u1", content: "hi"
+        )
+        let bot = MessageDto(
+            msgId: "bot1", channelId: "c1", channelSeq: 2,
+            senderType: "bot", senderId: "b1", content: "ok",
+            replyToMsgId: "root",
+            contentData: .object(["session_id": .string("sid-1")])
+        )
+        let reply = MessageDto(
+            msgId: "r1", channelId: "c1", channelSeq: 3,
+            senderType: "user", senderId: "u1", content: "more",
+            replyToMsgId: "bot1"
+        )
+        let grouped = MessageTree.groupByReply([root, bot, reply])
+        XCTAssertEqual(grouped.roots.map(\.msgId), ["root"])
+        XCTAssertEqual(grouped.childrenByParent["root"]?.map(\.msgId), ["bot1"])
+        XCTAssertEqual(grouped.childrenByParent["bot1"]?.map(\.msgId), ["r1"])
+        XCTAssertEqual(MessageTree.messageSessionId(bot), "sid-1")
+    }
+
+    func testMessageTreeKeepsOrphanRepliesAsRoots() {
+        let orphan = MessageDto(
+            msgId: "o1", channelId: "c1", channelSeq: 1,
+            senderType: "user", senderId: "u1", content: "x",
+            replyToMsgId: "missing"
+        )
+        let grouped = MessageTree.groupByReply([orphan])
+        XCTAssertEqual(grouped.roots.map(\.msgId), ["o1"])
+    }
+
+    func testMessageTreeFoldsAnchoredPermissions() {
+        let bot = MessageDto(
+            msgId: "bot1", channelId: "c1", channelSeq: 1,
+            senderType: "bot", senderId: "b1", content: "ok"
+        )
+        let perm = MessageDto(
+            msgId: "p1", channelId: "c1", channelSeq: 2,
+            senderType: "bot", senderId: "b1", content: "",
+            msgType: "permission",
+            contentData: .object([
+                "source_msg_id": .string("bot1"),
+                "request_id": .string("req1"),
+            ])
+        )
+        let grouped = MessageTree.groupByReply([bot, perm])
+        XCTAssertEqual(grouped.roots.map(\.msgId), ["bot1"])
+        XCTAssertNil(grouped.byId["p1"])
+        XCTAssertEqual(MessageTree.permissionSourceId(perm), "bot1")
+    }
+
     private func permissionRequest(_ json: String) throws -> PermissionRequest {
         let value = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
         return try XCTUnwrap(PermissionRequest(contentData: value))
