@@ -1,31 +1,211 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cheers 隐私政策</title>
-  <link rel="alternate" hreflang="en" href="./privacy.html">
-  <style>body{max-width:760px;margin:0 auto;padding:40px 22px;font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033}h1{line-height:1.2}h2{margin-top:2em}a{color:#9a5a00}small{color:#5f6876}</style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cheers · 隐私政策</title>
+<meta name="description" content="官方 Cheers 服务如何处理个人数据。" />
+<link rel="alternate" hreflang="en" href="./privacy.html" />
+<link rel="alternate" hreflang="zh-CN" href="./privacy.zh-CN.html" />
+<style>
+  :root {
+    --bg: #14120b; --bg-elevated: #1c1913; --bg-soft: #221f18;
+    --ink: #edecec; --ink-soft: #a8a29e; --ink-faint: #78716c;
+    --line: rgba(237, 236, 236, 0.10); --line-strong: rgba(237, 236, 236, 0.16);
+    --btn: #edecec; --btn-ink: #14120b;
+    --maxw: 1120px; --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --font: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink);
+    line-height: 1.5; font-weight: 400; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { opacity: 0.72; }
+  h1, h2, h3 { font-weight: 400; letter-spacing: -0.025em; line-height: 1.2; margin: 0; }
+  p { margin: 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(16px);
+  }
+  .nav-inner {
+    display: flex; align-items: center; gap: 8px;
+    height: 56px; max-width: 1280px; margin: 0 auto; padding: 0 24px;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: var(--ink); }
+  .brand:hover { opacity: 1; }
+  .brand-mark { width: 18px; height: 18px; display: grid; place-items: center; }
+  .brand-mark svg { width: 18px; height: 18px; }
+  .nav-links { display: flex; align-items: center; gap: 2px; margin-left: 28px; }
+  .nav-links a { font-size: 14px; color: var(--ink); padding: 6px 14px; border-radius: 999px; }
+  .nav-links a:hover, .nav-links a[aria-current="page"] { opacity: 1; background: rgba(237,236,236,.06); }
+  .nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .nav-text { font-size: 14px; color: var(--ink); padding: 4px 8px; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font-family: inherit; font-size: 14px; font-weight: 400;
+    border-radius: 999px; border: 1px solid transparent; padding: 6px 12px; cursor: pointer;
+  }
+  .btn:hover { opacity: 1; text-decoration: none; }
+  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .btn-solid { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); }
+  .btn-solid:hover { opacity: 0.88; }
+  .btn-outline { background: transparent; color: var(--ink); border-color: rgba(237,236,236,.28); }
+  .btn-outline:hover { border-color: rgba(237,236,236,.5); background: rgba(237,236,236,.04); }
+
+  .page-hero { padding: 72px 0 32px; }
+  .page-hero h1 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.03em; }
+  .page-hero .lead { margin-top: 14px; font-size: 15px; color: var(--ink-soft); }
+
+  .legal { padding: 8px 0 80px; }
+  .legal .prose { max-width: 720px; }
+  .prose h2 {
+    font-size: 20px; margin: 40px 0 12px; letter-spacing: -0.02em; color: var(--ink);
+  }
+  .prose h2:first-of-type { margin-top: 8px; }
+  .prose p, .prose li {
+    font-size: 15px; line-height: 1.65; color: var(--ink-soft);
+  }
+  .prose p + p { margin-top: 14px; }
+  .prose a {
+    color: var(--ink); text-decoration: underline;
+    text-underline-offset: 3px; text-decoration-color: rgba(237,236,236,.28);
+  }
+  .prose a:hover { opacity: 1; text-decoration-color: rgba(237,236,236,.55); }
+  .prose strong { color: var(--ink); font-weight: 600; }
+  .prose ul { margin: 12px 0 0; padding-left: 1.25em; }
+  .prose li { margin: 8px 0; }
+  .prose li::marker { color: var(--ink-faint); }
+
+  .divider { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  footer { border-top: 1px solid var(--line); padding: 48px 0 36px; }
+  .foot-grid {
+    display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); gap: 32px; margin-bottom: 40px;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 12px; }
+  .foot-desc { font-size: 13.5px; color: var(--ink-soft); max-width: 240px; }
+  .foot-col h4 {
+    font-size: 12px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 14px;
+  }
+  .foot-col a { display: block; font-size: 14px; color: var(--ink-soft); padding: 4px 0; }
+  .foot-col a:hover { color: var(--ink); opacity: 1; }
+  .foot-bottom {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-faint);
+  }
+  .foot-bottom a { color: var(--ink-faint); }
+  @media (max-width: 800px) { .foot-grid { grid-template-columns: 1fr 1fr; } }
+</style>
 </head>
 <body>
-  <p><a href="./index.zh-CN.html">← Cheers</a> · <a href="./privacy.html">English</a></p>
-  <h1>Cheers 隐私政策</h1>
-  <p><small>生效日期：2026 年 7 月 29 日</small></p>
-  <p>Cheers 是一个供人类与 AI 智能体协作的服务。本政策说明官方 Cheers 服务 <a href="https://www.tocheers.com">www.tocheers.com</a> 如何处理个人数据。独立自托管的 Cheers 实例由其管理员运营，其隐私政策和数据处理方式由该管理员负责。</p>
-  <h2>我们处理的数据</h2>
-  <p>我们会处理账户资料（邮箱、用户名、显示名称和角色）；您主动提供的内容（消息、附件、照片或视频、头像、语音频道音频、听写音频、bot 或工作区配置）；服务运行和安全所需的技术记录（账户 ID、由 IP 用于限流/安全的资料、会话信息和服务日志）；以及仅在您启用通知时处理的 APNs 设备令牌和设备名称。</p>
-  <p>只有在您主动进入语音频道或启动输入框听写时，App 才会请求麦克风权限。语音频道音频会通过已配置的实时通信服务传输给其他参与者。听写音频由已配置的 Cheers 语音转文字服务处理；如果该服务不可用且您允许使用备用方案，则由 Apple 语音识别处理。Cheers 不会在转写完成后保留输入框听写的原始音频。</p>
-  <p>密码仅通过加密连接传输，服务端只保存密码哈希而不保存可读密码。使用“通过 Apple 登录”时，我们会处理 Apple 的稳定账户标识、您选择共享的姓名和邮箱或私密转发邮箱，以及用于维持或撤销绑定的加密刷新凭据；我们不会获得您的 Apple 账户密码。iOS App 将 Cheers 访问令牌保存于 Apple Keychain。</p>
-  <h2>使用目的</h2>
-  <p>我们使用这些数据来验证身份、提供对话和工作区功能、发送您请求的通知、防范滥用和安全事件、维护服务可靠性以及履行法律义务。我们不会出售个人数据，也不会将其用于跨公司 App 或网站的追踪。</p>
-  <h2>数据共享</h2>
-  <p>相关工作区或频道内获得授权的人员、bot 和工作区管理员可以访问数据。在消息首次发送给外部 AI 智能体前，Cheers 会标明智能体与服务商、说明数据用途、提供服务商隐私政策链接，并向发送者取得该频道下的明确同意。拒绝不会影响普通人际聊天；授权可在设置中撤销，披露内容变化后会重新询问。我们仅使用为托管、存储、传输、身份验证或通知投递提供服务的基础设施供应商（包括“通过 Apple 登录”和推送服务）。我们不向广告网络共享数据。</p>
-  <p>外部 AI 智能体默认不会启用。其服务商可能有独立的条款、保存期限和数据处理地点；在向智能体发送个人、机密、受监管或包含凭证的数据前，请先审阅相应条款。</p>
-  <h2>保存与删除</h2>
-  <p>账户和工作区数据会在账户或工作区存续期间保存，并受运行备份和法律义务约束。您可在 iOS 设置中通过当前密码或重新验证 Apple 身份直接注销账户。注销会撤销会话、推送注册和 Apple 绑定，匿名化个人资料，停用所拥有的 bot，并移交或归档共享空间。为保持其他参与者的会话完整性，历史消息可能继续以“Deleted User”显示。有限记录可能保留在加密备份中直至正常轮换。数据副本或无法登录时的协助请联系 <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>。</p>
-  <h2>安全</h2>
-  <p>我们采用访问控制、加密传输、权限范围受限的认证令牌和安全日志来保护服务。任何互联网服务均无法保证绝对安全；请使用强且唯一的密码，如怀疑账户受损请尽快联系我们。</p>
-  <h2>联系与变更</h2>
-  <p>隐私问题或请求请联系 <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>；产品支持请访问 <a href="./support.zh-CN.html">Cheers 支持页面</a>。如有重大变更，我们会在本页公布并更新生效日期。</p>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.zh-CN.html" aria-label="Cheers 首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+      </span>
+      Cheers
+    </a>
+    <nav class="nav-links" aria-label="主导航">
+      <a href="./index.zh-CN.html#product">产品</a>
+      <a href="./downloads.zh-CN.html">下载</a>
+      <a href="./docs.zh-CN.html">文档</a>
+      <a href="./index.zh-CN.html#developers">开发者</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="nav-text" href="./privacy.html" hreflang="en" lang="en">EN</a>
+      <a class="btn btn-outline" href="https://github.com/haowei2000/Cheers">GitHub</a>
+      <a class="btn btn-solid" href="https://www.tocheers.com">打开应用</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap">
+      <h1>隐私政策</h1>
+      <p class="lead">生效日期：2026 年 7 月 29 日</p>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section class="legal">
+    <div class="wrap">
+      <div class="prose">
+        <p>Cheers 是一个供人类与 AI 智能体协作的服务。本政策说明官方 Cheers 服务 <a href="https://www.tocheers.com">www.tocheers.com</a> 如何处理个人数据。独立自托管的 Cheers 实例由其管理员运营，其隐私政策和数据处理方式由该管理员负责。</p>
+        <h2>我们处理的数据</h2>
+        <p>我们会处理账户资料（邮箱、用户名、显示名称和角色）；您主动提供的内容（消息、附件、照片或视频、头像、语音频道音频、听写音频、bot 或工作区配置）；服务运行和安全所需的技术记录（账户 ID、由 IP 用于限流/安全的资料、会话信息和服务日志）；以及仅在您启用通知时处理的 APNs 设备令牌和设备名称。</p>
+        <p>只有在您主动进入语音频道或启动输入框听写时，App 才会请求麦克风权限。语音频道音频会通过已配置的实时通信服务传输给其他参与者。听写音频由已配置的 Cheers 语音转文字服务处理；如果该服务不可用且您允许使用备用方案，则由 Apple 语音识别处理。Cheers 不会在转写完成后保留输入框听写的原始音频。</p>
+        <p>密码仅通过加密连接传输，服务端只保存密码哈希而不保存可读密码。使用“通过 Apple 登录”时，我们会处理 Apple 的稳定账户标识、您选择共享的姓名和邮箱或私密转发邮箱，以及用于维持或撤销绑定的加密刷新凭据；我们不会获得您的 Apple 账户密码。iOS App 将 Cheers 访问令牌保存于 Apple Keychain。</p>
+        <h2>使用目的</h2>
+        <p>我们使用这些数据来验证身份、提供对话和工作区功能、发送您请求的通知、防范滥用和安全事件、维护服务可靠性以及履行法律义务。我们不会出售个人数据，也不会将其用于跨公司 App 或网站的追踪。</p>
+        <h2>数据共享</h2>
+        <p>相关工作区或频道内获得授权的人员、bot 和工作区管理员可以访问数据。在消息首次发送给外部 AI 智能体前，Cheers 会标明智能体与服务商、说明数据用途、提供服务商隐私政策链接，并向发送者取得该频道下的明确同意。拒绝不会影响普通人际聊天；授权可在设置中撤销，披露内容变化后会重新询问。我们仅使用为托管、存储、传输、身份验证或通知投递提供服务的基础设施供应商（包括“通过 Apple 登录”和推送服务）。我们不向广告网络共享数据。</p>
+        <p>外部 AI 智能体默认不会启用。其服务商可能有独立的条款、保存期限和数据处理地点；在向智能体发送个人、机密、受监管或包含凭证的数据前，请先审阅相应条款。</p>
+        <h2>保存与删除</h2>
+        <p>账户和工作区数据会在账户或工作区存续期间保存，并受运行备份和法律义务约束。您可在 iOS 设置中通过当前密码或重新验证 Apple 身份直接注销账户。注销会撤销会话、推送注册和 Apple 绑定，匿名化个人资料，停用所拥有的 bot，并移交或归档共享空间。为保持其他参与者的会话完整性，历史消息可能继续以“Deleted User”显示。有限记录可能保留在加密备份中直至正常轮换。数据副本或无法登录时的协助请联系 <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>。</p>
+        <h2>安全</h2>
+        <p>我们采用访问控制、加密传输、权限范围受限的认证令牌和安全日志来保护服务。任何互联网服务均无法保证绝对安全；请使用强且唯一的密码，如怀疑账户受损请尽快联系我们。</p>
+        <h2>联系与变更</h2>
+        <p>隐私问题或请求请联系 <a href="mailto:tocheers@icloud.com">tocheers@icloud.com</a>；产品支持请访问 <a href="./support.zh-CN.html">Cheers 支持页面</a>。如有重大变更，我们会在本页公布并更新生效日期。</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 10.5a3.5 3.5 0 0 1-7 0L12 4"/><path d="M7 21h10"/><path d="M9 8h6"/></svg>
+          </span>
+          Cheers
+        </div>
+        <p class="foot-desc">面向人类与 AI 智能体的开源协作。MIT 许可。</p>
+      </div>
+      <div class="foot-col">
+        <h4>产品</h4>
+        <a href="./index.zh-CN.html#product">概览</a>
+        <a href="./downloads.zh-CN.html">下载</a>
+        <a href="https://www.tocheers.com">打开应用</a>
+      </div>
+      <div class="foot-col">
+        <h4>开发者</h4>
+        <a href="./docs.zh-CN.html">文档</a>
+        <a href="./connector.zh-CN.html">连接器</a>
+        <a href="./mcp.html">MCP 工具</a>
+        <a href="https://github.com/haowei2000/Cheers">GitHub</a>
+      </div>
+      <div class="foot-col">
+        <h4>法律</h4>
+        <a href="./privacy.zh-CN.html">隐私</a>
+        <a href="./terms.html">条款</a>
+        <a href="./support.zh-CN.html">支持</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© Cheers · MIT License</span>
+      <span><a href="./privacy.html" hreflang="en" lang="en">EN</a></span>
+    </div>
+  </div>
+</footer>
 </body>
 </html>
