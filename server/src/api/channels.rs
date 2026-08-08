@@ -379,6 +379,18 @@ fn bot_add_requires_session_create(
     !caller_is_owner && !legacy_admin && !platform_admin
 }
 
+fn can_create_channel(workspace_role: Option<&str>, platform_admin: bool) -> bool {
+    workspace_role.is_some() || platform_admin
+}
+
+fn pending_channel_invite_status(workspace_status: Option<&str>) -> &'static str {
+    if workspace_status == Some("active") {
+        "pending"
+    } else {
+        "pending_workspace"
+    }
+}
+
 /// GET /api/v1/channels/dm — the caller's DMs (type='dm' channels they're a member of).
 /// Access is membership-driven (independent of the anchor workspace). Each row carries
 /// `peer_name` (the OTHER participant) so the client can label the nameless DM channel.
@@ -453,11 +465,13 @@ pub async fn create_channel(
     .bind(&claims.sub)
     .fetch_optional(&state.db)
     .await?;
-    if workspace_role.is_none() {
+    let platform_admin = matches!(claims.role.as_str(), "system_admin" | "admin");
+    if !can_create_channel(workspace_role.as_deref(), platform_admin) {
         return Err(AppError::Forbidden("workspace member required".into()));
     }
-    let creator_is_workspace_admin = matches!(workspace_role.as_deref(), Some("owner" | "admin"))
-        || matches!(claims.role.as_str(), "system_admin" | "admin");
+    let activate_creator_membership = workspace_role.is_none() && platform_admin;
+    let creator_is_workspace_admin =
+        matches!(workspace_role.as_deref(), Some("owner" | "admin")) || platform_admin;
     let channel_id = Uuid::new_v4().to_string();
     let channel_type = body.channel_type.unwrap_or_else(|| "public".into());
     if !matches!(channel_type.as_str(), "public" | "private") {
@@ -516,6 +530,21 @@ pub async fn create_channel(
     .bind(body.allow_bot_adds.unwrap_or(true))
     .fetch_one(&mut *tx)
     .await?;
+    if activate_creator_membership {
+        // Platform admins retain their channel-creation bypass, but the deferred
+        // non-DM membership invariant still requires every human channel member
+        // to be active in the workspace. Activate/create that membership in the
+        // same transaction as the channel and its owner membership.
+        sqlx::query(
+            "INSERT INTO workspace_memberships (workspace_id, user_id, role, status)
+             VALUES ($1, $2, 'admin', 'active')
+             ON CONFLICT (workspace_id, user_id) DO UPDATE SET status = 'active'",
+        )
+        .bind(&body.workspace_id)
+        .bind(&claims.sub)
+        .execute(&mut *tx)
+        .await?;
+    }
     sqlx::query("INSERT INTO channel_memberships (channel_id, member_id, member_type, role, added_by) VALUES ($1, $2, 'user', 'owner', $2) ON CONFLICT DO NOTHING")
         .bind(&channel_id)
         .bind(&claims.sub)
@@ -599,6 +628,15 @@ pub async fn create_channel(
         }
     }
     tx.commit().await?;
+
+    if activate_creator_membership {
+        crate::api::notifications::resolve_notification(
+            &state,
+            &claims.sub,
+            &format!("workspace:{}", body.workspace_id),
+        )
+        .await;
+    }
 
     for uid in &workspace_invited_users {
         crate::api::notifications::deliver_notification_by_id(
@@ -887,9 +925,12 @@ pub async fn list_channel_members(
     // Pending invites (users who haven't accepted yet) — shown greyed with a badge.
     let pending = sqlx::query(
         "SELECT ci.user_id AS member_id, ci.role, u.username, u.display_name, u.avatar_url,
-                u.bio, u.status_text, u.status_emoji
+                u.bio, u.status_text, u.status_emoji, wm.status AS workspace_status
          FROM channel_invites ci
          JOIN users u ON u.user_id = ci.user_id
+         JOIN channels c ON c.channel_id = ci.channel_id
+         LEFT JOIN workspace_memberships wm
+           ON wm.workspace_id = c.workspace_id AND wm.user_id = ci.user_id
          WHERE ci.channel_id = $1
          ORDER BY u.username",
     )
@@ -897,10 +938,11 @@ pub async fn list_channel_members(
     .fetch_all(&state.db)
     .await?;
     for r in pending {
+        let workspace_status: Option<String> = r.try_get("workspace_status").ok().flatten();
         members.push(json!({
             "member_id": r.try_get::<String, _>("member_id").unwrap_or_default(),
             "member_type": "user",
-            "status": "pending",
+            "status": pending_channel_invite_status(workspace_status.as_deref()),
             "role": r.try_get::<String, _>("role").unwrap_or_else(|_| "member".into()),
             "username": r.try_get::<String, _>("username").ok(),
             "display_name": r.try_get::<String, _>("display_name").ok(),
@@ -1699,6 +1741,23 @@ mod tests {
     fn platform_admin_can_request_owned_bot_approval_without_a_grant() {
         assert!(!bot_add_requires_session_create(false, false, true));
         assert!(bot_add_requires_session_create(false, false, false));
+    }
+
+    #[test]
+    fn platform_admin_can_create_a_channel_without_workspace_membership() {
+        assert!(can_create_channel(None, true));
+        assert!(!can_create_channel(None, false));
+        assert!(can_create_channel(Some("member"), false));
+    }
+
+    #[test]
+    fn queued_channel_invite_keeps_workspace_pending_status() {
+        assert_eq!(pending_channel_invite_status(Some("active")), "pending");
+        assert_eq!(
+            pending_channel_invite_status(Some("pending")),
+            "pending_workspace"
+        );
+        assert_eq!(pending_channel_invite_status(None), "pending_workspace");
     }
 }
 

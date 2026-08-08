@@ -33,6 +33,16 @@ use crate::{
     resource::{self, Principal},
 };
 
+fn direct_message_notification_payload(channel_id: Uuid, sender_name: &str) -> Value {
+    json!({
+        "kind": "dm",
+        "channel_id": channel_id,
+        "sender_name": sender_name,
+        "title": sender_name,
+        "body": "New direct message",
+    })
+}
+
 /// Dispatch a `resource_req` frame and apply the post-write effects the db-only
 /// resource layer can't. Returns the `resource_res` frame verbatim from
 /// [`resource::dispatch`] — effects never change the reply, and never fail it.
@@ -237,11 +247,7 @@ fn spawn_created_message_effects(state: &AppState, author_bot_id: Uuid, created:
                 .fetch_all(&db)
                 .await
                 .unwrap_or_default();
-                let payload = json!({
-                    "kind": "dm",
-                    "channel_id": channel_id,
-                    "sender_name": sender_name,
-                });
+                let payload = direct_message_notification_payload(channel_id, &sender_name);
                 for user_id in &users {
                     if let Ok(uid) = user_id.parse::<Uuid>() {
                         fanout
@@ -356,5 +362,21 @@ async fn audit_status_write(state: &AppState, bot_id: &str, frame: &Value) {
     .await
     {
         tracing::warn!(bot_id = %bot_id, error = %err, "bot.status.write audit log write failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bot_dm_web_push_has_display_content() {
+        let channel_id = Uuid::new_v4();
+        let payload = direct_message_notification_payload(channel_id, "Planner");
+
+        assert_eq!(payload["kind"], "dm");
+        assert_eq!(payload["channel_id"], channel_id.to_string());
+        assert_eq!(payload["title"], "Planner");
+        assert_eq!(payload["body"], "New direct message");
     }
 }

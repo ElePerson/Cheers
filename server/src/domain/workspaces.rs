@@ -5,7 +5,14 @@
 use uuid::Uuid;
 
 use crate::errors::AppError;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
+
+/// Database-side result of removing a workspace member. Realtime subscription
+/// revocation and notification fanout stay in the API layer, after commit.
+pub struct DetachedWorkspaceMember {
+    pub channel_ids: Vec<String>,
+    pub invite_channel_ids: Vec<String>,
+}
 
 /// The user's personal workspace, creating it on first use (lazy provision — there is no
 /// signup hook, and this also covers users that predate the personal-workspace concept).
@@ -102,6 +109,165 @@ pub async fn decline_pending_invite(
     tx.commit().await.map_err(AppError::Db)?;
 
     Ok(channel_ids)
+}
+
+/// Remove a human's workspace-scoped access in one transaction.
+///
+/// Locking the workspace row serializes owner leaves/removals with role changes.
+/// The second of two concurrent owner leaves therefore observes the first commit
+/// and cannot remove the workspace's final active owner. Pending channel invites
+/// are consumed in the same transaction so a crash cannot leave an invite that
+/// becomes usable after the user later rejoins the workspace.
+pub async fn detach_member(
+    db: &PgPool,
+    workspace_id: &str,
+    user_id: &str,
+) -> Result<DetachedWorkspaceMember, AppError> {
+    let mut tx = db.begin().await.map_err(AppError::Db)?;
+
+    let workspace_exists: Option<String> = sqlx::query_scalar(
+        "SELECT workspace_id FROM workspaces WHERE workspace_id = $1 FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+    if workspace_exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    let membership = sqlx::query(
+        "SELECT role, status FROM workspace_memberships
+         WHERE workspace_id = $1 AND user_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+    let removing_active_owner = membership.as_ref().is_some_and(|row| {
+        row.try_get::<String, _>("role").ok().as_deref() == Some("owner")
+            && row.try_get::<String, _>("status").ok().as_deref() == Some("active")
+    });
+    if removing_active_owner {
+        let owner_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM workspace_memberships
+             WHERE workspace_id = $1 AND role = 'owner' AND status = 'active'",
+        )
+        .bind(workspace_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(AppError::Db)?;
+        if owner_count <= 1 {
+            return Err(AppError::Forbidden(
+                "you are the last owner — transfer ownership or delete the workspace first".into(),
+            ));
+        }
+    }
+
+    let last_owned = sqlx::query(
+        "SELECT c.channel_id, c.name
+         FROM channels c
+         JOIN channel_memberships mine
+           ON mine.channel_id = c.channel_id
+          AND mine.member_id = $2 AND mine.member_type = 'user' AND mine.role = 'owner'
+         WHERE c.workspace_id = $1 AND c.type <> 'dm' AND c.archived_at IS NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM channel_memberships other
+               WHERE other.channel_id = c.channel_id AND other.member_type = 'user'
+                 AND other.role = 'owner' AND other.member_id <> $2
+           )",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+    if let Some(row) = last_owned.first() {
+        let name: String = row.try_get("name").unwrap_or_else(|_| "a channel".into());
+        return Err(AppError::Forbidden(format!(
+            "transfer or delete #{name} before removing its last owner"
+        )));
+    }
+
+    let channel_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT cm.channel_id
+         FROM channel_memberships cm
+         JOIN channels c ON c.channel_id = cm.channel_id
+         WHERE c.workspace_id = $1 AND c.type <> 'dm'
+           AND cm.member_id = $2 AND cm.member_type = 'user'",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+    let invite_channel_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT ci.channel_id FROM channel_invites ci
+         JOIN channels c ON c.channel_id = ci.channel_id
+         WHERE ci.user_id = $1 AND c.workspace_id = $2",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+
+    sqlx::query(
+        "DELETE FROM approval_delegations ad
+         USING channels c
+         WHERE ad.channel_id = c.channel_id AND c.workspace_id = $1
+           AND c.type <> 'dm' AND ad.user_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+    sqlx::query(
+        "DELETE FROM bot_event_access bea
+         USING channels c
+         WHERE bea.channel_id = c.channel_id AND c.workspace_id = $1
+           AND c.type <> 'dm' AND bea.subject_kind = 'user' AND bea.subject_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+    sqlx::query(
+        "DELETE FROM channel_memberships cm
+         USING channels c
+         WHERE cm.channel_id = c.channel_id AND c.workspace_id = $1
+           AND c.type <> 'dm' AND cm.member_id = $2 AND cm.member_type = 'user'",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+    sqlx::query(
+        "DELETE FROM channel_invites
+         WHERE user_id = $1
+           AND channel_id IN (SELECT channel_id FROM channels WHERE workspace_id = $2)",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+    sqlx::query("DELETE FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2")
+        .bind(workspace_id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::Db)?;
+    tx.commit().await.map_err(AppError::Db)?;
+
+    Ok(DetachedWorkspaceMember {
+        channel_ids,
+        invite_channel_ids,
+    })
 }
 
 fn parse_ws(s: String) -> Result<Uuid, AppError> {

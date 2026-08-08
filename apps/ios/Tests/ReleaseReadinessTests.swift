@@ -157,6 +157,19 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(destination, .activity)
     }
 
+    @MainActor
+    func testRealtimeNotificationOnlyTreatsDmKindAsDirectMessage() {
+        let dm = Data("""
+        {"type":"notification","data":{"kind":"dm","channel_id":"dm-1"}}
+        """.utf8)
+        let mention = Data("""
+        {"type":"notification","data":{"kind":"mention","channel_id":"channel-1"}}
+        """.utf8)
+
+        XCTAssertEqual(ChatSocket.directMessageChannelId(fromNotificationFrame: dm), "dm-1")
+        XCTAssertNil(ChatSocket.directMessageChannelId(fromNotificationFrame: mention))
+    }
+
     func testApprovalUsesClaudeRawInputAndLocations() throws {
         let request = try permissionRequest("""
         {

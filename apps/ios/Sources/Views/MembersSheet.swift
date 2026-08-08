@@ -171,7 +171,9 @@ struct MembersSheet: View {
                     if member.isPending {
                         Text(member.status == "pending_owner"
                              ? "Awaiting bot owner approval"
-                             : "Invited · awaiting reply")
+                             : member.status == "pending_workspace"
+                               ? "Awaiting workspace acceptance"
+                               : "Invited · awaiting reply")
                             .font(.caption)
                             .foregroundStyle(Theme.warning)
                     } else if let role = member.role, role != "member" {
