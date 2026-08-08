@@ -314,6 +314,9 @@ export interface MemberItem {
   /** Bots only: connector-reported "agent accepts audio prompts" (policy AND
    *  promptCapabilities.audio). null = unknown (never connected) — treat as false. */
   can_receive_audio?: boolean | null;
+  /** Pending bot-owner approval context. */
+  requested_cwd?: string | null;
+  requested_additional_dirs?: string[];
 }
 
 export interface BotItem {

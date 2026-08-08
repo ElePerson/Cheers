@@ -21,6 +21,7 @@ import {
   registerPushSubscription,
 } from "@/api/push";
 import { useChatStore } from "@/stores/chatStore";
+import { useActivityUiStore } from "@/stores/activityUiStore";
 
 // ── Active-channel tracking (notification suppression) ─────────────────────
 
@@ -149,11 +150,17 @@ export function initPushBridge(): void {
       event.ports[0]?.postMessage(document.hasFocus() ? activeChannelId : null);
     } else if (data.type === "cheers:open-channel" && data.channelId) {
       openChannelFromPush(data.channelId, data.msgId ?? null, true);
+    } else if (data.type === "cheers:open-activity") {
+      if (chatLayoutMounted === 0) window.location.assign("/chat?activity=1");
+      else useActivityUiStore.getState().requestOpen();
     }
   });
 
   const params = new URLSearchParams(window.location.search);
   const channelId = params.get("push_channel");
+  if (params.get("activity") === "1") {
+    useActivityUiStore.getState().requestOpen();
+  }
   if (channelId) {
     const msgId = params.get("push_msg");
     params.delete("push_channel");

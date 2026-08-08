@@ -139,6 +139,22 @@ pub async fn dispatch_with_effects(state: &AppState, principal: Principal, frame
             crate::api::bots::broadcast_bot_member_update(state, &bot_id).await;
             audit_status_write(state, &bot_id, frame).await;
         }
+        Some("dm.open") => {
+            if let Some(data) = resp.get("data") {
+                if data.get("created").and_then(Value::as_bool) == Some(true) {
+                    if let Some(user_id) = data
+                        .get("target_user_id")
+                        .and_then(Value::as_str)
+                        .and_then(|value| value.parse::<Uuid>().ok())
+                    {
+                        state
+                            .fanout
+                            .broadcast_user(user_id, WireFrame::user("dm_created", data.clone()))
+                            .await;
+                    }
+                }
+            }
+        }
         _ => {}
     }
     resp
@@ -187,6 +203,66 @@ fn spawn_created_message_effects(state: &AppState, author_bot_id: Uuid, created:
                     .collect()
             })
             .unwrap_or_default();
+        let channel_id = created
+            .get("channel_id")
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse::<Uuid>().ok());
+        let is_dm = if let Some(channel_id) = channel_id {
+            sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM channels WHERE channel_id = $1 AND type = 'dm')",
+            )
+            .bind(channel_id.to_string())
+            .fetch_one(&db)
+            .await
+            .unwrap_or(false)
+        } else {
+            false
+        };
+        if is_dm {
+            let sender_name: String = sqlx::query_scalar(
+                "SELECT COALESCE(display_name, username) FROM bot_accounts WHERE bot_id = $1",
+            )
+            .bind(author_bot_id.to_string())
+            .fetch_optional(&db)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "Bot".into());
+            if let Some(channel_id) = channel_id {
+                let users: Vec<String> = sqlx::query_scalar(
+                    "SELECT member_id FROM channel_memberships
+                     WHERE channel_id = $1 AND member_type = 'user'",
+                )
+                .bind(channel_id.to_string())
+                .fetch_all(&db)
+                .await
+                .unwrap_or_default();
+                let payload = json!({
+                    "kind": "dm",
+                    "channel_id": channel_id,
+                    "sender_name": sender_name,
+                });
+                for user_id in &users {
+                    if let Ok(uid) = user_id.parse::<Uuid>() {
+                        fanout
+                            .broadcast_user(uid, WireFrame::user("notification", payload.clone()))
+                            .await;
+                        crate::notify::push_to_user(
+                            &state_for_apns,
+                            uid,
+                            crate::notify::PushKind::DirectMessage {
+                                channel_id,
+                                sender_name: sender_name.clone(),
+                            },
+                        );
+                    }
+                    if let Some(sender) = web_push.as_ref() {
+                        crate::infra::web_push::push_to_user(&db, sender, user_id, payload.clone())
+                            .await;
+                    }
+                }
+            }
+        }
         if !human_mentions.is_empty() {
             let sender_name: Option<String> = sqlx::query_scalar(
                 "SELECT COALESCE(display_name, username) FROM bot_accounts WHERE bot_id = $1",

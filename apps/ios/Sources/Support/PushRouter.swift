@@ -6,6 +6,7 @@ import UserNotifications
 enum PushDestination: Equatable {
     case channel(String)
     case approval(channelId: String, requestId: String)
+    case activity
 }
 
 /// OS push bridge (docs/arch/MOBILE_APP_DESIGN.md §5.4), following the HIG:
@@ -178,8 +179,9 @@ final class PushRouter: NSObject {
     }
 
     nonisolated static func destination(from cheers: [String: Any]) -> PushDestination? {
-        guard let channelId = stringValue(cheers["channel_id"]) else { return nil }
         let type = stringValue(cheers["type"])
+        if type == "activity" { return .activity }
+        guard let channelId = stringValue(cheers["channel_id"]) else { return nil }
         if type == "permission_request", let requestId = stringValue(cheers["request_id"]) {
             return .approval(channelId: channelId, requestId: requestId)
         }

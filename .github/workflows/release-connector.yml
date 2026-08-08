@@ -54,6 +54,15 @@ jobs:
           rustup update stable --no-self-update
           rustup target add ${{ matrix.target }}
 
+      - name: Cache Rust release artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            packages/cheers-acp-connector-rs
+            packages/cheers-mcp-server
+          shared-key: connector-release-${{ matrix.target }}
+          cache-on-failure: true
+
       - name: Install cross (Linux musl builds)
         if: matrix.use_cross
         uses: taiki-e/install-action@v2

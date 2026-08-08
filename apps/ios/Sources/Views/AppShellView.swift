@@ -16,7 +16,7 @@ struct AppShellView: View {
             .task {
                 convo.attach(app)
                 shell.attach(app)
-                activity.attach(app, shell: shell)
+                activity.attach(app, shell: shell, conversations: convo)
                 PushRouter.shared.configure(app: app)
                 // Finish first paint / list load before wiring deep links so a
                 // cold-start notification tap does not push+sheet against an
@@ -138,6 +138,9 @@ struct AppShellView: View {
             // on top — simultaneous push+sheet on cold start has crashed.
             try? await Task.sleep(for: .milliseconds(350))
             shell.pushApproval = PushApprovalDeepLink(channelId: channelId, requestId: requestId)
+        case .activity:
+            shell.selectedSection = .activity
+            await activity.loadInvites()
         }
     }
 

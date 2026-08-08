@@ -3,6 +3,7 @@ pub mod bot_status;
 pub mod channel_info;
 pub mod commands;
 pub mod context;
+pub mod dms;
 pub mod files;
 pub mod fs;
 pub mod members;
@@ -114,6 +115,7 @@ pub async fn dispatch(db: &PgPool, principal: Principal, frame: &Value) -> Value
         // Agent writes its OWN status card (set_status tool); live broadcast is
         // emitted at the WS boundary (agent_bridge), which holds the fanout.
         "bot.status.write" => bot_status::handle_write(db, &principal, &params).await,
+        "dm.open" => dms::handle_open(db, &principal, &params).await,
         "channel.leave" => members::handle_leave(db, &principal, &params).await,
         "channel.files.create" => files::handle_create(db, &principal, &params).await,
         "channel.files.stage" => files::handle_stage(db, &principal, &params).await,

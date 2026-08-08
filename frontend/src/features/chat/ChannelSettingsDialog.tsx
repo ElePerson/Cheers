@@ -124,13 +124,18 @@ export function ChannelSettingsDialog({
 
   async function addMember(it: InvitableItem) {
     try {
-      await addChannelMember(channel.channel_id, {
+      const result = await addChannelMember(channel.channel_id, {
         member_id: it.member_id,
         member_type: it.member_type,
       });
       const who = it.display_name || it.username || it.member_id.slice(0, 8);
-      // Users must accept (pending); bots are bound immediately.
-      toast.success(it.member_type === "bot" ? `Added ${who}` : `Invited ${who}`);
+      const message = {
+        active: `Added ${who}`,
+        pending: `Invited ${who}`,
+        pending_workspace: `Invited ${who} to the workspace first`,
+        pending_owner: `Sent ${who}'s owner an approval request`,
+      }[result.status];
+      toast.success(message);
       setQuery("");
       setResults([]);
       await refreshMembers();
@@ -261,14 +266,16 @@ export function ChannelSettingsDialog({
                     {m.member_type === "bot" && (
                       <span className="ml-1.5 text-[10px] text-indigo-400">BOT</span>
                     )}
-                    {m.status === "pending" && (
+                    {m.status && m.status !== "active" && (
                       <span className="ml-1.5 text-[10px] text-amber-400/90">
-                        Pending
+                        {m.status === "pending_owner"
+                          ? "Waiting for owner"
+                          : "Pending"}
                       </span>
                     )}
                   </p>
                   {canManage &&
-                  m.status !== "pending" &&
+                  m.status === "active" &&
                   (m.member_type === "user" || m.member_type === "bot") &&
                   m.member_id !== me?.user_id ? (
                     <select
@@ -344,6 +351,11 @@ export function ChannelSettingsDialog({
                         {it.member_type === "bot" && (
                           <span className="ml-1.5 text-[10px] text-indigo-400">BOT</span>
                         )}
+                        {it.requires_workspace_acceptance && (
+                          <span className="ml-1.5 text-[10px] text-amber-400">
+                            WORKSPACE FIRST
+                          </span>
+                        )}
                       </span>
                       {it.already_member ? (
                         <span className="ml-auto text-xs text-zinc-400">Already in</span>
@@ -363,7 +375,7 @@ export function ChannelSettingsDialog({
         {canManage && (
           <TaskClaimSettings
             channelId={channel.channel_id}
-            bots={members.filter((m) => m.member_type === "bot" && m.status !== "pending")}
+            bots={members.filter((m) => m.member_type === "bot" && m.status === "active")}
           />
         )}
 

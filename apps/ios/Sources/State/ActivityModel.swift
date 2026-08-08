@@ -27,11 +27,13 @@ final class ActivityModel {
 
     @ObservationIgnored private weak var app: AppModel?
     @ObservationIgnored private weak var shell: ShellModel?
+    @ObservationIgnored private weak var conversations: ConversationListModel?
     @ObservationIgnored private var listenerId: UUID?
 
-    func attach(_ app: AppModel, shell: ShellModel) {
+    func attach(_ app: AppModel, shell: ShellModel, conversations: ConversationListModel) {
         self.app = app
         self.shell = shell
+        self.conversations = conversations
         if listenerId == nil {
             listenerId = app.addSocketListener { [weak self] event in
                 self?.handle(event)
@@ -68,13 +70,22 @@ final class ActivityModel {
     func acceptInvite(_ notification: NotificationDto) async {
         guard let api = app?.api else { return }
         do {
-            if notification.isChannelInvite, let channelId = notification.channelId {
+            if notification.kind == "friend_request", let requester = notification.requesterUserId {
+                _ = try await api.acceptFriendRequest(userId: requester)
+            } else if notification.kind == "bot_channel_invite",
+                      let channelId = notification.channelId,
+                      let botId = notification.botId {
+                try await api.acceptBotChannelInvite(channelId: channelId, botId: botId)
+            } else if notification.isChannelInvite, let channelId = notification.channelId {
                 try await api.acceptChannelInvite(channelId: channelId)
+            } else if let workspaceId = notification.workspaceId {
+                try await api.acceptWorkspaceInvite(workspaceId: workspaceId)
             } else {
-                try await api.acceptWorkspaceInvite(workspaceId: notification.workspaceId)
+                return
             }
             invites.removeAll { $0.id == notification.id }
             shell?.pendingInvites = invites.count
+            await refreshMembershipState()
         } catch {
             // Leave the invite in place on failure.
         }
@@ -83,10 +94,18 @@ final class ActivityModel {
     func declineInvite(_ notification: NotificationDto) async {
         guard let api = app?.api else { return }
         do {
-            if notification.isChannelInvite, let channelId = notification.channelId {
+            if notification.kind == "friend_request", let requester = notification.requesterUserId {
+                try await api.removeFriend(friendId: requester)
+            } else if notification.kind == "bot_channel_invite",
+                      let channelId = notification.channelId,
+                      let botId = notification.botId {
+                try await api.declineBotChannelInvite(channelId: channelId, botId: botId)
+            } else if notification.isChannelInvite, let channelId = notification.channelId {
                 try await api.declineChannelInvite(channelId: channelId)
+            } else if let workspaceId = notification.workspaceId {
+                try await api.declineWorkspaceInvite(workspaceId: workspaceId)
             } else {
-                try await api.declineWorkspaceInvite(workspaceId: notification.workspaceId)
+                return
             }
             invites.removeAll { $0.id == notification.id }
             shell?.pendingInvites = invites.count
@@ -101,8 +120,25 @@ final class ActivityModel {
         switch event {
         case .message(_, let message), .messageDone(_, let message):
             if message.msgType == "permission" { ingest(message) }
+        case .notification(let notification):
+            invites.removeAll { $0.id == notification.id }
+            invites.insert(notification, at: 0)
+            shell?.pendingInvites = invites.count
+        case .notificationResolved(let id):
+            invites.removeAll { $0.id == id }
+            shell?.pendingInvites = invites.count
+        case .dmCreated:
+            Task { await conversations?.load() }
         default:
             break
+        }
+    }
+
+    private func refreshMembershipState() async {
+        await shell?.loadWorkspaces()
+        await conversations?.load()
+        if let channel = shell?.currentChannel {
+            await app?.chatModels.model(for: channel).refreshMembers()
         }
     }
 

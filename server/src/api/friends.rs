@@ -147,13 +147,16 @@ pub async fn add_friend(
     // blindly auto-accepting (the old behavior): a pending request the OTHER
     // user already sent me is accepted here (mutual); my own pending request is
     // idempotent; an accepted pair is a no-op.
-    if let Some(row) = sqlx::query("SELECT user_id, status FROM friendships WHERE pair_key = $1")
-        .bind(&pair)
-        .fetch_optional(&state.db)
-        .await?
+    if let Some(row) = sqlx::query(
+        "SELECT friendship_id, user_id, friend_id, status FROM friendships WHERE pair_key = $1",
+    )
+    .bind(&pair)
+    .fetch_optional(&state.db)
+    .await?
     {
         let status: String = row.try_get("status").unwrap_or_default();
         let requester: String = row.try_get("user_id").unwrap_or_default();
+        let friendship_id: String = row.try_get("friendship_id").unwrap_or_default();
         match status.as_str() {
             "accepted" => {
                 return Ok(Json(
@@ -168,6 +171,12 @@ pub async fn add_friend(
                 .bind(&pair)
                 .execute(&state.db)
                 .await?;
+                crate::api::notifications::resolve_notification(
+                    &state,
+                    &claims.sub,
+                    &format!("friend:{friendship_id}"),
+                )
+                .await;
                 return Ok(Json(
                     json!({"friend_id": body.friend_id, "status": "accepted"}),
                 ));
@@ -180,7 +189,7 @@ pub async fn add_friend(
         }
     }
     let friendship_id = Uuid::new_v4().to_string();
-    sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO friendships (friendship_id, user_id, friend_id, pair_key, status)
          VALUES ($1, $2, $3, $4, 'pending')
          ON CONFLICT (pair_key) DO NOTHING",
@@ -190,7 +199,16 @@ pub async fn add_friend(
     .bind(&body.friend_id)
     .bind(&pair)
     .execute(&state.db)
-    .await?;
+    .await?
+    .rows_affected();
+    if inserted > 0 {
+        crate::api::notifications::deliver_notification_by_id(
+            &state,
+            &body.friend_id,
+            &format!("friend:{friendship_id}"),
+        )
+        .await?;
+    }
     Ok(Json(
         json!({"friend_id": body.friend_id, "status": "pending"}),
     ))
@@ -204,10 +222,32 @@ pub async fn remove_friend(
     let friend_id = q
         .friend_id
         .ok_or_else(|| AppError::BadRequest("friend_id is required".into()))?;
+    let pair = pair_key(&claims.sub, &friend_id);
+    let existing = sqlx::query(
+        "SELECT friendship_id, user_id, friend_id FROM friendships WHERE pair_key = $1",
+    )
+    .bind(&pair)
+    .fetch_optional(&state.db)
+    .await?;
     sqlx::query("DELETE FROM friendships WHERE pair_key = $1")
-        .bind(pair_key(&claims.sub, &friend_id))
+        .bind(&pair)
         .execute(&state.db)
         .await?;
+    if let Some(row) = existing {
+        let id: String = row.try_get("friendship_id").unwrap_or_default();
+        let requester: String = row.try_get("user_id").unwrap_or_default();
+        let target: String = row.try_get("friend_id").unwrap_or_default();
+        crate::api::notifications::resolve_notification(&state, &target, &format!("friend:{id}"))
+            .await;
+        // Harmless for the requester (outgoing requests are not Activity items),
+        // but keeps every signed-in device converged if the model expands later.
+        crate::api::notifications::resolve_notification(
+            &state,
+            &requester,
+            &format!("friend:{id}"),
+        )
+        .await;
+    }
     Ok(Json(json!({"removed": true})))
 }
 
@@ -268,16 +308,22 @@ pub async fn accept_friend(
 ) -> Result<Json<Value>, AppError> {
     let updated = sqlx::query(
         "UPDATE friendships SET status='accepted', responded_at=NOW(), updated_at=NOW()
-         WHERE pair_key = $1 AND user_id = $2 AND friend_id = $3 AND status = 'pending'",
+         WHERE pair_key = $1 AND user_id = $2 AND friend_id = $3 AND status = 'pending'
+         RETURNING friendship_id",
     )
     .bind(pair_key(&claims.sub, &user_id))
     .bind(&user_id)
     .bind(&claims.sub)
-    .execute(&state.db)
+    .fetch_optional(&state.db)
     .await?;
-    if updated.rows_affected() == 0 {
-        return Err(AppError::NotFound);
-    }
+    let updated = updated.ok_or(AppError::NotFound)?;
+    let friendship_id: String = updated.try_get("friendship_id").unwrap_or_default();
+    crate::api::notifications::resolve_notification(
+        &state,
+        &claims.sub,
+        &format!("friend:{friendship_id}"),
+    )
+    .await;
     Ok(Json(json!({"friend_id": user_id, "status": "accepted"})))
 }
 
@@ -317,10 +363,29 @@ pub async fn block_user(
     if body.user_id == claims.sub {
         return Err(AppError::BadRequest("cannot block yourself".into()));
     }
+    let friendship_id: Option<String> =
+        sqlx::query_scalar("SELECT friendship_id FROM friendships WHERE pair_key = $1")
+            .bind(pair_key(&claims.sub, &body.user_id))
+            .fetch_optional(&state.db)
+            .await?;
     sqlx::query("DELETE FROM friendships WHERE pair_key = $1")
         .bind(pair_key(&claims.sub, &body.user_id))
         .execute(&state.db)
         .await?;
+    if let Some(id) = friendship_id {
+        crate::api::notifications::resolve_notification(
+            &state,
+            &claims.sub,
+            &format!("friend:{id}"),
+        )
+        .await;
+        crate::api::notifications::resolve_notification(
+            &state,
+            &body.user_id,
+            &format!("friend:{id}"),
+        )
+        .await;
+    }
     sqlx::query(
         "INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)
          ON CONFLICT DO NOTHING",

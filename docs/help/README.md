@@ -20,6 +20,7 @@ This directory contains user-facing, administrator-facing, and operations-facing
 | Local ACP agent (developer) | [Local Bot Setup Guide](本地Bot配置指南.md) | Host daemon: one TOML per bot, sidecar-file tokens, multi-bot management, full field reference, troubleshooting |
 | Anyone asking "what is a Bot?" | [MCP Cheers: Bots vs. Users](mcp-bot-vs-user.md) | The MCP tool surface, the bot auth chain, and how a Bot is the same as / different from a regular user |
 | Object storage operator | [RustFS Object Storage Guide](RustFS对象存储部署说明.md) | S3-compatible storage, bucket, and key setup |
+| CI/CD maintainer | [CI/CD Planning and Optimization Tool](CI_CD_TOOL.md) | Change-impact planning, workflow audits, run metrics, caching, and duplicate-run prevention |
 | Troubleshooter | [Troubleshooting Q&A](技术排查Q&A.md) | Health checks, logs, database, Bot no-response, preview failures |
 
 ## Current Defaults

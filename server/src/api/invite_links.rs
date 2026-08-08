@@ -390,6 +390,7 @@ pub async fn accept_invite_link(
     .fetch_optional(&state.db)
     .await?;
 
+    let was_pending = matches!(membership.as_deref(), Some(status) if status != "active");
     let already_member = match membership.as_deref() {
         Some("active") => true,
         Some(_) => {
@@ -445,6 +446,17 @@ pub async fn accept_invite_link(
             inserted == 0
         }
     };
+
+    if was_pending {
+        crate::api::notifications::resolve_notification(
+            &state,
+            &me,
+            &format!("workspace:{workspace_id}"),
+        )
+        .await;
+        crate::api::notifications::deliver_unlocked_channel_invites(&state, &me, &workspace_id)
+            .await?;
+    }
 
     // Channel-scoped link: drop the joiner into the public channel. Re-validated
     // at redeem time — the channel may have been deleted or flipped private since

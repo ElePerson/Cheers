@@ -21,28 +21,31 @@ jobs:
     permissions:
       contents: read
     outputs:
-      gateway: ${{ steps.filter.outputs.gateway }}
-      frontend: ${{ steps.filter.outputs.frontend }}
+      gateway: ${{ steps.plan.outputs.gateway }}
+      frontend: ${{ steps.plan.outputs.frontend }}
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Detect changed images
-        id: filter
-        uses: dorny/paths-filter@v3
         with:
-          filters: |
-            gateway:
-              - "server/**"
-              # The gateway image compiles the shared bridge-protocol crate
-              # (path dep) — a protocol change alone must rebuild it.
-              - "packages/cheers-acp-connector-rs/bridge-protocol/**"
-              - "docker-compose.yml.template"
-              - ".github/workflows/cd.yml"
-            frontend:
-              - "frontend/**"
-              - "docker-compose.yml.template"
-              - ".github/workflows/cd.yml"
+          fetch-depth: 0
+
+      - name: Plan changed images
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          FORCE_ALL: ${{ github.ref_type == 'tag' }}
+        run: |
+          args=(
+            plan
+            --workflow cd
+            --base "$BASE_SHA"
+            --head "$HEAD_SHA"
+            --github-output "$GITHUB_OUTPUT"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+          if [ "$FORCE_ALL" = "true" ]; then args+=(--force-all); fi
+          python3 scripts/ci_tool.py "${args[@]}"
 
   # ─────────────────────────────────────────────
   # Build & push Docker images
@@ -95,8 +98,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=gateway-image
+          cache-to: type=gha,mode=max,scope=gateway-image
 
   build-frontend:
     name: Build Frontend Image
@@ -144,8 +147,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=frontend-image
+          cache-to: type=gha,mode=max,scope=frontend-image
 
   # ─────────────────────────────────────────────
   # Deploy to the production server (Hetzner) via SSH.

@@ -121,6 +121,42 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(channel.displayName, "Unknown participant")
     }
 
+    func testActivityNotificationDecodesAllBotApprovalFields() throws {
+        let data = Data("""
+        {
+          "id":"bot-channel:channel-1:bot-1",
+          "kind":"bot_channel_invite",
+          "title":"private-planning",
+          "actor_id":"user-1",
+          "actor_name":"Ada",
+          "created_at":"2026-08-08T00:00:00Z",
+          "workspace_id":"workspace-1",
+          "channel_id":"channel-1",
+          "bot_id":"bot-1",
+          "bot_name":"Planner",
+          "role":"member",
+          "requested_cwd":"/repo",
+          "requested_additional_dirs":["/docs"]
+        }
+        """.utf8)
+
+        let notification = try JSONDecoder().decode(NotificationDto.self, from: data)
+
+        XCTAssertEqual(notification.id, "bot-channel:channel-1:bot-1")
+        XCTAssertEqual(notification.botName, "Planner")
+        XCTAssertEqual(notification.requestedCwd, "/repo")
+        XCTAssertEqual(notification.requestedAdditionalDirs, ["/docs"])
+    }
+
+    func testActivityPushRoutesWithoutAChannelId() {
+        let destination = PushRouter.destination(from: [
+            "type": "activity",
+            "notification_id": "friend:request-1",
+        ])
+
+        XCTAssertEqual(destination, .activity)
+    }
+
     func testApprovalUsesClaudeRawInputAndLocations() throws {
         let request = try permissionRequest("""
         {
