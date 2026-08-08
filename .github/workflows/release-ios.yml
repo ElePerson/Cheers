@@ -30,7 +30,7 @@ jobs:
           echo "key=$XCODE_CACHE_KEY" >> "$GITHUB_OUTPUT"
 
       - name: Cache SwiftPM packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/cheers-swiftpm-release
           key: ios-release-spm-${{ runner.os }}-${{ steps.xcode-cache.outputs.key }}-${{ hashFiles('apps/ios/Cheers.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
