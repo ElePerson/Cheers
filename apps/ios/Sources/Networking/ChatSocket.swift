@@ -374,6 +374,20 @@ final class ChatSocket: NSObject {
         enum CodingKeys: String, CodingKey { case channelId = "channel_id" }
     }
 
+    private struct DMNotificationPayload: Decodable {
+        let kind: String
+        let channelId: String
+        enum CodingKeys: String, CodingKey { case kind; case channelId = "channel_id" }
+    }
+
+    static func directMessageChannelId(fromNotificationFrame data: Data) -> String? {
+        guard let payload = try? JSONDecoder().decode(
+            DataEnvelope<DMNotificationPayload>.self,
+            from: data
+        ), payload.data.kind == "dm" else { return nil }
+        return payload.data.channelId
+    }
+
     private func handleFrame(_ text: String) {
         guard let data = text.data(using: .utf8),
               let head = try? JSONDecoder().decode(FrameHead.self, from: data) else { return }
@@ -450,8 +464,8 @@ final class ChatSocket: NSObject {
         case "notification":
             if let payload = try? JSONDecoder().decode(DataEnvelope<NotificationDto>.self, from: data) {
                 onEvent?(.notification(payload.data))
-            } else if let dm = try? JSONDecoder().decode(DataEnvelope<DMCreatedPayload>.self, from: data) {
-                onEvent?(.dmCreated(channelId: dm.data.channelId))
+            } else if let channelId = Self.directMessageChannelId(fromNotificationFrame: data) {
+                onEvent?(.dmCreated(channelId: channelId))
             }
         case "notification_resolved":
             if let payload = try? JSONDecoder().decode(DataEnvelope<NotificationResolvedPayload>.self, from: data) {

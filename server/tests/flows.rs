@@ -1297,6 +1297,129 @@ async fn stale_workspace_decline_keeps_unlocked_channel_invites(db: PgPool) {
     assert_eq!(remaining, 0, "a real decline consumes queued invites");
 }
 
+#[sqlx::test]
+async fn workspace_detach_atomically_cleans_access_but_preserves_dm_membership(db: PgPool) {
+    let workspace = seed_workspace(&db).await;
+    let channel = seed_channel(&db, workspace).await;
+    let user = seed_user(&db).await;
+    add_member(&db, channel, user, "user").await;
+
+    sqlx::query(
+        "INSERT INTO channel_invites (channel_id, user_id, role)
+         VALUES ($1, $2, 'member')",
+    )
+    .bind(channel.to_string())
+    .bind(user.to_string())
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let dm = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channels (channel_id, workspace_id, name, type)
+         VALUES ($1, $2, 'Direct Message', 'dm')",
+    )
+    .bind(dm.to_string())
+    .bind(workspace.to_string())
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO channel_memberships (channel_id, member_id, member_type, role)
+         VALUES ($1, $2, 'user', 'member')",
+    )
+    .bind(dm.to_string())
+    .bind(user.to_string())
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let detached = workspaces::detach_member(&db, &workspace.to_string(), &user.to_string())
+        .await
+        .unwrap();
+    assert_eq!(detached.channel_ids, vec![channel.to_string()]);
+    assert_eq!(detached.invite_channel_ids, vec![channel.to_string()]);
+
+    let workspace_membership: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2",
+    )
+    .bind(workspace.to_string())
+    .bind(user.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    let channel_membership: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM channel_memberships WHERE channel_id = $1 AND member_id = $2",
+    )
+    .bind(channel.to_string())
+    .bind(user.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    let dm_membership: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM channel_memberships WHERE channel_id = $1 AND member_id = $2",
+    )
+    .bind(dm.to_string())
+    .bind(user.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    let pending_invites: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM channel_invites WHERE channel_id = $1 AND user_id = $2",
+    )
+    .bind(channel.to_string())
+    .bind(user.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
+
+    assert_eq!(workspace_membership, 0);
+    assert_eq!(channel_membership, 0);
+    assert_eq!(pending_invites, 0);
+    assert_eq!(dm_membership, 1, "DM membership is an explicit exception");
+}
+
+#[sqlx::test]
+async fn concurrent_workspace_owner_leaves_keep_one_active_owner(db: PgPool) {
+    let workspace = seed_workspace(&db).await;
+    let first = seed_user(&db).await;
+    let second = seed_user(&db).await;
+    for owner in [first, second] {
+        sqlx::query(
+            "INSERT INTO workspace_memberships (workspace_id, user_id, role, status)
+             VALUES ($1, $2, 'owner', 'active')",
+        )
+        .bind(workspace.to_string())
+        .bind(owner.to_string())
+        .execute(&db)
+        .await
+        .unwrap();
+    }
+
+    let workspace_id = workspace.to_string();
+    let first_id = first.to_string();
+    let second_id = second.to_string();
+    let (first_result, second_result) = tokio::join!(
+        workspaces::detach_member(&db, &workspace_id, &first_id),
+        workspaces::detach_member(&db, &workspace_id, &second_id),
+    );
+    assert_eq!(
+        usize::from(first_result.is_ok()) + usize::from(second_result.is_ok()),
+        1,
+        "exactly one concurrent owner leave must commit"
+    );
+
+    let active_owners: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workspace_memberships
+         WHERE workspace_id = $1 AND role = 'owner' AND status = 'active'",
+    )
+    .bind(workspace_id)
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(active_owners, 1);
+}
+
 // M3 inbox_open(channel.files.read):按 channel_id 限定作用域(修了「永 404」+ 防跨频道猜读),
 // 图片等二进制返回 kind:"binary" 不伪装文本(S3 未初始化时走该分支,无需对象存储)。
 #[sqlx::test]

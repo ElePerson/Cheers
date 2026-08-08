@@ -270,7 +270,9 @@ export function ChannelSettingsDialog({
                       <span className="ml-1.5 text-[10px] text-amber-400/90">
                         {m.status === "pending_owner"
                           ? "Waiting for owner"
-                          : "Pending"}
+                          : m.status === "pending_workspace"
+                            ? "Waiting for workspace"
+                            : "Pending"}
                       </span>
                     )}
                   </p>

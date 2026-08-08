@@ -959,7 +959,7 @@ struct BotMonitoringUpdate: Encodable {
 struct ChannelMemberDto: Decodable, Identifiable, Hashable {
     let memberId: String
     let memberType: String
-    /// active | pending | pending_owner.
+    /// active | pending | pending_workspace | pending_owner.
     let status: String?
     let role: String?
     let username: String?
