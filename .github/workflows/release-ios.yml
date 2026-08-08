@@ -23,6 +23,20 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Read Xcode cache key
+        id: xcode-cache
+        run: |
+          XCODE_CACHE_KEY="$(xcodebuild -version | paste -sd- - | tr ' /' '--')"
+          echo "key=$XCODE_CACHE_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Cache SwiftPM packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cheers-swiftpm-release
+          key: ios-release-spm-${{ runner.os }}-${{ steps.xcode-cache.outputs.key }}-${{ hashFiles('apps/ios/Cheers.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: |
+            ios-release-spm-${{ runner.os }}-${{ steps.xcode-cache.outputs.key }}-
+
       - name: Prepare signing material
         env:
           P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12 }}
@@ -66,6 +80,7 @@ jobs:
             -configuration Release \
             -destination "generic/platform=iOS" \
             -archivePath "$RUNNER_TEMP/Cheers.xcarchive" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/cheers-swiftpm-release" \
             archive \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \

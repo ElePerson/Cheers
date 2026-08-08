@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop, "feat/**", "fix/**"]
+    # Feature branches are validated by pull_request. Running both push and PR
+    # for the same SHA duplicated the complete iOS job (~7 minutes each).
+    branches: [main, develop]
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
@@ -21,50 +23,54 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
     outputs:
-      gateway: ${{ steps.filter.outputs.gateway }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      plugin: ${{ steps.filter.outputs.plugin }}
-      desktop: ${{ steps.filter.outputs.desktop }}
-      ios: ${{ steps.filter.outputs.ios }}
+      gateway: ${{ steps.plan.outputs.gateway }}
+      frontend: ${{ steps.plan.outputs.frontend }}
+      plugin: ${{ steps.plan.outputs.plugin }}
+      desktop: ${{ steps.plan.outputs.desktop }}
+      ios: ${{ steps.plan.outputs.ios }}
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Detect changed areas
-        id: filter
-        uses: dorny/paths-filter@v3
         with:
-          filters: |
-            gateway:
-              - "server/**"
-              # The gateway's frame constructors are pinned to the shared
-              # bridge-protocol golden fixtures — a fixture edit must re-run
-              # gateway tests too.
-              - "packages/cheers-acp-connector-rs/bridge-protocol/**"
-              - ".github/workflows/ci.yml"
-            frontend:
-              - "frontend/**"
-              - ".github/workflows/ci.yml"
-            plugin:
-              - "packages/cheers-acp-connector-rs/**"
-              - "packages/cheers-mcp-server/**"
-              - ".github/workflows/ci.yml"
-            desktop:
-              - "apps/macos/**"
-              - ".github/workflows/ci.yml"
-            ios:
-              - "apps/ios/**"
-              - "scripts/check-pbxproj.py"
-              - ".github/workflows/ci.yml"
+          # The planner compares the exact push or pull-request revisions. Full
+          # history avoids incorrect partial plans after multi-commit pushes.
+          fetch-depth: 0
+
+      - name: Test and audit CI/CD planner
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_ci_tool.py'
+          python3 scripts/ci_tool.py audit
+
+      - name: Plan affected checks
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          IS_PULL_REQUEST: ${{ github.event_name == 'pull_request' }}
+          FORCE_ALL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          args=(
+            plan
+            --workflow ci
+            --base "$BASE_SHA"
+            --head "$HEAD_SHA"
+            --github-output "$GITHUB_OUTPUT"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+          if [ "$IS_PULL_REQUEST" = "true" ]; then args+=(--merge-base); fi
+          if [ "$FORCE_ALL" = "true" ]; then args+=(--force-all); fi
+          python3 scripts/ci_tool.py "${args[@]}"
 
   # ─────────────────────────────────────────────
-  # Gateway (Rust): build + test
+  # Gateway (Rust): fast contract check. This required status stays separate
+  # for branch-protection compatibility, while compilation and every test run
+  # once in the Postgres job below.
   # ─────────────────────────────────────────────
   gateway-check:
     name: Gateway Check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: changes
     if: needs.changes.outputs.gateway == 'true' || github.event_name == 'workflow_dispatch'
     defaults:
@@ -77,38 +83,20 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: rustfmt
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: server
-
-      # The other Rust crates gate on fmt; the gateway didn't, so CLAUDE.md's
-      # "run cargo fmt --check before pushing" was unenforced here. Runs before
-      # the build so a formatting-only failure reports in seconds.
+      # Fail in seconds before the compile-heavy test job completes.
       - name: Format
         run: cargo fmt --check
 
-      - name: Build
-        run: cargo build
-
-      - name: Test
-        run: cargo test
-
-      # 骨架阶段有已知 warnings；clippy 仅作信息，不阻塞。
-      - name: Clippy (non-blocking)
-        run: cargo clippy --all-targets || true
-
   # ─────────────────────────────────────────────
-  # Gateway (Rust): white-box integration tests (R4-2) against a real Postgres.
-  # The suite is feature-gated (`#![cfg(feature = "integration")]`), so the plain
-  # `cargo test` in gateway-check compiles zero of these — this job is the only
-  # place the I1/I2/I4/I6 + R5 invariants are actually exercised against Postgres.
+  # Gateway (Rust): compile once, then run unit + integration tests against a
+  # real Postgres. Keeping this job name preserves existing required checks.
   # ─────────────────────────────────────────────
   gateway-integration:
     name: Gateway Integration (Postgres)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: changes
     if: needs.changes.outputs.gateway == 'true' || github.event_name == 'workflow_dispatch'
     defaults:
@@ -142,14 +130,22 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: server
 
-      - name: Integration tests (real Postgres)
-        run: cargo test --features integration --test flows
+      # One feature-enabled invocation compiles the gateway once and runs its
+      # unit, doc, and Postgres-backed integration suites.
+      - name: Unit and integration tests (real Postgres)
+        run: cargo test --features integration
+
+      # Known warnings remain informational, but reuse the artifacts above.
+      - name: Clippy (non-blocking)
+        run: cargo clippy --all-targets --features integration || true
 
   # ─────────────────────────────────────────────
   # Frontend: type-check + build
@@ -157,6 +153,7 @@ jobs:
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: changes
     if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
     defaults:
@@ -176,15 +173,29 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: Type-check & build
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
         run: npm run build
 
       # The production image uses the repository root as its context so it can
       # include the authoritative policy pages from website/. A plain Vite build
       # cannot catch stale COPY paths between Docker stages.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build production image
-        working-directory: .
-        run: docker build --file frontend/Dockerfile --tag cheers-frontend:ci .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./frontend/Dockerfile
+          push: false
+          cache-from: type=gha,scope=frontend-image
+          cache-to: type=gha,mode=max,scope=frontend-image
 
   # ─────────────────────────────────────────────
   # Agent packages: Rust connector/MCP binaries
@@ -192,6 +203,7 @@ jobs:
   plugin-build:
     name: Agent Package Check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: changes
     if: needs.changes.outputs.plugin == 'true' || github.event_name == 'workflow_dispatch'
 
@@ -231,6 +243,7 @@ jobs:
     # macos-14: the Tauri crate needs Apple frameworks; no `tauri build` in CI
     # (slow, and unsigned artifacts aren't shippable anyway) — fmt + check only.
     runs-on: macos-14
+    timeout-minutes: 15
     needs: changes
     if: needs.changes.outputs.desktop == 'true' || github.event_name == 'workflow_dispatch'
 
