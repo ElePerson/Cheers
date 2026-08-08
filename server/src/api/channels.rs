@@ -4,10 +4,13 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sqlx::Row;
+use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
-use crate::{api::middleware::Claims, app_state::AppState, errors::AppError};
+use crate::{
+    api::middleware::Claims, app_state::AppState, errors::AppError,
+    gateway::realtime::frame::WireFrame,
+};
 
 #[derive(Serialize)]
 pub struct ChannelDto {
@@ -348,12 +351,10 @@ pub async fn create_dm(
     .await?;
     let channel_id = opened.channel_id;
     if opened.created && !is_bot {
-        crate::api::notifications::broadcast_user_notification(
-            &state,
-            &target_id.to_string(),
-            json!({ "kind": "dm_created", "channel_id": channel_id }),
-        )
-        .await;
+        state
+            .fanout
+            .broadcast_user(target_id, dm_created_frame(channel_id))
+            .await;
     }
     let row = sqlx::query(
         "SELECT channel_id, workspace_id, name, avatar_url, type, kind, purpose, auto_assist,
@@ -364,6 +365,18 @@ pub async fn create_dm(
     .fetch_one(&state.db)
     .await?;
     Ok(Json(dto(row)))
+}
+
+fn dm_created_frame(channel_id: Uuid) -> WireFrame {
+    WireFrame::user("dm_created", json!({ "channel_id": channel_id }))
+}
+
+fn bot_add_requires_session_create(
+    caller_is_owner: bool,
+    legacy_admin: bool,
+    platform_admin: bool,
+) -> bool {
+    !caller_is_owner && !legacy_admin && !platform_admin
 }
 
 /// GET /api/v1/channels/dm — the caller's DMs (type='dm' channels they're a member of).
@@ -974,6 +987,41 @@ async fn bind_bot_to_channel(
     cwd: Option<String>,
     additional_dirs: Vec<String>,
 ) -> Result<(), AppError> {
+    let bot_uuid = Uuid::parse_str(bot_id)
+        .map_err(|_| AppError::BadRequest("member_id must be a bot uuid".into()))?;
+    let provider_account_id =
+        crate::domain::messages::resolve_provider_account_id_for_bot(&state.db, bot_uuid)
+            .await
+            .unwrap_or_else(|_| bot_id.to_string());
+    let mut tx = state.db.begin().await?;
+    bind_bot_to_channel_tx(
+        &mut tx,
+        channel_id,
+        bot_id,
+        &provider_account_id,
+        role,
+        added_by,
+        cwd,
+        additional_dirs,
+    )
+    .await?;
+    tx.commit().await?;
+    if let Ok(cid) = Uuid::parse_str(channel_id) {
+        crate::gateway::presence::broadcast_presence(state, cid).await;
+    }
+    Ok(())
+}
+
+async fn bind_bot_to_channel_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    channel_id: &str,
+    bot_id: &str,
+    provider_account_id: &str,
+    role: &str,
+    added_by: &str,
+    cwd: Option<String>,
+    additional_dirs: Vec<String>,
+) -> Result<(), AppError> {
     let written = sqlx::query(
         "INSERT INTO channel_memberships (channel_id, member_id, member_type, role, added_by)
          VALUES ($1, $2, 'bot', $3, $4)
@@ -984,7 +1032,7 @@ async fn bind_bot_to_channel(
     .bind(bot_id)
     .bind(role)
     .bind(added_by)
-    .execute(&state.db)
+    .execute(&mut **tx)
     .await?
     .rows_affected();
     if written == 0 {
@@ -994,22 +1042,15 @@ async fn bind_bot_to_channel(
     }
     let bot_uuid = Uuid::parse_str(bot_id)
         .map_err(|_| AppError::BadRequest("member_id must be a bot uuid".into()))?;
-    let provider_account_id =
-        crate::domain::messages::resolve_provider_account_id_for_bot(&state.db, bot_uuid)
-            .await
-            .unwrap_or_else(|_| bot_id.to_string());
-    crate::domain::sessions::ensure_primary_session_workspace(
-        &state.db,
+    crate::domain::sessions::ensure_primary_session_workspace_tx(
+        tx,
         bot_uuid,
-        &provider_account_id,
+        provider_account_id,
         channel_id,
         cwd.as_deref(),
         &additional_dirs,
     )
     .await?;
-    if let Ok(cid) = Uuid::parse_str(channel_id) {
-        crate::gateway::presence::broadcast_presence(state, cid).await;
-    }
     Ok(())
 }
 
@@ -1066,9 +1107,9 @@ pub async fn add_channel_member(
             ));
         }
         let caller_is_owner = owner_id.as_deref() == Some(claims.sub.as_str());
-        let legacy_admin =
-            owner_id.is_none() && matches!(claims.role.as_str(), "system_admin" | "admin");
-        if !caller_is_owner && !legacy_admin {
+        let platform_admin = matches!(claims.role.as_str(), "system_admin" | "admin");
+        let legacy_admin = owner_id.is_none() && platform_admin;
+        if bot_add_requires_session_create(caller_is_owner, legacy_admin, platform_admin) {
             let caller_role = caller_channel_role(&state, &channel_id, &claims.sub).await;
             let allowed = crate::domain::acp_policy::allows(
                 &state.db,
@@ -1518,41 +1559,87 @@ pub async fn accept_bot_channel_invite(
         .unwrap_or_default();
     let bot_uuid =
         Uuid::parse_str(&bot_id).map_err(|_| AppError::BadRequest("invalid bot id".into()))?;
+    let invite_signature = (
+        role.clone(),
+        invited_by.clone(),
+        cwd.clone(),
+        dirs_value.clone(),
+    );
     let (cwd, additional_dirs) = if cwd.is_some() || !additional_dirs.is_empty() {
         crate::api::workspace::validate_workspace_paths(&state, bot_uuid, cwd, additional_dirs)
             .await?
     } else {
         (None, Vec::new())
     };
+    let provider_account_id =
+        crate::domain::messages::resolve_provider_account_id_for_bot(&state.db, bot_uuid)
+            .await
+            .unwrap_or_else(|_| bot_id.clone());
 
-    if let Err(error) = bind_bot_to_channel(
-        &state,
+    let mut tx = state.db.begin().await?;
+    let locked = sqlx::query(
+        "SELECT bci.role, bci.invited_by, bci.cwd, bci.additional_dirs,
+                b.is_disabled
+         FROM bot_channel_invites bci
+         JOIN bot_accounts b ON b.bot_id = bci.bot_id
+         WHERE bci.channel_id = $1 AND bci.bot_id = $2
+           AND bci.owner_user_id = $3 AND b.created_by = $3
+         FOR UPDATE OF bci, b",
+    )
+    .bind(&channel_id)
+    .bind(&bot_id)
+    .bind(&claims.sub)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    if locked.try_get::<bool, _>("is_disabled").unwrap_or(false) {
+        return Err(AppError::BadRequest("disabled bot cannot be added".into()));
+    }
+    let locked_signature = (
+        locked
+            .try_get::<String, _>("role")
+            .unwrap_or_else(|_| "member".into()),
+        locked
+            .try_get::<String, _>("invited_by")
+            .unwrap_or_else(|_| claims.sub.clone()),
+        locked.try_get::<Option<String>, _>("cwd").ok().flatten(),
+        locked
+            .try_get::<Value, _>("additional_dirs")
+            .unwrap_or_else(|_| json!([])),
+    );
+    if locked_signature != invite_signature {
+        return Err(AppError::Conflict(
+            "bot invitation changed while it was being accepted; retry".into(),
+        ));
+    }
+
+    bind_bot_to_channel_tx(
+        &mut tx,
         &channel_id,
         &bot_id,
+        &provider_account_id,
         &role,
         &invited_by,
         cwd,
         additional_dirs,
     )
-    .await
-    {
-        // A failed session materialization must not leave a half-bound bot.
-        sqlx::query(
-            "DELETE FROM channel_memberships
-             WHERE channel_id = $1 AND member_id = $2 AND member_type = 'bot'",
-        )
-        .bind(&channel_id)
-        .bind(&bot_id)
-        .execute(&state.db)
-        .await
-        .ok();
-        return Err(error);
+    .await?;
+    let deleted =
+        sqlx::query("DELETE FROM bot_channel_invites WHERE channel_id = $1 AND bot_id = $2")
+            .bind(&channel_id)
+            .bind(&bot_id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+    if deleted != 1 {
+        return Err(AppError::Conflict(
+            "bot invitation was already resolved".into(),
+        ));
     }
-    sqlx::query("DELETE FROM bot_channel_invites WHERE channel_id = $1 AND bot_id = $2")
-        .bind(&channel_id)
-        .bind(&bot_id)
-        .execute(&state.db)
-        .await?;
+    tx.commit().await?;
+    if let Ok(cid) = Uuid::parse_str(&channel_id) {
+        crate::gateway::presence::broadcast_presence(&state, cid).await;
+    }
     crate::api::notifications::resolve_notification(
         &state,
         &claims.sub,
@@ -1593,6 +1680,26 @@ pub async fn decline_bot_channel_invite(
     )
     .await;
     Ok(Json(json!({ "declined": true })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dm_created_is_a_top_level_realtime_event() {
+        let channel_id = Uuid::new_v4();
+        let frame = dm_created_frame(channel_id);
+
+        assert_eq!(frame.frame_type, "dm_created");
+        assert_eq!(frame.data["channel_id"], channel_id.to_string());
+    }
+
+    #[test]
+    fn platform_admin_can_request_owned_bot_approval_without_a_grant() {
+        assert!(!bot_add_requires_session_create(false, false, true));
+        assert!(bot_add_requires_session_create(false, false, false));
+    }
 }
 
 /// Revoke a user's channel-scoped ACP approval authority when they leave / are

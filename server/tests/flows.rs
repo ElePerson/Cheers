@@ -1191,6 +1191,112 @@ async fn non_dm_human_membership_requires_active_workspace_but_dm_is_exempt(db: 
     );
 }
 
+#[sqlx::test]
+async fn deferred_workspace_invariant_allows_transient_invalid_rows(db: PgPool) {
+    let workspace = seed_workspace(&db).await;
+    let channel = seed_channel(&db, workspace).await;
+    let user = seed_user(&db).await;
+
+    let mut tx = db.begin().await.unwrap();
+    sqlx::query(
+        "INSERT INTO channel_memberships (channel_id, member_id, member_type, role)
+         VALUES ($1, $2, 'user', 'member')",
+    )
+    .bind(channel.to_string())
+    .bind(user.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "DELETE FROM channel_memberships
+         WHERE channel_id = $1 AND member_id = $2",
+    )
+    .bind(channel.to_string())
+    .bind(user.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    tx.commit()
+        .await
+        .expect("the deferred check must inspect final state, not the old row");
+}
+
+#[sqlx::test]
+async fn stale_workspace_decline_keeps_unlocked_channel_invites(db: PgPool) {
+    let workspace = seed_workspace(&db).await;
+    let channel = seed_channel(&db, workspace).await;
+    let user = seed_user(&db).await;
+
+    sqlx::query(
+        "INSERT INTO workspace_memberships (workspace_id, user_id, role, status)
+         VALUES ($1, $2, 'member', 'pending')",
+    )
+    .bind(workspace.to_string())
+    .bind(user.to_string())
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO channel_invites (channel_id, user_id, role)
+         VALUES ($1, $2, 'member')",
+    )
+    .bind(channel.to_string())
+    .bind(user.to_string())
+    .execute(&db)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "UPDATE workspace_memberships SET status = 'active'
+         WHERE workspace_id = $1 AND user_id = $2",
+    )
+    .bind(workspace.to_string())
+    .bind(user.to_string())
+    .execute(&db)
+    .await
+    .unwrap();
+    let stale =
+        workspaces::decline_pending_invite(&db, &workspace.to_string(), &user.to_string()).await;
+    assert!(
+        matches!(stale, Err(server::errors::AppError::NotFound)),
+        "a stale decline must lose to the completed acceptance"
+    );
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM channel_invites WHERE channel_id = $1 AND user_id = $2",
+    )
+    .bind(channel.to_string())
+    .bind(user.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(remaining, 1, "the unlocked channel invite must survive");
+
+    sqlx::query(
+        "UPDATE workspace_memberships SET status = 'pending'
+         WHERE workspace_id = $1 AND user_id = $2",
+    )
+    .bind(workspace.to_string())
+    .bind(user.to_string())
+    .execute(&db)
+    .await
+    .unwrap();
+    let removed =
+        workspaces::decline_pending_invite(&db, &workspace.to_string(), &user.to_string())
+            .await
+            .unwrap();
+    assert_eq!(removed, vec![channel.to_string()]);
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM channel_invites WHERE channel_id = $1 AND user_id = $2",
+    )
+    .bind(channel.to_string())
+    .bind(user.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(remaining, 0, "a real decline consumes queued invites");
+}
+
 // M3 inbox_open(channel.files.read):按 channel_id 限定作用域(修了「永 404」+ 防跨频道猜读),
 // 图片等二进制返回 kind:"binary" 不伪装文本(S3 未初始化时走该分支,无需对象存储)。
 #[sqlx::test]

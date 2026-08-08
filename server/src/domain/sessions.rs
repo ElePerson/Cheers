@@ -1,6 +1,6 @@
 use chrono::Utc;
 use serde_json::{json, Value};
-use sqlx::{PgPool, Row};
+use sqlx::{Executor, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::errors::AppError;
@@ -259,6 +259,30 @@ pub async fn ensure_primary_session_workspace(
     cwd: Option<&str>,
     additional_dirs: &[String],
 ) -> Result<SessionHandle, AppError> {
+    let mut tx = db.begin().await.map_err(AppError::Db)?;
+    let handle = ensure_primary_session_workspace_tx(
+        &mut tx,
+        bot_id,
+        provider_account_id,
+        channel_id,
+        cwd,
+        additional_dirs,
+    )
+    .await?;
+    tx.commit().await.map_err(AppError::Db)?;
+    Ok(handle)
+}
+
+/// Transactional variant used when adding a bot and materializing its primary
+/// session must commit atomically with the channel membership.
+pub async fn ensure_primary_session_workspace_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    bot_id: Uuid,
+    provider_account_id: &str,
+    channel_id: &str,
+    cwd: Option<&str>,
+    additional_dirs: &[String],
+) -> Result<SessionHandle, AppError> {
     let provider_account_id = provider_account_id.trim();
     if provider_account_id.is_empty() {
         return Err(AppError::BadRequest(
@@ -296,7 +320,7 @@ pub async fn ensure_primary_session_workspace(
     .bind(SESSION_STATUS_IDLE)
     .bind(now)
     .bind(metadata)
-    .fetch_one(db)
+    .fetch_one(&mut **tx)
     .await
     .map_err(AppError::Db)?;
 
@@ -306,12 +330,25 @@ pub async fn ensure_primary_session_workspace(
     // (re)bind the deterministic session as primary when no live primary binding
     // exists for this scope. When the deterministic session already IS the
     // primary, the upsert would be a no-op anyway.
-    if resolve_primary_session(db, bot_id, channel_id)
-        .await?
-        .is_none()
-    {
+    let has_live_primary: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM cheers_session_bindings b
+            JOIN cheers_sessions s ON s.session_id = b.session_id
+            WHERE b.bot_id = $1 AND b.scope_type = $2 AND b.scope_id = $3
+              AND b.role = 'primary'
+              AND s.status NOT IN ('terminated', 'revoked', 'expired')
+        )",
+    )
+    .bind(bot_id.to_string())
+    .bind(SESSION_SCOPE_CHANNEL)
+    .bind(channel_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(AppError::Db)?;
+    if !has_live_primary {
         upsert_session_binding(
-            db,
+            &mut **tx,
             &session_uuid,
             bot_id,
             provider_account_id,
@@ -640,8 +677,8 @@ pub async fn close_channel_session(
     Ok(())
 }
 
-async fn upsert_session_binding(
-    db: &PgPool,
+async fn upsert_session_binding<'e, E>(
+    db: E,
     session_id: &Uuid,
     bot_id: Uuid,
     provider_account_id: &str,
@@ -649,7 +686,10 @@ async fn upsert_session_binding(
     scope_id: &str,
     task_id: Option<String>,
     role: &str,
-) -> Result<(), AppError> {
+) -> Result<(), AppError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
     let (channel_id, binding_task_id) = scope_columns(scope_type, scope_id, task_id.as_deref());
     // Conflict target is `uq_cheers_session_binding_session_scope` (session_id,
     // scope_type, scope_id) — this session's OWN prior binding to this scope,
