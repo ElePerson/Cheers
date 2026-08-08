@@ -54,6 +54,56 @@ pub async fn get_or_create_personal_workspace(
     parse_ws(existing)
 }
 
+/// Decline a still-pending workspace invitation and consume any channel
+/// invitations queued behind it. Keeping both deletes in one transaction makes
+/// a stale decline harmless when another device has already accepted the
+/// workspace invitation.
+pub async fn decline_pending_invite(
+    db: &PgPool,
+    workspace_id: &str,
+    user_id: &str,
+) -> Result<Vec<String>, AppError> {
+    let mut tx = db.begin().await.map_err(AppError::Db)?;
+    let deleted = sqlx::query(
+        "DELETE FROM workspace_memberships
+         WHERE workspace_id = $1 AND user_id = $2 AND status = 'pending'",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Db)?
+    .rows_affected();
+    if deleted == 0 {
+        return Err(AppError::NotFound);
+    }
+
+    let channel_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT ci.channel_id
+         FROM channel_invites ci
+         JOIN channels c ON c.channel_id = ci.channel_id
+         WHERE ci.user_id = $1 AND c.workspace_id = $2",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+    sqlx::query(
+        "DELETE FROM channel_invites
+         WHERE user_id = $1
+           AND channel_id IN (SELECT channel_id FROM channels WHERE workspace_id = $2)",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Db)?;
+    tx.commit().await.map_err(AppError::Db)?;
+
+    Ok(channel_ids)
+}
+
 fn parse_ws(s: String) -> Result<Uuid, AppError> {
     Uuid::parse_str(&s).map_err(|_| AppError::Internal("invalid workspace_id".into()))
 }

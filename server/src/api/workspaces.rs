@@ -505,15 +505,17 @@ pub async fn decline_invite(
     Extension(claims): Extension<Claims>,
     Path(workspace_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    sqlx::query(
-        "DELETE FROM workspace_memberships
-         WHERE workspace_id = $1 AND user_id = $2 AND status = 'pending'",
-    )
-    .bind(&workspace_id)
-    .bind(current_user_id(&claims))
-    .execute(&state.db)
-    .await?;
-    purge_channel_invites_in_workspace(&state, &workspace_id, &claims.sub).await?;
+    let channel_ids =
+        crate::domain::workspaces::decline_pending_invite(&state.db, &workspace_id, &claims.sub)
+            .await?;
+    for channel_id in channel_ids {
+        crate::api::notifications::resolve_notification(
+            &state,
+            &claims.sub,
+            &format!("channel:{channel_id}"),
+        )
+        .await;
+    }
     crate::api::notifications::resolve_notification(
         &state,
         &claims.sub,

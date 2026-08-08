@@ -161,7 +161,20 @@ impl PushKind {
             Self::BotReply { channel_id, .. } => format!("bot-reply:{channel_id}"),
             Self::Activity {
                 notification_id, ..
-            } => format!("activity:{notification_id}"),
+            } => {
+                let raw = format!("activity:{notification_id}");
+                if raw.len() <= 64 {
+                    raw
+                } else {
+                    // APNs rejects collapse identifiers longer than 64 bytes.
+                    // Keep the full notification id in `custom()` for routing,
+                    // and use a deterministic digest only for transport dedupe.
+                    format!(
+                        "activity:{}",
+                        &crate::infra::crypto::sha256_hex(notification_id)[..48]
+                    )
+                }
+            }
         }
     }
 
@@ -694,5 +707,18 @@ mod tests {
         assert_eq!(first.custom()["type"], "activity");
         assert_eq!(first.custom()["notification_id"], "friend:one");
         assert_eq!(first.kind_label(), "activity");
+    }
+
+    #[test]
+    fn long_activity_identity_uses_apns_safe_collapse_id() {
+        let notification_id = format!("bot-channel:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+        let kind = PushKind::Activity {
+            notification_id: notification_id.clone(),
+            title: "Bot invitation".into(),
+            body: "Open Activity".into(),
+        };
+
+        assert!(kind.collapse_id().len() <= 64);
+        assert_eq!(kind.custom()["notification_id"], notification_id);
     }
 }
