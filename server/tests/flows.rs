@@ -85,6 +85,19 @@ async fn add_member_role(
     member_type: &str,
     role: &str,
 ) {
+    if member_type == "user" {
+        sqlx::query(
+            "INSERT INTO workspace_memberships (workspace_id, user_id, role, status)
+             SELECT workspace_id, $2, 'member', 'active' FROM channels WHERE channel_id = $1
+             ON CONFLICT (workspace_id, user_id)
+             DO UPDATE SET status = 'active'",
+        )
+        .bind(channel_id.to_string())
+        .bind(member_id.to_string())
+        .execute(db)
+        .await
+        .unwrap();
+    }
     sqlx::query(
         "INSERT INTO channel_memberships (channel_id, member_id, member_type, role)
          VALUES ($1, $2, $3, $4)",
@@ -1106,6 +1119,76 @@ async fn dm_find_or_create_dedups_by_pair(db: PgPool) {
     assert!(dms::find_or_create_dm(&db, a, &a.to_string(), false)
         .await
         .is_err());
+}
+
+#[sqlx::test]
+async fn dm_user_bot_and_bot_user_share_one_canonical_channel(db: PgPool) {
+    let user = seed_user(&db).await;
+    let bot = seed_bot(&db).await;
+
+    let first = dms::open_dm(
+        &db,
+        dms::Participant::User(user),
+        dms::Participant::Bot(bot),
+    )
+    .await
+    .unwrap();
+    assert!(first.created);
+    let reverse = dms::open_dm(
+        &db,
+        dms::Participant::Bot(bot),
+        dms::Participant::User(user),
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.channel_id, reverse.channel_id);
+    assert!(!reverse.created);
+    assert!(dms::open_dm(
+        &db,
+        dms::Participant::Bot(bot),
+        dms::Participant::Bot(Uuid::new_v4()),
+    )
+    .await
+    .is_err());
+}
+
+#[sqlx::test]
+async fn non_dm_human_membership_requires_active_workspace_but_dm_is_exempt(db: PgPool) {
+    let workspace = seed_workspace(&db).await;
+    let channel = seed_channel(&db, workspace).await;
+    let user = seed_user(&db).await;
+
+    let invalid = sqlx::query(
+        "INSERT INTO channel_memberships (channel_id, member_id, member_type, role)
+         VALUES ($1, $2, 'user', 'member')",
+    )
+    .bind(channel.to_string())
+    .bind(user.to_string())
+    .execute(&db)
+    .await;
+    assert!(
+        invalid.is_err(),
+        "deferred invariant must reject orphan channel membership"
+    );
+
+    let bot = seed_bot(&db).await;
+    let dm = dms::open_dm(
+        &db,
+        dms::Participant::Bot(bot),
+        dms::Participant::User(user),
+    )
+    .await
+    .unwrap();
+    let members: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM channel_memberships WHERE channel_id = $1")
+            .bind(dm.channel_id.to_string())
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(
+        members, 2,
+        "DM memberships do not require the anchor workspace"
+    );
 }
 
 // M3 inbox_open(channel.files.read):按 channel_id 限定作用域(修了「永 404」+ 防跨频道猜读),

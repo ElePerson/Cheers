@@ -33,11 +33,6 @@ pub struct ChannelDto {
     /// that don't compute it.
     #[serde(default)]
     pub mention_count: i64,
-    /// The owning workspace's name — populated ONLY by the `guest=true` listing,
-    /// where the caller isn't a workspace member and the sidebar needs a label
-    /// for the "shared with you" section. Absent everywhere else.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace_name: Option<String>,
     /// Whether the caller has a `channel_memberships` row. Workspace members see
     /// public channels they haven't joined yet (Slack model) — those come back
     /// `false` so the client renders a join prompt instead of the composer.
@@ -128,9 +123,6 @@ fn dto(row: sqlx::postgres::PgRow) -> ChannelDto {
         allow_bot_adds: row.try_get("allow_bot_adds").unwrap_or(true),
         unread_count: row.try_get("unread_count").unwrap_or(0),
         mention_count: row.try_get("mention_count").unwrap_or(0),
-        // Only the guest-scope query selects this column (labels the "shared with
-        // you" section); every other query leaves it absent → None.
-        workspace_name: row.try_get("workspace_name").ok(),
         // Only the workspace-scoped listing computes this; the other queries are
         // membership-gated (or membership-joined) already, so absent → true.
         is_member: row.try_get("is_member").unwrap_or(true),
@@ -196,14 +188,6 @@ pub(crate) async fn ensure_channel_admin(
 #[derive(Deserialize)]
 pub struct ListChannelsQuery {
     pub workspace_id: Option<String>,
-    /// `guest=true` → ONLY channels the caller belongs to whose workspace they are
-    /// NOT an active member of. In the workspace-first model a channel invite can
-    /// only target an existing workspace member, so this now only catches LEGACY
-    /// rows: channels shared from someone's PERSONAL workspace, and members removed
-    /// from a workspace but left in its channels. These never show under a rail
-    /// workspace, so the sidebar lists them in a separate "shared with you" section.
-    /// Mutually exclusive with `workspace_id`.
-    pub guest: Option<bool>,
 }
 
 pub async fn list_channels(
@@ -211,56 +195,6 @@ pub async fn list_channels(
     Extension(claims): Extension<Claims>,
     Query(q): Query<ListChannelsQuery>,
 ) -> Result<Json<Vec<ChannelDto>>, AppError> {
-    // Guest scope: channel member ∧ NOT active workspace member. Carries the
-    // workspace name purely as a display label — membership still isn't granted.
-    if q.guest == Some(true) {
-        let rows = sqlx::query(
-            // One lateral scan for both counts (cm is an INNER JOIN here, so every row
-            // is a member — no non-member guard needed).
-            "SELECT c.channel_id, c.workspace_id, c.name, c.avatar_url, c.type, c.kind, c.purpose,
-                    c.auto_assist, c.allow_member_invites, c.allow_bot_adds, c.created_at,
-                    w.name AS workspace_name,
-                    counts.unread_count,
-                    counts.mention_count
-             FROM channels c
-             JOIN channel_memberships cm ON cm.channel_id = c.channel_id
-                    AND cm.member_id = $1 AND cm.member_type = 'user'
-             JOIN workspaces w ON w.workspace_id = c.workspace_id
-             LEFT JOIN workspace_memberships wm ON wm.workspace_id = c.workspace_id
-                    AND wm.user_id = $1 AND wm.status = 'active'
-             CROSS JOIN LATERAL (
-                 -- Bounded unread scan: cap at the newest 100 unread messages so a
-                 -- huge backlog can't force an unbounded count. `unread_count` is
-                 -- therefore min(actual, 100) (99+ semantics); `mention_count`
-                 -- is computed over the same capped window via a single LEFT JOIN
-                 -- (PK (msg_id, member_id) ⇒ at most one match per message) rather
-                 -- than a per-row correlated EXISTS.
-                 SELECT count(*) AS unread_count,
-                        count(mm.msg_id) AS mention_count
-                 FROM messages m
-                 LEFT JOIN message_mentions mm
-                        ON mm.msg_id = m.msg_id
-                       AND mm.member_id = $1 AND mm.member_type = 'user'
-                 WHERE m.msg_id IN (
-                     SELECT m2.msg_id
-                     FROM messages m2
-                     WHERE m2.channel_id = c.channel_id
-                       AND m2.is_partial = FALSE
-                       AND m2.sender_id <> $1
-                       AND m2.created_at > COALESCE(cm.last_read_at, 'epoch'::timestamptz)
-                     ORDER BY m2.created_at DESC
-                     LIMIT 100
-                 )
-             ) counts
-             WHERE c.type != 'dm'
-               AND wm.user_id IS NULL
-             ORDER BY c.created_at DESC",
-        )
-        .bind(&claims.sub)
-        .fetch_all(&state.db)
-        .await?;
-        return Ok(Json(rows.into_iter().map(dto).collect()));
-    }
     // Scope to one workspace when `?workspace_id=` is given (the sidebar always
     // passes it). The handler previously ignored the param entirely, leaking
     // every workspace's channels into whichever one you had selected.
@@ -313,6 +247,7 @@ pub async fn list_channels(
              )
          ) counts
          WHERE c.type != 'dm'
+           AND c.archived_at IS NULL
            AND (cm.member_id IS NOT NULL
                 OR (wm.user_id IS NOT NULL AND c.type = 'public'))
            AND ($2::text IS NULL OR c.workspace_id = $2)
@@ -362,7 +297,7 @@ pub async fn create_dm(
 ) -> Result<Json<ChannelDto>, AppError> {
     let me =
         Uuid::parse_str(&claims.sub).map_err(|_| AppError::BadRequest("bad user id".into()))?;
-    let (target_id, is_bot) = match (body.target_user_id, body.target_bot_id) {
+    let (target_id_raw, is_bot) = match (body.target_user_id, body.target_bot_id) {
         (Some(u), None) => (u, false),
         (None, Some(b)) => (b, true),
         _ => {
@@ -371,13 +306,55 @@ pub async fn create_dm(
             ))
         }
     };
+    let target_id = Uuid::parse_str(&target_id_raw)
+        .map_err(|_| AppError::BadRequest("target id must be a uuid".into()))?;
     if !is_bot && !users_can_dm(&state.db, &claims.sub, &target_id.to_string()).await? {
         return Err(AppError::Forbidden(
             "you can only DM friends or people you share a channel with".into(),
         ));
     }
-    let channel_id =
-        crate::domain::dms::find_or_create_dm(&state.db, me, &target_id, is_bot).await?;
+    if is_bot {
+        let visible: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM bot_accounts b
+                WHERE b.bot_id = $1 AND b.is_disabled = FALSE AND (
+                    $3::boolean OR b.created_by = $2 OR EXISTS (
+                        SELECT 1 FROM channel_memberships bm
+                        JOIN channel_memberships um ON um.channel_id = bm.channel_id
+                        WHERE bm.member_id = b.bot_id AND bm.member_type = 'bot'
+                          AND um.member_id = $2 AND um.member_type = 'user'
+                    )
+                )
+             )",
+        )
+        .bind(target_id.to_string())
+        .bind(&claims.sub)
+        .bind(matches!(claims.role.as_str(), "system_admin" | "admin"))
+        .fetch_one(&state.db)
+        .await?;
+        if !visible {
+            return Err(AppError::NotFound);
+        }
+    }
+    let opened = crate::domain::dms::open_dm(
+        &state.db,
+        crate::domain::dms::Participant::User(me),
+        if is_bot {
+            crate::domain::dms::Participant::Bot(target_id)
+        } else {
+            crate::domain::dms::Participant::User(target_id)
+        },
+    )
+    .await?;
+    let channel_id = opened.channel_id;
+    if opened.created && !is_bot {
+        crate::api::notifications::broadcast_user_notification(
+            &state,
+            &target_id.to_string(),
+            json!({ "kind": "dm_created", "channel_id": channel_id }),
+        )
+        .await;
+    }
     let row = sqlx::query(
         "SELECT channel_id, workspace_id, name, avatar_url, type, kind, purpose, auto_assist,
                 allow_member_invites, allow_bot_adds
@@ -455,21 +432,19 @@ pub async fn create_channel(
     if body.name.trim().is_empty() {
         return Err(AppError::BadRequest("name is required".into()));
     }
-    let allowed = sqlx::query(
-        "SELECT EXISTS(
-            SELECT 1 FROM workspace_memberships
-            WHERE workspace_id = $1 AND user_id = $2
-        ) AS ok",
+    let workspace_role: Option<String> = sqlx::query_scalar(
+        "SELECT role FROM workspace_memberships
+         WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'",
     )
     .bind(&body.workspace_id)
     .bind(&claims.sub)
-    .fetch_one(&state.db)
-    .await?
-    .try_get::<bool, _>("ok")
-    .unwrap_or(false);
-    if !allowed && !matches!(claims.role.as_str(), "system_admin" | "admin") {
+    .fetch_optional(&state.db)
+    .await?;
+    if workspace_role.is_none() {
         return Err(AppError::Forbidden("workspace member required".into()));
     }
+    let creator_is_workspace_admin = matches!(workspace_role.as_deref(), Some("owner" | "admin"))
+        || matches!(claims.role.as_str(), "system_admin" | "admin");
     let channel_id = Uuid::new_v4().to_string();
     let channel_type = body.channel_type.unwrap_or_else(|| "public".into());
     if !matches!(channel_type.as_str(), "public" | "private") {
@@ -482,6 +457,34 @@ pub async fn create_channel(
         return Err(AppError::BadRequest(
             "channel kind must be text or voice".into(),
         ));
+    }
+    // Validate initial bots before writing the channel so a bad/unauthorized bot
+    // cannot leave behind a partially-created channel. A newly-created channel
+    // cannot already carry a channel-scoped session_create grant, so the only
+    // immediate initial-bot paths are owner and platform administrator.
+    let mut initial_bots: Vec<(String, Option<String>)> = Vec::new();
+    for bot_id in &body.initial_bot_ids {
+        Uuid::parse_str(bot_id)
+            .map_err(|_| AppError::BadRequest("initial_bot_ids must contain bot uuids".into()))?;
+        let bot = sqlx::query("SELECT created_by, is_disabled FROM bot_accounts WHERE bot_id = $1")
+            .bind(bot_id)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if bot.try_get::<bool, _>("is_disabled").unwrap_or(false) {
+            return Err(AppError::BadRequest(
+                "disabled bot cannot be invited".into(),
+            ));
+        }
+        let owner_id: Option<String> = bot.try_get("created_by").ok().flatten();
+        if owner_id.as_deref() != Some(claims.sub.as_str())
+            && !matches!(claims.role.as_str(), "system_admin" | "admin")
+        {
+            return Err(AppError::Forbidden(
+                "initial bots must be owned by the channel creator".into(),
+            ));
+        }
+        initial_bots.push((bot_id.clone(), owner_id));
     }
     let mut tx = state.db.begin().await?;
     let row = sqlx::query(
@@ -500,93 +503,151 @@ pub async fn create_channel(
     .bind(body.allow_bot_adds.unwrap_or(true))
     .fetch_one(&mut *tx)
     .await?;
-    let ch_name: String = row.try_get("name").unwrap_or_default();
     sqlx::query("INSERT INTO channel_memberships (channel_id, member_id, member_type, role, added_by) VALUES ($1, $2, 'user', 'owner', $2) ON CONFLICT DO NOTHING")
         .bind(&channel_id)
         .bind(&claims.sub)
         .execute(&mut *tx)
         .await?;
-    // Founding members are INVITED (consent required), not force-added — and only if
-    // they're active members of this workspace (workspace-first model; the creator
-    // above is the sole immediate member). Notifications are pushed after commit so
-    // the invitee's client only ever sees a committed invite.
+    // Founding members are invited rather than force-added. Private channels may
+    // queue a channel invitation behind workspace acceptance; public-channel
+    // founding invitees must already be active workspace members.
     let mut invited_users: Vec<String> = Vec::new();
+    let mut workspace_invited_users: Vec<String> = Vec::new();
     for user_id in &body.initial_user_ids {
         // The creator is already the active owner (above) — never self-invite them
         // (would leave a stale pending row + a self-notification).
         if user_id == &claims.sub {
             continue;
         }
+        let ws_status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM workspace_memberships
+             WHERE workspace_id = $1 AND user_id = $2",
+        )
+        .bind(&body.workspace_id)
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if ws_status.as_deref() != Some("active") {
+            if channel_type != "private" {
+                return Err(AppError::BadRequest(
+                    "initial users of a public channel must already be active workspace members"
+                        .into(),
+                ));
+            }
+            if ws_status.is_none() {
+                let friend: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM friendships
+                        WHERE status = 'accepted'
+                          AND ((user_id = $1 AND friend_id = $2)
+                            OR (user_id = $2 AND friend_id = $1))
+                    )",
+                )
+                .bind(&claims.sub)
+                .bind(user_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                if !friend || !creator_is_workspace_admin {
+                    return Err(AppError::Forbidden(
+                        "inviting a non-workspace user requires an accepted friendship and workspace admin role"
+                            .into(),
+                    ));
+                }
+                let inserted = sqlx::query(
+                    "INSERT INTO workspace_memberships
+                        (workspace_id, user_id, role, status, invited_by, invited_at)
+                     VALUES ($1, $2, 'member', 'pending', $3, NOW())
+                     ON CONFLICT (workspace_id, user_id) DO NOTHING",
+                )
+                .bind(&body.workspace_id)
+                .bind(user_id)
+                .bind(&claims.sub)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+                if inserted > 0 {
+                    workspace_invited_users.push(user_id.clone());
+                }
+            }
+        }
         let n = sqlx::query(
             "INSERT INTO channel_invites (channel_id, user_id, role, invited_by, invited_at)
-             SELECT $1, $2, 'member', $3, NOW()
-             WHERE EXISTS (
-                 SELECT 1 FROM workspace_memberships wm
-                 WHERE wm.workspace_id = $4 AND wm.user_id = $2 AND wm.status = 'active'
-             )
+             VALUES ($1, $2, 'member', $3, NOW())
              ON CONFLICT (channel_id, user_id) DO NOTHING",
         )
         .bind(&channel_id)
         .bind(user_id)
         .bind(&claims.sub)
-        .bind(&body.workspace_id)
         .execute(&mut *tx)
         .await?
         .rows_affected();
-        if n > 0 {
+        if n > 0 && ws_status.as_deref() == Some("active") {
             invited_users.push(user_id.clone());
         }
     }
-    let initial_bot_ids = body.initial_bot_ids;
-    for bot_id in &initial_bot_ids {
-        sqlx::query("INSERT INTO channel_memberships (channel_id, member_id, member_type, role, added_by) VALUES ($1, $2, 'bot', 'member', $3) ON CONFLICT DO NOTHING")
-            .bind(&channel_id)
-            .bind(bot_id)
-            .bind(&claims.sub)
-            .execute(&mut *tx)
-            .await?;
-    }
     tx.commit().await?;
 
-    // Channel creation with initial bots is the same session-creation contract as
-    // adding a bot later: every bound bot must have a dispatchable PRIMARY session.
-    // Keep this after the membership transaction so session creation cannot point at
-    // a channel/bot membership that has not committed yet.
-    for bot_id in &initial_bot_ids {
-        let bot_uuid = Uuid::parse_str(bot_id)
-            .map_err(|_| AppError::BadRequest("initial_bot_ids must contain bot uuids".into()))?;
-        let provider_account_id =
-            crate::domain::messages::resolve_provider_account_id_for_bot(&state.db, bot_uuid)
-                .await
-                .unwrap_or_else(|_| bot_id.clone());
-        crate::domain::sessions::ensure_primary_session_workspace(
-            &state.db,
-            bot_uuid,
-            &provider_account_id,
-            &channel_id,
-            None,
-            &[],
+    for uid in &workspace_invited_users {
+        crate::api::notifications::deliver_notification_by_id(
+            &state,
+            uid,
+            &format!("workspace:{}", body.workspace_id),
         )
         .await?;
     }
 
+    // Initial bots use the same owner-approval semantics as later additions.
+    for (bot_id, owner_id) in &initial_bots {
+        if owner_id.as_deref() == Some(claims.sub.as_str())
+            || (owner_id.is_none() && matches!(claims.role.as_str(), "system_admin" | "admin"))
+        {
+            bind_bot_to_channel(
+                &state,
+                &channel_id,
+                bot_id,
+                "member",
+                &claims.sub,
+                None,
+                Vec::new(),
+            )
+            .await?;
+        } else if matches!(claims.role.as_str(), "system_admin" | "admin") {
+            let owner_id = owner_id.clone().ok_or_else(|| {
+                AppError::Forbidden("ownerless bots may only be added by an admin".into())
+            })?;
+            let inserted = sqlx::query(
+                "INSERT INTO bot_channel_invites
+                    (channel_id, bot_id, owner_user_id, invited_by, role)
+                 VALUES ($1, $2, $3, $4, 'member')
+                 ON CONFLICT (channel_id, bot_id) DO NOTHING",
+            )
+            .bind(&channel_id)
+            .bind(bot_id)
+            .bind(&owner_id)
+            .bind(&claims.sub)
+            .execute(&state.db)
+            .await?
+            .rows_affected();
+            if inserted > 0 {
+                crate::api::notifications::deliver_notification_by_id(
+                    &state,
+                    &owner_id,
+                    &format!("bot-channel:{channel_id}:{bot_id}"),
+                )
+                .await?;
+            }
+        }
+    }
+
     // Live push for any founding-member invites (best-effort; durable in DB).
     if !invited_users.is_empty() {
-        let inviter = display_name_for(&state, &claims.sub).await;
         for uid in &invited_users {
-            crate::api::notifications::push_notification(
+            crate::api::notifications::deliver_notification_by_id(
                 &state,
                 uid,
-                json!({
-                    "kind": "channel_invite",
-                    "channel_id": channel_id,
-                    "workspace_id": body.workspace_id,
-                    "title": ch_name,
-                    "invited_by": inviter,
-                    "role": "member",
-                }),
+                &format!("channel:{channel_id}"),
             )
-            .await;
+            .await?;
         }
     }
     Ok(Json(dto(row)))
@@ -698,6 +759,16 @@ pub async fn delete_channel(
     Path(channel_id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
     ensure_channel_admin(&state, &channel_id, &claims.sub, &claims.role).await?;
+    let pending_users: Vec<String> =
+        sqlx::query_scalar("SELECT user_id FROM channel_invites WHERE channel_id = $1")
+            .bind(&channel_id)
+            .fetch_all(&state.db)
+            .await?;
+    let pending_bots =
+        sqlx::query("SELECT bot_id, owner_user_id FROM bot_channel_invites WHERE channel_id = $1")
+            .bind(&channel_id)
+            .fetch_all(&state.db)
+            .await?;
     sqlx::query("DELETE FROM channels WHERE channel_id = $1")
         .bind(&channel_id)
         .execute(&state.db)
@@ -705,6 +776,24 @@ pub async fn delete_channel(
     // Drop every live realtime subscription to the deleted channel.
     if let Ok(cid) = Uuid::parse_str(&channel_id) {
         state.conn_manager.drop_channel(cid);
+    }
+    for user_id in pending_users {
+        crate::api::notifications::resolve_notification(
+            &state,
+            &user_id,
+            &format!("channel:{channel_id}"),
+        )
+        .await;
+    }
+    for row in pending_bots {
+        let bot_id: String = row.try_get("bot_id").unwrap_or_default();
+        let owner_id: String = row.try_get("owner_user_id").unwrap_or_default();
+        crate::api::notifications::resolve_notification(
+            &state,
+            &owner_id,
+            &format!("bot-channel:{channel_id}:{bot_id}"),
+        )
+        .await;
     }
     Ok(Json(json!({"deleted": true})))
 }
@@ -810,6 +899,36 @@ pub async fn list_channel_members(
             "can_receive_audio": Value::Null,
         }));
     }
+    let pending_bots = sqlx::query(
+        "SELECT bci.bot_id AS member_id, bci.role, b.username, b.display_name,
+                b.avatar_url, b.description AS bio, b.status_text, b.status_emoji,
+                bci.cwd, bci.additional_dirs
+         FROM bot_channel_invites bci
+         JOIN bot_accounts b ON b.bot_id = bci.bot_id
+         WHERE bci.channel_id = $1
+         ORDER BY b.username",
+    )
+    .bind(&channel_id)
+    .fetch_all(&state.db)
+    .await?;
+    for r in pending_bots {
+        members.push(json!({
+            "member_id": r.try_get::<String, _>("member_id").unwrap_or_default(),
+            "member_type": "bot",
+            "status": "pending_owner",
+            "role": r.try_get::<String, _>("role").unwrap_or_else(|_| "member".into()),
+            "username": r.try_get::<String, _>("username").ok(),
+            "display_name": r.try_get::<String, _>("display_name").ok(),
+            "avatar_url": r.try_get::<Option<String>, _>("avatar_url").ok().flatten(),
+            "bio": r.try_get::<Option<String>, _>("bio").ok().flatten(),
+            "status_text": r.try_get::<Option<String>, _>("status_text").ok().flatten(),
+            "status_emoji": r.try_get::<Option<String>, _>("status_emoji").ok().flatten(),
+            "is_online": false,
+            "can_receive_audio": Value::Null,
+            "requested_cwd": r.try_get::<Option<String>, _>("cwd").ok().flatten(),
+            "requested_additional_dirs": r.try_get::<Value, _>("additional_dirs").unwrap_or_else(|_| json!([])),
+        }));
+    }
     Ok(Json(members))
 }
 
@@ -844,6 +963,54 @@ pub async fn search_invitable(
     )
     .await?;
     Ok(Json(json!({ "results": items })))
+}
+
+async fn bind_bot_to_channel(
+    state: &AppState,
+    channel_id: &str,
+    bot_id: &str,
+    role: &str,
+    added_by: &str,
+    cwd: Option<String>,
+    additional_dirs: Vec<String>,
+) -> Result<(), AppError> {
+    let written = sqlx::query(
+        "INSERT INTO channel_memberships (channel_id, member_id, member_type, role, added_by)
+         VALUES ($1, $2, 'bot', $3, $4)
+         ON CONFLICT (channel_id, member_id) DO UPDATE SET role = EXCLUDED.role
+         WHERE channel_memberships.member_type = EXCLUDED.member_type",
+    )
+    .bind(channel_id)
+    .bind(bot_id)
+    .bind(role)
+    .bind(added_by)
+    .execute(&state.db)
+    .await?
+    .rows_affected();
+    if written == 0 {
+        return Err(AppError::BadRequest(
+            "member already exists with a different member_type".into(),
+        ));
+    }
+    let bot_uuid = Uuid::parse_str(bot_id)
+        .map_err(|_| AppError::BadRequest("member_id must be a bot uuid".into()))?;
+    let provider_account_id =
+        crate::domain::messages::resolve_provider_account_id_for_bot(&state.db, bot_uuid)
+            .await
+            .unwrap_or_else(|_| bot_id.to_string());
+    crate::domain::sessions::ensure_primary_session_workspace(
+        &state.db,
+        bot_uuid,
+        &provider_account_id,
+        channel_id,
+        cwd.as_deref(),
+        &additional_dirs,
+    )
+    .await?;
+    if let Ok(cid) = Uuid::parse_str(channel_id) {
+        crate::gateway::presence::broadcast_presence(state, cid).await;
+    }
+    Ok(())
 }
 
 pub async fn add_channel_member(
@@ -885,14 +1052,23 @@ pub async fn add_channel_member(
     // bot. Closes the gap where any channel admin could bind ANY bot with no
     // bot-side authorization. An optional pinned working directory rides the same
     // authorization (it can only be chosen through an invite the caller may make).
-    // ── Bot: bound immediately. A bot doesn't "consent"; the AND-gate above governs
-    //    who may bind which bot, so there is no accept step. ──
     if body.member_type == "bot" {
-        let is_owner =
-            crate::api::bots::ensure_bot_owner_or_admin(&state, &claims, &body.member_id)
-                .await
-                .is_ok();
-        if !is_owner {
+        let bot = sqlx::query("SELECT created_by, is_disabled FROM bot_accounts WHERE bot_id = $1")
+            .bind(&body.member_id)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        let owner_id: Option<String> = bot.try_get("created_by").ok().flatten();
+        let disabled: bool = bot.try_get("is_disabled").unwrap_or(false);
+        if disabled {
+            return Err(AppError::BadRequest(
+                "disabled bot cannot be invited".into(),
+            ));
+        }
+        let caller_is_owner = owner_id.as_deref() == Some(claims.sub.as_str());
+        let legacy_admin =
+            owner_id.is_none() && matches!(claims.role.as_str(), "system_admin" | "admin");
+        if !caller_is_owner && !legacy_admin {
             let caller_role = caller_channel_role(&state, &channel_id, &claims.sub).await;
             let allowed = crate::domain::acp_policy::allows(
                 &state.db,
@@ -911,9 +1087,6 @@ pub async fn add_channel_member(
                 ));
             }
         }
-        // Optional pinned working directory for the bot's PRIMARY session here.
-        // Shape-check → on-the-spot validation against the bot connector's policy;
-        // stored (immutable) after the membership is committed.
         let cwd = crate::api::session_control::normalize_workspace_path(body.cwd.clone())?;
         let additional_dirs =
             crate::api::session_control::normalize_additional_dirs(body.additional_dirs.clone())?;
@@ -933,85 +1106,61 @@ pub async fn add_channel_member(
             None
         };
 
-        // ON CONFLICT 不改 member_type：类型冲突时 WHERE 不命中 → 0 行，必须报错。
-        let written = sqlx::query(
-            "INSERT INTO channel_memberships (channel_id, member_id, member_type, role, added_by)
-             VALUES ($1, $2, 'bot', $3, $4)
-             ON CONFLICT (channel_id, member_id) DO UPDATE SET
-                role = EXCLUDED.role
-             WHERE channel_memberships.member_type = EXCLUDED.member_type",
+        let (cwd, additional_dirs) = primary_workspace.unwrap_or((None, Vec::new()));
+        if caller_is_owner || legacy_admin {
+            bind_bot_to_channel(
+                &state,
+                &channel_id,
+                &body.member_id,
+                &role,
+                &claims.sub,
+                cwd,
+                additional_dirs,
+            )
+            .await?;
+            return Ok(Json(json!({
+                "channel_id": channel_id,
+                "member_id": body.member_id,
+                "member_type": "bot",
+                "role": role,
+                "status": "active",
+            })));
+        }
+
+        let owner_id = owner_id.ok_or_else(|| {
+            AppError::Forbidden("ownerless bots may only be added by an admin".into())
+        })?;
+        let inserted = sqlx::query(
+            "INSERT INTO bot_channel_invites
+                (channel_id, bot_id, owner_user_id, invited_by, role, cwd, additional_dirs, invited_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+             ON CONFLICT (channel_id, bot_id) DO NOTHING",
         )
         .bind(&channel_id)
         .bind(&body.member_id)
-        .bind(&role)
+        .bind(&owner_id)
         .bind(&claims.sub)
+        .bind(&role)
+        .bind(&cwd)
+        .bind(json!(additional_dirs).to_string())
         .execute(&state.db)
         .await?
         .rows_affected();
-        if written == 0 {
-            return Err(AppError::BadRequest(
-                "member already exists with a different member_type".into(),
-            ));
+        if inserted > 0 {
+            crate::api::notifications::deliver_notification_by_id(
+                &state,
+                &owner_id,
+                &format!("bot-channel:{channel_id}:{}", body.member_id),
+            )
+            .await?;
         }
-
-        // Eagerly materialize the bot's PRIMARY session with its pinned
-        // (validated) workspace. This must also run when no workspace was
-        // supplied: task-claim approval and ordinary channel dispatch both
-        // require a primary binding, even when the connector uses its default
-        // working directory. The operation is idempotent and preserves an
-        // existing session's immutable workspace metadata.
-        let bot_uuid = Uuid::parse_str(&body.member_id)
-            .map_err(|_| AppError::BadRequest("member_id must be a bot uuid".into()))?;
-        let provider_account_id =
-            crate::domain::messages::resolve_provider_account_id_for_bot(&state.db, bot_uuid)
-                .await
-                .unwrap_or_else(|_| body.member_id.clone());
-        let (cwd, additional_dirs) = primary_workspace.unwrap_or((None, Vec::new()));
-        crate::domain::sessions::ensure_primary_session_workspace(
-            &state.db,
-            bot_uuid,
-            &provider_account_id,
-            &channel_id,
-            cwd.as_deref(),
-            &additional_dirs,
-        )
-        .await?;
-
-        // 成员集变了（尤其是拉入一个在线 bot）→ 重发全量 presence。
-        if let Ok(cid) = Uuid::parse_str(&channel_id) {
-            crate::gateway::presence::broadcast_presence(&state, cid).await;
-        }
-
         return Ok(Json(json!({
             "channel_id": channel_id,
             "member_id": body.member_id,
             "member_type": "bot",
             "role": role,
-            "status": "active",
+            "status": "pending_owner",
         })));
-    }
-
-    // ── User: an INVITE requiring the invitee's consent (workspace-first model). ──
-    // The invitee must already be an ACTIVE member of this channel's workspace —
-    // there is no guest / auto-join path. The invite grants nothing until accepted;
-    // it lands in `channel_invites` and is pushed live to the invitee's inbox.
-    let ws_member: bool = sqlx::query(
-        "SELECT EXISTS(
-            SELECT 1 FROM workspace_memberships wm
-            JOIN channels c ON c.workspace_id = wm.workspace_id
-            WHERE c.channel_id = $1 AND wm.user_id = $2 AND wm.status = 'active'
-        ) AS ok",
-    )
-    .bind(&channel_id)
-    .bind(&body.member_id)
-    .fetch_one(&state.db)
-    .await?
-    .try_get::<bool, _>("ok")
-    .unwrap_or(false);
-    if !ws_member {
-        return Err(AppError::Forbidden(
-            "you can only invite members of this channel's workspace".into(),
-        ));
     }
 
     let already_member: bool = sqlx::query(
@@ -1032,7 +1181,70 @@ pub async fn add_channel_member(
         ));
     }
 
-    // Idempotent: a repeat invite before the first is answered is a no-op.
+    let channel = sqlx::query("SELECT workspace_id, type FROM channels WHERE channel_id = $1")
+        .bind(&channel_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let workspace_id: String = channel.try_get("workspace_id").unwrap_or_default();
+    let channel_type: String = channel.try_get("type").unwrap_or_default();
+    let workspace_status: Option<String> = sqlx::query_scalar(
+        "SELECT status FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2",
+    )
+    .bind(&workspace_id)
+    .bind(&body.member_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    if workspace_status.as_deref() != Some("active") && channel_type != "private" {
+        return Err(AppError::Forbidden(
+            "the user must accept the workspace before being invited to a public channel".into(),
+        ));
+    }
+    if workspace_status.is_none() {
+        let friends: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM friendships f
+                WHERE f.status = 'accepted'
+                  AND ((f.user_id = $1 AND f.friend_id = $2)
+                    OR (f.user_id = $2 AND f.friend_id = $1))
+             )",
+        )
+        .bind(&claims.sub)
+        .bind(&body.member_id)
+        .fetch_one(&state.db)
+        .await?;
+        if !friends {
+            return Err(AppError::Forbidden(
+                "a cross-workspace private-channel invite is limited to friends".into(),
+            ));
+        }
+        crate::api::workspaces::ensure_workspace_admin(
+            &state,
+            &workspace_id,
+            &claims.sub,
+            &claims.role,
+        )
+        .await?;
+    }
+
+    let mut tx = state.db.begin().await?;
+    let mut workspace_invite_created = false;
+    if workspace_status.is_none() {
+        workspace_invite_created = sqlx::query(
+            "INSERT INTO workspace_memberships
+                (workspace_id, user_id, role, status, invited_by, invited_at)
+             VALUES ($1, $2, 'member', 'pending', $3, NOW())
+             ON CONFLICT (workspace_id, user_id) DO NOTHING",
+        )
+        .bind(&workspace_id)
+        .bind(&body.member_id)
+        .bind(&claims.sub)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+            > 0;
+    }
     let inserted = sqlx::query(
         "INSERT INTO channel_invites (channel_id, user_id, role, invited_by, invited_at)
          VALUES ($1, $2, $3, $4, NOW())
@@ -1042,66 +1254,40 @@ pub async fn add_channel_member(
     .bind(&body.member_id)
     .bind(&role)
     .bind(&claims.sub)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
+    tx.commit().await?;
 
-    // Live push to the invitee's notification center — only for a NEW invite, so a
-    // repeat invite doesn't re-toast an invitee who already has it (mirrors
-    // invite_workspace_member). Best-effort; the row is durable regardless.
-    if inserted > 0 {
-        let inviter = display_name_for(&state, &claims.sub).await;
-        let (ch_name, ws_id) = channel_label(&state, &channel_id).await;
-        crate::api::notifications::push_notification(
+    if workspace_invite_created {
+        crate::api::notifications::deliver_notification_by_id(
             &state,
             &body.member_id,
-            json!({
-                "kind": "channel_invite",
-                "channel_id": channel_id,
-                "workspace_id": ws_id,
-                "title": ch_name,
-                "invited_by": inviter,
-                "role": role,
-            }),
+            &format!("workspace:{workspace_id}"),
         )
-        .await;
+        .await?;
+    } else if inserted > 0 && workspace_status.as_deref() == Some("active") {
+        crate::api::notifications::deliver_notification_by_id(
+            &state,
+            &body.member_id,
+            &format!("channel:{channel_id}"),
+        )
+        .await?;
     }
+
+    let status = if workspace_status.as_deref() == Some("active") {
+        "pending"
+    } else {
+        "pending_workspace"
+    };
 
     Ok(Json(json!({
         "channel_id": channel_id,
         "member_id": body.member_id,
         "member_type": "user",
         "role": role,
-        "status": "pending",
+        "status": status,
     })))
-}
-
-/// Best-effort display name for a user (falls back to username; None if unknown).
-async fn display_name_for(state: &AppState, user_id: &str) -> Option<String> {
-    sqlx::query("SELECT COALESCE(display_name, username) AS name FROM users WHERE user_id = $1")
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|r| r.try_get::<Option<String>, _>("name").ok().flatten())
-}
-
-/// (channel name, workspace id) for a channel — used to label an invite notification.
-async fn channel_label(state: &AppState, channel_id: &str) -> (String, String) {
-    sqlx::query("SELECT name, workspace_id FROM channels WHERE channel_id = $1")
-        .bind(channel_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-        .map(|r| {
-            (
-                r.try_get::<String, _>("name").unwrap_or_default(),
-                r.try_get::<String, _>("workspace_id").unwrap_or_default(),
-            )
-        })
-        .unwrap_or_default()
 }
 
 /// POST /api/v1/channels/{channel_id}/accept — accept a pending channel invite:
@@ -1148,6 +1334,12 @@ pub async fn accept_channel_invite(
     .unwrap_or(false);
     if !still_ws_member {
         tx.commit().await?;
+        crate::api::notifications::resolve_notification(
+            &state,
+            &claims.sub,
+            &format!("channel:{channel_id}"),
+        )
+        .await;
         return Err(AppError::Forbidden(
             "you are no longer a member of this channel's workspace".into(),
         ));
@@ -1170,6 +1362,12 @@ pub async fn accept_channel_invite(
     if let Ok(cid) = Uuid::parse_str(&channel_id) {
         crate::gateway::presence::broadcast_presence(&state, cid).await;
     }
+    crate::api::notifications::resolve_notification(
+        &state,
+        &claims.sub,
+        &format!("channel:{channel_id}"),
+    )
+    .await;
     Ok(Json(
         json!({"channel_id": channel_id, "status": "active", "role": role}),
     ))
@@ -1237,6 +1435,13 @@ pub async fn join_channel(
         .await?;
     tx.commit().await?;
 
+    crate::api::notifications::resolve_notification(
+        &state,
+        &claims.sub,
+        &format!("channel:{channel_id}"),
+    )
+    .await;
+
     // New member → refresh presence for everyone already in the channel.
     if inserted > 0 {
         if let Ok(cid) = Uuid::parse_str(&channel_id) {
@@ -1263,7 +1468,131 @@ pub async fn decline_channel_invite(
         .bind(&claims.sub)
         .execute(&state.db)
         .await?;
+    crate::api::notifications::resolve_notification(
+        &state,
+        &claims.sub,
+        &format!("channel:{channel_id}"),
+    )
+    .await;
     Ok(Json(json!({"declined": true})))
+}
+
+/// Bot-owner approval for a pending bot channel invitation.
+pub async fn accept_bot_channel_invite(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path((channel_id, bot_id)): Path<(String, String)>,
+) -> Result<Json<Value>, AppError> {
+    let row = sqlx::query(
+        "SELECT bci.role, bci.invited_by, bci.cwd, bci.additional_dirs,
+                b.is_disabled
+         FROM bot_channel_invites bci
+         JOIN bot_accounts b ON b.bot_id = bci.bot_id
+         WHERE bci.channel_id = $1 AND bci.bot_id = $2
+           AND bci.owner_user_id = $3 AND b.created_by = $3",
+    )
+    .bind(&channel_id)
+    .bind(&bot_id)
+    .bind(&claims.sub)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    if row.try_get::<bool, _>("is_disabled").unwrap_or(false) {
+        return Err(AppError::BadRequest("disabled bot cannot be added".into()));
+    }
+    let role: String = row.try_get("role").unwrap_or_else(|_| "member".into());
+    let invited_by: String = row
+        .try_get("invited_by")
+        .unwrap_or_else(|_| claims.sub.clone());
+    let cwd: Option<String> = row.try_get("cwd").ok().flatten();
+    let dirs_value: Value = row.try_get("additional_dirs").unwrap_or_else(|_| json!([]));
+    let additional_dirs: Vec<String> = dirs_value
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let bot_uuid =
+        Uuid::parse_str(&bot_id).map_err(|_| AppError::BadRequest("invalid bot id".into()))?;
+    let (cwd, additional_dirs) = if cwd.is_some() || !additional_dirs.is_empty() {
+        crate::api::workspace::validate_workspace_paths(&state, bot_uuid, cwd, additional_dirs)
+            .await?
+    } else {
+        (None, Vec::new())
+    };
+
+    if let Err(error) = bind_bot_to_channel(
+        &state,
+        &channel_id,
+        &bot_id,
+        &role,
+        &invited_by,
+        cwd,
+        additional_dirs,
+    )
+    .await
+    {
+        // A failed session materialization must not leave a half-bound bot.
+        sqlx::query(
+            "DELETE FROM channel_memberships
+             WHERE channel_id = $1 AND member_id = $2 AND member_type = 'bot'",
+        )
+        .bind(&channel_id)
+        .bind(&bot_id)
+        .execute(&state.db)
+        .await
+        .ok();
+        return Err(error);
+    }
+    sqlx::query("DELETE FROM bot_channel_invites WHERE channel_id = $1 AND bot_id = $2")
+        .bind(&channel_id)
+        .bind(&bot_id)
+        .execute(&state.db)
+        .await?;
+    crate::api::notifications::resolve_notification(
+        &state,
+        &claims.sub,
+        &format!("bot-channel:{channel_id}:{bot_id}"),
+    )
+    .await;
+    Ok(Json(json!({
+        "channel_id": channel_id,
+        "member_id": bot_id,
+        "member_type": "bot",
+        "role": role,
+        "status": "active",
+    })))
+}
+
+pub async fn decline_bot_channel_invite(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path((channel_id, bot_id)): Path<(String, String)>,
+) -> Result<Json<Value>, AppError> {
+    let deleted = sqlx::query(
+        "DELETE FROM bot_channel_invites
+         WHERE channel_id = $1 AND bot_id = $2 AND owner_user_id = $3",
+    )
+    .bind(&channel_id)
+    .bind(&bot_id)
+    .bind(&claims.sub)
+    .execute(&state.db)
+    .await?
+    .rows_affected();
+    if deleted == 0 {
+        return Err(AppError::NotFound);
+    }
+    crate::api::notifications::resolve_notification(
+        &state,
+        &claims.sub,
+        &format!("bot-channel:{channel_id}:{bot_id}"),
+    )
+    .await;
+    Ok(Json(json!({ "declined": true })))
 }
 
 /// Revoke a user's channel-scoped ACP approval authority when they leave / are
@@ -1283,7 +1612,7 @@ async fn purge_channel_approval_authority(
     sqlx::query(
         "DELETE FROM bot_event_access
          WHERE channel_id = $1 AND subject_kind = 'user' AND subject_id = $2
-           AND capability = 'respond'",
+        ",
     )
     .bind(channel_id)
     .bind(user_id)
@@ -1298,6 +1627,44 @@ pub async fn remove_channel_member(
     Path((channel_id, member_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, AppError> {
     ensure_channel_admin(&state, &channel_id, &claims.sub, &claims.role).await?;
+    let removing_last_owner: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM channel_memberships removing
+            JOIN channels c ON c.channel_id = removing.channel_id
+            WHERE removing.channel_id = $1 AND removing.member_id = $2
+              AND removing.member_type = 'user' AND removing.role = 'owner'
+              AND c.type <> 'dm' AND c.archived_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM channel_memberships other
+                WHERE other.channel_id = removing.channel_id
+                  AND other.member_type = 'user' AND other.role = 'owner'
+                  AND other.member_id <> removing.member_id
+              )
+        )",
+    )
+    .bind(&channel_id)
+    .bind(&member_id)
+    .fetch_one(&state.db)
+    .await?;
+    if removing_last_owner {
+        return Err(AppError::BadRequest(
+            "transfer channel ownership or delete the channel first".into(),
+        ));
+    }
+    let pending_user: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM channel_invites WHERE channel_id = $1 AND user_id = $2)",
+    )
+    .bind(&channel_id)
+    .bind(&member_id)
+    .fetch_one(&state.db)
+    .await?;
+    let pending_bot_owner: Option<String> = sqlx::query_scalar(
+        "SELECT owner_user_id FROM bot_channel_invites WHERE channel_id = $1 AND bot_id = $2",
+    )
+    .bind(&channel_id)
+    .bind(&member_id)
+    .fetch_optional(&state.db)
+    .await?;
     sqlx::query("DELETE FROM channel_memberships WHERE channel_id = $1 AND member_id = $2")
         .bind(&channel_id)
         .bind(&member_id)
@@ -1310,6 +1677,27 @@ pub async fn remove_channel_member(
         .bind(&member_id)
         .execute(&state.db)
         .await?;
+    sqlx::query("DELETE FROM bot_channel_invites WHERE channel_id = $1 AND bot_id = $2")
+        .bind(&channel_id)
+        .bind(&member_id)
+        .execute(&state.db)
+        .await?;
+    if let Some(owner_id) = pending_bot_owner {
+        crate::api::notifications::resolve_notification(
+            &state,
+            &owner_id,
+            &format!("bot-channel:{channel_id}:{member_id}"),
+        )
+        .await;
+    }
+    if pending_user {
+        crate::api::notifications::resolve_notification(
+            &state,
+            &member_id,
+            &format!("channel:{channel_id}"),
+        )
+        .await;
+    }
     // A removed member must not retain approval authority in this channel: drop any
     // approver delegations they held (approval_delegations) and any per-user RESPOND
     // overrides (bot_event_access) — otherwise a stale row would still let them

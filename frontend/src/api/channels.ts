@@ -47,6 +47,9 @@ export interface InvitableItem {
   /** Bots: connector liveness (non-null). Users: may be null. */
   is_online: boolean | null;
   already_member: boolean;
+  /** Human candidates only: active/pending membership in this workspace. */
+  workspace_status?: "active" | "pending" | "none" | null;
+  requires_workspace_acceptance?: boolean;
 }
 
 /** Channel admin: search users + bots invitable into a channel (substring on name). */
@@ -85,10 +88,28 @@ export async function addChannelMember(
     /** Bot only: extra roots for the primary session (ACP additionalDirectories). */
     additional_dirs?: string[];
   }
-): Promise<void> {
-  await apiJson(`/channels/${channelId}/members`, {
+): Promise<{ status: "active" | "pending" | "pending_workspace" | "pending_owner" }> {
+  return apiJson(`/channels/${channelId}/members`, {
     method: "POST",
     body: JSON.stringify(member),
+  });
+}
+
+export async function acceptBotChannelInvite(
+  channelId: string,
+  botId: string
+): Promise<void> {
+  await apiJson(`/channels/${channelId}/bot-invites/${botId}/accept`, {
+    method: "POST",
+  });
+}
+
+export async function declineBotChannelInvite(
+  channelId: string,
+  botId: string
+): Promise<void> {
+  await apiJson(`/channels/${channelId}/bot-invites/${botId}/decline`, {
+    method: "POST",
   });
 }
 

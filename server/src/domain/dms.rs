@@ -1,7 +1,5 @@
-//! Direct messages. A DM is NOT a separate subsystem — it's a `type='dm'` channel with
-//! exactly two members, anchored in the initiator's personal workspace. Everything else
-//! (messages, channel_seq, files, channel.* resources, sessions) reuses the channel
-//! machinery. See docs/arch/CONVERSATION_MODEL.md.
+//! Direct messages are two-member `type='dm'` channels.  Their workspace is an
+//! internal personal-workspace anchor only; access is always membership-driven.
 
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -9,15 +7,57 @@ use uuid::Uuid;
 use crate::domain::workspaces;
 use crate::errors::AppError;
 
-/// Canonical, order-independent key for the participant pair, so find-or-create dedups a
-/// DM regardless of who starts it: members are tagged (`u:`/`b:`), sorted, and joined.
-fn dm_key(me: Uuid, target_id: &str, target_is_bot: bool) -> String {
-    let mut tags = vec![
-        format!("u:{me}"),
-        format!("{}:{target_id}", if target_is_bot { "b" } else { "u" }),
-    ];
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Participant {
+    User(Uuid),
+    Bot(Uuid),
+}
+
+impl Participant {
+    fn id(self) -> Uuid {
+        match self {
+            Self::User(id) | Self::Bot(id) => id,
+        }
+    }
+
+    fn member_type(self) -> &'static str {
+        match self {
+            Self::User(_) => "user",
+            Self::Bot(_) => "bot",
+        }
+    }
+
+    fn tag(self) -> String {
+        format!(
+            "{}:{}",
+            if matches!(self, Self::Bot(_)) {
+                "b"
+            } else {
+                "u"
+            },
+            self.id()
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DmOpenResult {
+    pub channel_id: Uuid,
+    pub created: bool,
+}
+
+fn dm_key(a: Participant, b: Participant) -> Result<String, AppError> {
+    if a == b {
+        return Err(AppError::BadRequest("cannot DM yourself".into()));
+    }
+    if matches!((a, b), (Participant::Bot(_), Participant::Bot(_))) {
+        return Err(AppError::BadRequest(
+            "bot-to-bot DMs are not supported".into(),
+        ));
+    }
+    let mut tags = [a.tag(), b.tag()];
     tags.sort();
-    tags.join("|")
+    Ok(tags.join("|"))
 }
 
 async fn find_by_key(db: &PgPool, key: &str) -> Result<Option<Uuid>, AppError> {
@@ -29,38 +69,32 @@ async fn find_by_key(db: &PgPool, key: &str) -> Result<Option<Uuid>, AppError> {
     .await
     .map_err(AppError::Db)?
     {
-        Some(s) => Uuid::parse_str(&s)
+        Some(value) => Uuid::parse_str(&value)
             .map(Some)
             .map_err(|_| AppError::Internal("invalid channel_id".into())),
         None => Ok(None),
     }
 }
 
-/// Find the DM between `me` (a user) and the target (user or bot), or create it. Idempotent
-/// and race-safe via `uq_channels_dm_key`. Returns the dm channel's id.
-pub async fn find_or_create_dm(
+pub async fn open_dm(
     db: &PgPool,
-    me: Uuid,
-    target_id: &str,
-    target_is_bot: bool,
-) -> Result<Uuid, AppError> {
-    let target_id = target_id.trim();
-    if target_id.is_empty() {
-        return Err(AppError::BadRequest("target id required".into()));
-    }
-    if !target_is_bot && target_id == me.to_string() {
-        return Err(AppError::BadRequest("cannot DM yourself".into()));
-    }
-    let key = dm_key(me, target_id, target_is_bot);
-
-    if let Some(id) = find_by_key(db, &key).await? {
-        return Ok(id); // reuse — no new workspace, no new members
+    initiator: Participant,
+    target: Participant,
+) -> Result<DmOpenResult, AppError> {
+    let key = dm_key(initiator, target)?;
+    if let Some(channel_id) = find_by_key(db, &key).await? {
+        return Ok(DmOpenResult {
+            channel_id,
+            created: false,
+        });
     }
 
-    // create, anchored to the initiator's personal workspace (FK anchor only; access is by
-    // channel membership, so the other participant still reaches it).
-    let ws = workspaces::get_or_create_personal_workspace(db, me).await?;
-    let channel_id = Uuid::new_v4().to_string();
+    let anchor_user = match (initiator, target) {
+        (Participant::User(user), _) | (_, Participant::User(user)) => user,
+        _ => unreachable!("bot-bot rejected above"),
+    };
+    let workspace_id = workspaces::get_or_create_personal_workspace(db, anchor_user).await?;
+    let proposed_channel_id = Uuid::new_v4();
     let mut tx = db.begin().await.map_err(AppError::Db)?;
     let created = sqlx::query_scalar::<_, String>(
         "INSERT INTO channels (channel_id, workspace_id, name, type, dm_key)
@@ -68,44 +102,69 @@ pub async fn find_or_create_dm(
          ON CONFLICT (dm_key) WHERE type = 'dm' DO NOTHING
          RETURNING channel_id",
     )
-    .bind(&channel_id)
-    .bind(ws.to_string())
+    .bind(proposed_channel_id.to_string())
+    .bind(workspace_id.to_string())
     .bind(&key)
     .fetch_optional(&mut *tx)
     .await
     .map_err(AppError::Db)?;
 
     let Some(channel_id) = created else {
-        // lost a concurrent race — the winner created it with its members; re-select.
         tx.rollback().await.ok();
-        return find_by_key(db, &key)
+        let channel_id = find_by_key(db, &key)
             .await?
-            .ok_or_else(|| AppError::Internal("dm vanished after conflict".into()));
+            .ok_or_else(|| AppError::Internal("dm vanished after conflict".into()))?;
+        return Ok(DmOpenResult {
+            channel_id,
+            created: false,
+        });
     };
 
-    // both participants are members; user peers are 'owner' (symmetric), a bot is 'member'.
-    sqlx::query(
-        "INSERT INTO channel_memberships (channel_id, member_id, member_type, role, added_by)
-         VALUES ($1, $2, 'user', 'owner', $2) ON CONFLICT DO NOTHING",
-    )
-    .bind(&channel_id)
-    .bind(me.to_string())
-    .execute(&mut *tx)
-    .await
-    .map_err(AppError::Db)?;
-    sqlx::query(
-        "INSERT INTO channel_memberships (channel_id, member_id, member_type, role, added_by)
-         VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-    )
-    .bind(&channel_id)
-    .bind(target_id)
-    .bind(if target_is_bot { "bot" } else { "user" })
-    .bind(if target_is_bot { "member" } else { "owner" })
-    .bind(me.to_string())
-    .execute(&mut *tx)
-    .await
-    .map_err(AppError::Db)?;
+    for participant in [initiator, target] {
+        sqlx::query(
+            "INSERT INTO channel_memberships
+                (channel_id, member_id, member_type, role, added_by)
+             VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+        )
+        .bind(&channel_id)
+        .bind(participant.id().to_string())
+        .bind(participant.member_type())
+        .bind(if matches!(participant, Participant::User(_)) {
+            "owner"
+        } else {
+            "member"
+        })
+        .bind(initiator.id().to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::Db)?;
+    }
     tx.commit().await.map_err(AppError::Db)?;
+    Ok(DmOpenResult {
+        channel_id: Uuid::parse_str(&channel_id)
+            .map_err(|_| AppError::Internal("invalid channel_id".into()))?,
+        created: true,
+    })
+}
 
-    Uuid::parse_str(&channel_id).map_err(|_| AppError::Internal("invalid channel_id".into()))
+/// Compatibility wrapper for existing human REST callers and integration tests.
+pub async fn find_or_create_dm(
+    db: &PgPool,
+    me: Uuid,
+    target_id: &str,
+    target_is_bot: bool,
+) -> Result<Uuid, AppError> {
+    let target = Uuid::parse_str(target_id)
+        .map_err(|_| AppError::BadRequest("target id must be a uuid".into()))?;
+    Ok(open_dm(
+        db,
+        Participant::User(me),
+        if target_is_bot {
+            Participant::Bot(target)
+        } else {
+            Participant::User(target)
+        },
+    )
+    .await?
+    .channel_id)
 }

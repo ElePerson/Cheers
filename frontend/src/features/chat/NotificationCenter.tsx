@@ -43,7 +43,22 @@ async function refreshLists() {
 }
 
 function label(n: NotificationItem): string {
-  return n.kind === "channel_invite" ? `#${n.title}` : n.title;
+  return n.kind === "channel_invite" || n.kind === "bot_channel_invite"
+    ? `#${n.title}`
+    : n.title;
+}
+
+function kindLabel(n: NotificationItem): string {
+  switch (n.kind) {
+    case "friend_request":
+      return "Friend request";
+    case "channel_invite":
+      return "Channel invite";
+    case "bot_channel_invite":
+      return "Bot approval";
+    default:
+      return "Workspace invite";
+  }
 }
 
 function toCardMessage(a: FleetApproval, botName?: string): Message {
@@ -192,7 +207,7 @@ export function ActivityCenter() {
               <EmptyState
                 icon={Bell}
                 title="Nothing waiting"
-                hint="Approvals and channel invites appear here."
+                hint="Approvals, friend requests, and invitations appear here."
               />
             )}
 
@@ -235,14 +250,13 @@ export function ActivityCenter() {
                     >
                       <div className="min-w-0 flex-1">
                         <p className="text-sm text-zinc-200 truncate">
-                          {n.kind === "channel_invite"
-                            ? "Channel invite"
-                            : "Workspace invite"}{" "}
-                          · {label(n)}
+                          {kindLabel(n)} · {label(n)}
                         </p>
                         <p className="text-[11px] text-zinc-400">
-                          Role {n.role}
-                          {n.invited_by ? ` · from ${n.invited_by}` : ""}
+                          {n.role ? `Role ${n.role}` : "Needs your response"}
+                          {n.bot_name ? ` · ${n.bot_name}` : ""}
+                          {n.actor_name ? ` · from ${n.actor_name}` : ""}
+                          {n.requested_cwd ? ` · ${n.requested_cwd}` : ""}
                         </p>
                       </div>
                       <Button

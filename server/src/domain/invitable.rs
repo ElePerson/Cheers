@@ -1,8 +1,8 @@
 //! 频道邀请候选搜索（人机统一的邀请入口）。
 //!
 //! 一个查询同时返回可邀请的用户和 bot，供前端统一邀请选择器使用：
-//! - 用户：目标频道所在 workspace 的 active 成员（workspace-first 模型：频道邀请
-//!   只能面向本 workspace 成员，故不再并入好友）。
+//! - 用户：目标频道所在 workspace 的 active/pending members, plus the
+//!   caller's accepted friends for private-channel two-stage invitations.
 //! - bot：未禁用，且调用者按 SESSION_WORKDIR_ROOTSET 的 AND-gate 有权邀请
 //!   （平台管理员 / bot owner / 持有该 bot 在此频道的 `cheers/session_create`
 //!   INITIATE 授权，fail-closed）。
@@ -31,6 +31,9 @@ pub struct InvitableItem {
     /// bot：connector 双 WS 在线；用户：候选可能不在频道内，无 presence 语义 → None。
     pub is_online: Option<bool>,
     pub already_member: bool,
+    /// active | pending | none (bots use null).
+    pub workspace_status: Option<String>,
+    pub requires_workspace_acceptance: bool,
 }
 
 /// 每类候选的返回上限（用户、bot 各自截断）。
@@ -59,20 +62,23 @@ pub async fn search_invitable(
     }
     let pattern = format!("%{}%", escape_like_pattern(query));
 
-    let mut items = search_users(db, channel_id, &pattern).await?;
+    let mut items = search_users(db, caller.user_id, channel_id, &pattern).await?;
     items.extend(search_bots(db, bot_locator, caller, channel_id, &pattern).await?);
     Ok(items)
 }
 
-/// 用户候选：目标频道所在 workspace 的 active 成员，按名字子串匹配。
+/// Human candidates: active/pending workspace members and, for private
+/// channels, accepted friends of the caller.
 /// `already_member` 同时覆盖现有成员与已发出的待接受邀请，前端一并置灰。
 async fn search_users(
     db: &PgPool,
+    caller_user_id: &str,
     channel_id: &str,
     pattern: &str,
 ) -> Result<Vec<InvitableItem>, AppError> {
     let rows = sqlx::query(
         "SELECT u.user_id, u.username, u.display_name, u.avatar_url,
+                COALESCE(wm.status, 'none') AS workspace_status,
                 (EXISTS(
                     SELECT 1 FROM channel_memberships cm
                     WHERE cm.channel_id = $1 AND cm.member_id = u.user_id
@@ -82,17 +88,29 @@ async fn search_users(
                     WHERE ci.channel_id = $1 AND ci.user_id = u.user_id
                 )) AS already_member
          FROM users u
-         JOIN workspace_memberships wm
-                ON wm.user_id = u.user_id AND wm.status = 'active'
-         JOIN channels c
-                ON c.workspace_id = wm.workspace_id AND c.channel_id = $1
+         JOIN channels c ON c.channel_id = $1
+         LEFT JOIN workspace_memberships wm
+                ON wm.user_id = u.user_id AND wm.workspace_id = c.workspace_id
          WHERE u.is_deleted = FALSE
            AND (u.username ILIKE $2 OR u.display_name ILIKE $2)
+           AND (
+                wm.status = 'active'
+                OR (c.type = 'private' AND (
+                    wm.status = 'pending'
+                    OR EXISTS (
+                        SELECT 1 FROM friendships f
+                        WHERE f.status = 'accepted'
+                          AND ((f.user_id = $3 AND f.friend_id = u.user_id)
+                            OR (f.user_id = u.user_id AND f.friend_id = $3))
+                    )
+                ))
+           )
          ORDER BY u.username
-         LIMIT $3",
+         LIMIT $4",
     )
     .bind(channel_id)
     .bind(pattern)
+    .bind(caller_user_id)
     .bind(PER_KIND_LIMIT)
     .fetch_all(db)
     .await
@@ -100,14 +118,21 @@ async fn search_users(
 
     Ok(rows
         .into_iter()
-        .map(|row| InvitableItem {
-            member_id: row.try_get("user_id").unwrap_or_default(),
-            member_type: "user",
-            username: row.try_get("username").ok(),
-            display_name: row.try_get("display_name").ok(),
-            avatar_url: row.try_get("avatar_url").ok().flatten(),
-            is_online: None,
-            already_member: row.try_get("already_member").unwrap_or(false),
+        .map(|row| {
+            let workspace_status: String = row
+                .try_get("workspace_status")
+                .unwrap_or_else(|_| "none".into());
+            InvitableItem {
+                member_id: row.try_get("user_id").unwrap_or_default(),
+                member_type: "user",
+                username: row.try_get("username").ok(),
+                display_name: row.try_get("display_name").ok(),
+                avatar_url: row.try_get("avatar_url").ok().flatten(),
+                is_online: None,
+                already_member: row.try_get("already_member").unwrap_or(false),
+                requires_workspace_acceptance: workspace_status != "active",
+                workspace_status: Some(workspace_status),
+            }
         })
         .collect())
 }
@@ -123,11 +148,14 @@ async fn search_bots(
 ) -> Result<Vec<InvitableItem>, AppError> {
     let rows = sqlx::query(
         "SELECT b.bot_id, b.username, b.display_name, b.avatar_url, b.created_by,
-                EXISTS(
+                (EXISTS(
                     SELECT 1 FROM channel_memberships cm
                     WHERE cm.channel_id = $1 AND cm.member_id = b.bot_id
                       AND cm.member_type = 'bot'
-                ) AS already_member
+                ) OR EXISTS(
+                    SELECT 1 FROM bot_channel_invites bci
+                    WHERE bci.channel_id = $1 AND bci.bot_id = b.bot_id
+                )) AS already_member
          FROM bot_accounts b
          WHERE b.is_disabled = FALSE
            AND (b.username ILIKE $2 OR b.display_name ILIKE $2)
@@ -177,6 +205,8 @@ async fn search_bots(
             avatar_url: row.try_get("avatar_url").ok().flatten(),
             is_online: Some(is_online),
             already_member: row.try_get("already_member").unwrap_or(false),
+            workspace_status: None,
+            requires_workspace_acceptance: false,
         });
     }
     Ok(items)
