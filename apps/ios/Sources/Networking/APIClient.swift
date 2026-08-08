@@ -1162,6 +1162,14 @@ extension APIClient {
         try await postEmpty("/channels/\(channelId)/decline")
     }
 
+    func acceptBotChannelInvite(channelId: String, botId: String) async throws {
+        try await postEmpty("/channels/\(channelId)/bot-invites/\(botId)/accept")
+    }
+
+    func declineBotChannelInvite(channelId: String, botId: String) async throws {
+        try await postEmpty("/channels/\(channelId)/bot-invites/\(botId)/decline")
+    }
+
     // MARK: Agents
 
     func listBots() async throws -> [BotDto] {

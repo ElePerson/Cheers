@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { ErrorState } from "@/components/ui/error-state";
 import { useChatStore } from "@/stores/chatStore";
 import { useNotificationStore } from "@/stores/notificationStore";
+import { useActivityUiStore } from "@/stores/activityUiStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { getActivePushChannel, markChatLayoutMounted } from "@/lib/push";
 import { notifyNative } from "@/lib/desktop";
@@ -86,6 +87,7 @@ export default function ChatLayout() {
   // mobile. See useUserSocket / NotificationCenter.
   const refreshNotifications = useNotificationStore((s) => s.refresh);
   const upsertNotification = useNotificationStore((s) => s.upsert);
+  const removeNotificationById = useNotificationStore((s) => s.removeById);
   useEffect(() => {
     void refreshNotifications();
   }, [refreshNotifications]);
@@ -108,6 +110,28 @@ export default function ChatLayout() {
       }
       return;
     }
+    if (frameType === "notification_resolved") {
+      const resolved = raw as { id?: string } | null;
+      if (resolved?.id) removeNotificationById(resolved.id);
+      return;
+    }
+    if (frameType === "dm_created") {
+      void listDms()
+        .then((dms) => {
+          const current = useChatStore.getState();
+          if (
+            current.personalWorkspace &&
+            current.selectedWorkspaceId === current.personalWorkspace.workspace_id
+          ) {
+            current.setChannels([
+              ...current.channels.filter((channel) => channel.type !== "dm"),
+              ...dms,
+            ]);
+          }
+        })
+        .catch(() => {});
+      return;
+    }
     // Desktop shell: permission_request / mention nudges arrive on this
     // user-scoped socket (the gateway mirrors its Web Push payloads here —
     // WKWebView has no Push API). Same suppression as the service worker:
@@ -125,6 +149,23 @@ export default function ChatLayout() {
       tool?: PermissionContentData["tool"];
       options?: PermissionOption[];
     } | null;
+    if (nudge?.kind === "dm") {
+      void listDms()
+        .then((dms) => {
+          const current = useChatStore.getState();
+          if (
+            current.personalWorkspace &&
+            current.selectedWorkspaceId === current.personalWorkspace.workspace_id
+          ) {
+            current.setChannels([
+              ...current.channels.filter((channel) => channel.type !== "dm"),
+              ...dms,
+            ]);
+          }
+        })
+        .catch(() => {});
+      return;
+    }
     if (nudge?.kind === "permission_request" || nudge?.kind === "mention") {
       if (
         isTauri() &&
@@ -168,11 +209,26 @@ export default function ChatLayout() {
       return;
     }
     const n = raw as NotificationItem | null;
-    if (!n || (n.kind !== "workspace_invite" && n.kind !== "channel_invite")) return;
+    if (
+      !n ||
+      ![
+        "friend_request",
+        "workspace_invite",
+        "channel_invite",
+        "bot_channel_invite",
+      ].includes(n.kind)
+    ) return;
     upsertNotification(n);
-    const where = n.kind === "channel_invite" ? `#${n.title}` : n.title;
-    toast(`${n.invited_by ?? "Someone"} invited you to ${where}`, { icon: "🔔" });
+    toast(`${n.actor_name ?? "Someone"}: ${n.title}`, { icon: "🔔" });
   });
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("activity") !== "1") return;
+    useActivityUiStore.getState().requestOpen();
+    params.delete("activity");
+    const query = params.toString();
+    navigate(location.pathname + (query ? `?${query}` : ""), { replace: true });
+  }, [location.pathname, location.search, navigate]);
   // Mobile stacked navigation (Telegram-style): the conversation screen is "pushed"
   // over the list by writing `{ chat: true }` into the history entry's state, so the
   // browser/hardware Back button pops back to the list naturally.

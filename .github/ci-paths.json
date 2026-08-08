@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "workflows": {
+    "ci": {
+      "global_patterns": [
+        ".github/ci-paths.json",
+        ".github/workflows/ci.yml",
+        "scripts/ci_tool.py",
+        "scripts/tests/test_ci_tool.py"
+      ],
+      "lanes": {
+        "gateway": [
+          "server/**",
+          "packages/cheers-acp-connector-rs/bridge-protocol/**"
+        ],
+        "frontend": [
+          "frontend/**",
+          "website/**"
+        ],
+        "plugin": [
+          "packages/cheers-acp-connector-rs/**",
+          "packages/cheers-mcp-server/**"
+        ],
+        "desktop": [
+          "apps/macos/**"
+        ],
+        "ios": [
+          "apps/ios/**",
+          "scripts/check-pbxproj.py"
+        ]
+      }
+    },
+    "cd": {
+      "global_patterns": [
+        ".dockerignore",
+        ".github/ci-paths.json",
+        ".github/workflows/cd.yml",
+        "docker-compose.yml.template",
+        "scripts/ci_tool.py"
+      ],
+      "lanes": {
+        "gateway": [
+          "server/**",
+          "packages/cheers-acp-connector-rs/bridge-protocol/**"
+        ],
+        "frontend": [
+          "frontend/**",
+          "website/**"
+        ]
+      }
+    }
+  }
+}

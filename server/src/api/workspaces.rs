@@ -77,7 +77,8 @@ pub(crate) async fn ensure_workspace_admin(
     let ok = sqlx::query(
         "SELECT EXISTS(
             SELECT 1 FROM workspace_memberships
-            WHERE workspace_id = $1 AND user_id = $2 AND role IN ('owner', 'admin')
+            WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'
+              AND role IN ('owner', 'admin')
         ) AS ok",
     )
     .bind(workspace_id)
@@ -380,29 +381,6 @@ async fn resolve_user_id(state: &AppState, identifier: &str) -> Result<String, A
     Ok(row.try_get("user_id").unwrap_or_default())
 }
 
-/// Best-effort display name for a user (falls back to username; None if unknown).
-async fn user_display_name(state: &AppState, user_id: &str) -> Option<String> {
-    sqlx::query("SELECT COALESCE(display_name, username) AS name FROM users WHERE user_id = $1")
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|r| r.try_get::<Option<String>, _>("name").ok().flatten())
-}
-
-/// Workspace name — used to label an invite notification.
-async fn workspace_name(state: &AppState, workspace_id: &str) -> String {
-    sqlx::query("SELECT name FROM workspaces WHERE workspace_id = $1")
-        .bind(workspace_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|r| r.try_get::<String, _>("name").ok())
-        .unwrap_or_default()
-}
-
 /// POST /api/v1/workspaces/{workspace_id}/invite — an admin invites a user, who must
 /// then accept. Creates a *pending* row that grants no access until accepted (see
 /// `accept_invite`). Every membership now flows through this path — there is no
@@ -447,21 +425,12 @@ pub async fn invite_workspace_member(
     .await?;
     let already_member = res.rows_affected() == 0;
     if !already_member {
-        // Live push to the invitee's notification center (best-effort; durable in DB).
-        let inviter = user_display_name(&state, &current_user_id(&claims)).await;
-        let ws_name = workspace_name(&state, &workspace_id).await;
-        crate::api::notifications::push_notification(
+        crate::api::notifications::deliver_notification_by_id(
             &state,
             &user_id,
-            serde_json::json!({
-                "kind": "workspace_invite",
-                "workspace_id": workspace_id,
-                "title": ws_name,
-                "invited_by": inviter,
-                "role": role,
-            }),
+            &format!("workspace:{workspace_id}"),
         )
-        .await;
+        .await?;
     }
     Ok(Json(serde_json::json!({
         "workspace_id": workspace_id,
@@ -517,6 +486,14 @@ pub async fn accept_invite(
     if res.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
+    crate::api::notifications::resolve_notification(
+        &state,
+        &claims.sub,
+        &format!("workspace:{workspace_id}"),
+    )
+    .await;
+    crate::api::notifications::deliver_unlocked_channel_invites(&state, &claims.sub, &workspace_id)
+        .await?;
     Ok(Json(
         serde_json::json!({"workspace_id": workspace_id, "status": "active"}),
     ))
@@ -528,35 +505,59 @@ pub async fn decline_invite(
     Extension(claims): Extension<Claims>,
     Path(workspace_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    sqlx::query(
-        "DELETE FROM workspace_memberships
-         WHERE workspace_id = $1 AND user_id = $2 AND status = 'pending'",
+    let channel_ids =
+        crate::domain::workspaces::decline_pending_invite(&state.db, &workspace_id, &claims.sub)
+            .await?;
+    for channel_id in channel_ids {
+        crate::api::notifications::resolve_notification(
+            &state,
+            &claims.sub,
+            &format!("channel:{channel_id}"),
+        )
+        .await;
+    }
+    crate::api::notifications::resolve_notification(
+        &state,
+        &claims.sub,
+        &format!("workspace:{workspace_id}"),
     )
-    .bind(&workspace_id)
-    .bind(current_user_id(&claims))
-    .execute(&state.db)
-    .await?;
+    .await;
     Ok(Json(serde_json::json!({"declined": true})))
 }
 
-/// Cut a user's pending channel invites within a workspace when they leave / are
-/// removed from it — a pending invite must not outlive workspace membership
-/// (workspace-first), or it becomes a back-door to guest access at accept time.
-/// Mirrors `channels::remove_channel_member`'s invite cleanup.
-async fn purge_channel_invites_in_workspace(
+/// Remove a human from every non-DM channel in a workspace before removing the
+/// workspace membership. The deferred DB constraint is the final guard; this
+/// helper owns the domain cleanup and realtime revocation.
+async fn detach_workspace_member(
     state: &AppState,
     workspace_id: &str,
     user_id: &str,
 ) -> Result<(), AppError> {
-    sqlx::query(
-        "DELETE FROM channel_invites
-         WHERE user_id = $1
-           AND channel_id IN (SELECT channel_id FROM channels WHERE workspace_id = $2)",
+    let detached =
+        crate::domain::workspaces::detach_member(&state.db, workspace_id, user_id).await?;
+    for channel_id in detached.invite_channel_ids {
+        crate::api::notifications::resolve_notification(
+            state,
+            user_id,
+            &format!("channel:{channel_id}"),
+        )
+        .await;
+    }
+    crate::api::notifications::resolve_notification(
+        state,
+        user_id,
+        &format!("workspace:{workspace_id}"),
     )
-    .bind(user_id)
-    .bind(workspace_id)
-    .execute(&state.db)
-    .await?;
+    .await;
+    for channel_id in detached.channel_ids {
+        if let (Ok(uid), Ok(cid)) = (Uuid::parse_str(user_id), Uuid::parse_str(&channel_id)) {
+            state
+                .conn_manager
+                .revoke_channel_subscriptions(uid, cid)
+                .await;
+            crate::gateway::presence::broadcast_presence(state, cid).await;
+        }
+    }
     Ok(())
 }
 
@@ -572,12 +573,7 @@ pub async fn remove_workspace_member(
         &claims.role,
     )
     .await?;
-    sqlx::query("DELETE FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2")
-        .bind(&workspace_id)
-        .bind(&user_id)
-        .execute(&state.db)
-        .await?;
-    purge_channel_invites_in_workspace(&state, &workspace_id, &user_id).await?;
+    detach_workspace_member(&state, &workspace_id, &user_id).await?;
     Ok(Json(serde_json::json!({"removed": true})))
 }
 
@@ -612,14 +608,17 @@ pub async fn leave_workspace(
     Path(workspace_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let me = current_user_id(&claims);
-    let role: Option<String> = sqlx::query_scalar(
-        "SELECT role FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2",
+    let membership_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM workspace_memberships
+         WHERE workspace_id = $1 AND user_id = $2)",
     )
     .bind(&workspace_id)
     .bind(&me)
-    .fetch_optional(&state.db)
+    .fetch_one(&state.db)
     .await?;
-    let role = role.ok_or(AppError::NotFound)?;
+    if !membership_exists {
+        return Err(AppError::NotFound);
+    }
 
     let kind: Option<String> =
         sqlx::query_scalar("SELECT kind FROM workspaces WHERE workspace_id = $1")
@@ -632,36 +631,7 @@ pub async fn leave_workspace(
         ));
     }
 
-    if role == "owner" {
-        // Owner leaving reduces the owner count — serialize against concurrent
-        // owner leaves/demotes: lock the owner rows, re-count, delete, in one tx.
-        let mut tx = state.db.begin().await?;
-        let owners = sqlx::query(
-            "SELECT 1 FROM workspace_memberships
-             WHERE workspace_id = $1 AND role = 'owner' AND status = 'active' FOR UPDATE",
-        )
-        .bind(&workspace_id)
-        .fetch_all(&mut *tx)
-        .await?;
-        if owners.len() <= 1 {
-            return Err(AppError::Forbidden(
-                "you are the last owner — transfer ownership or delete the workspace first".into(),
-            ));
-        }
-        sqlx::query("DELETE FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2")
-            .bind(&workspace_id)
-            .bind(&me)
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-    } else {
-        sqlx::query("DELETE FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2")
-            .bind(&workspace_id)
-            .bind(&me)
-            .execute(&state.db)
-            .await?;
-    }
-    purge_channel_invites_in_workspace(&state, &workspace_id, &me).await?;
+    detach_workspace_member(&state, &workspace_id, &me).await?;
     Ok(Json(serde_json::json!({ "left": true })))
 }
 
@@ -692,59 +662,70 @@ pub async fn set_workspace_member_role(
             "role must be owner, admin, or member".into(),
         ));
     }
-    let current: Option<String> = sqlx::query_scalar(
+    // Serialize every role write with leave/removal. Both paths lock this same
+    // workspace row before revalidating authority and the active-owner count.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT workspace_id FROM workspaces WHERE workspace_id = $1 FOR UPDATE")
+        .bind(&workspace_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let locked_current: String = sqlx::query_scalar(
         "SELECT role FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2",
     )
     .bind(&workspace_id)
     .bind(&user_id)
-    .fetch_optional(&state.db)
-    .await?;
-    let current = current.ok_or(AppError::NotFound)?;
-
-    // Privilege guard: granting 'owner' or modifying an existing owner requires the
-    // caller to be an owner (or global admin) — a plain 'admin' can't mint/seize owner.
-    if (role == "owner" || current == "owner")
-        && !caller_workspace_is_owner(&state, &workspace_id, &claims).await?
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    let platform_admin = matches!(claims.role.as_str(), "system_admin" | "admin");
+    let locked_caller_role: Option<String> = if platform_admin {
+        None
+    } else {
+        sqlx::query_scalar(
+            "SELECT role FROM workspace_memberships
+             WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'",
+        )
+        .bind(&workspace_id)
+        .bind(&claims.sub)
+        .fetch_optional(&mut *tx)
+        .await?
+    };
+    if !platform_admin && !matches!(locked_caller_role.as_deref(), Some("owner" | "admin")) {
+        return Err(AppError::Forbidden("workspace admin required".into()));
+    }
+    // Granting 'owner' or modifying an existing owner requires a workspace owner
+    // (or platform admin); a plain workspace admin cannot mint or seize owners.
+    if (role == "owner" || locked_current == "owner")
+        && !platform_admin
+        && locked_caller_role.as_deref() != Some("owner")
     {
         return Err(AppError::Forbidden(
             "only an owner or a system admin can grant or change the owner role".into(),
         ));
     }
-
-    if current == "owner" && role != "owner" {
-        // Demoting an owner reduces the owner count — serialize like leave.
-        let mut tx = state.db.begin().await?;
-        let owners = sqlx::query(
-            "SELECT 1 FROM workspace_memberships
-             WHERE workspace_id = $1 AND role = 'owner' AND status = 'active' FOR UPDATE",
+    if locked_current == "owner" && role != "owner" {
+        let owner_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM workspace_memberships
+             WHERE workspace_id = $1 AND role = 'owner' AND status = 'active'",
         )
         .bind(&workspace_id)
-        .fetch_all(&mut *tx)
+        .fetch_one(&mut *tx)
         .await?;
-        if owners.len() <= 1 {
+        if owner_count <= 1 {
             return Err(AppError::Forbidden(
                 "can't demote the last owner — promote another owner first".into(),
             ));
         }
-        sqlx::query(
-            "UPDATE workspace_memberships SET role = $3 WHERE workspace_id = $1 AND user_id = $2",
-        )
-        .bind(&workspace_id)
-        .bind(&user_id)
-        .bind(&role)
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-    } else {
-        sqlx::query(
-            "UPDATE workspace_memberships SET role = $3 WHERE workspace_id = $1 AND user_id = $2",
-        )
-        .bind(&workspace_id)
-        .bind(&user_id)
-        .bind(&role)
-        .execute(&state.db)
-        .await?;
     }
+    sqlx::query(
+        "UPDATE workspace_memberships SET role = $3 WHERE workspace_id = $1 AND user_id = $2",
+    )
+    .bind(&workspace_id)
+    .bind(&user_id)
+    .bind(&role)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     Ok(Json(
         serde_json::json!({ "user_id": user_id, "role": role }),
     ))

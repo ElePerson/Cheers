@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// New channel (name + text/voice + public/private → POST /channels) or New DM
-/// (pick a bot → POST /channels/dm). On success it opens the new conversation.
+/// (pick a friend or bot → POST /channels/dm). On success it opens the conversation.
 struct NewConversationSheet: View {
     let startAsDM: Bool
     @Environment(AppModel.self) private var app
@@ -12,6 +12,7 @@ struct NewConversationSheet: View {
     @State private var isPrivate = false
     @State private var kind: ChannelKind = .text
     @State private var bots: [BotDto] = []
+    @State private var friends: [FriendDto] = []
     @State private var busy = false
     @State private var errorText: String?
 
@@ -115,10 +116,32 @@ struct NewConversationSheet: View {
         }
     }
 
-    // MARK: DM (bots)
+    // MARK: DM (people + bots)
 
     private var dmList: some View {
         List {
+            Section("Friends") {
+                if friends.isEmpty {
+                    Text("No friends available").foregroundStyle(Theme.textSecondary)
+                }
+                ForEach(friends) { friend in
+                    Button { startDM(with: friend) } label: {
+                        HStack(spacing: 11) {
+                            AvatarView(
+                                seedId: friend.friendId,
+                                name: friend.displayName ?? friend.username,
+                                size: 34,
+                                monochrome: true
+                            )
+                            Text(friend.displayName ?? friend.username).foregroundStyle(Theme.textBody)
+                            Spacer()
+                            if busy { ProgressView().controlSize(.small) }
+                        }
+                        .frame(minHeight: 48)
+                    }
+                    .disabled(busy)
+                }
+            }
             Section {
                 if bots.isEmpty {
                     Text("No agents available").foregroundStyle(Theme.textSecondary)
@@ -137,16 +160,17 @@ struct NewConversationSheet: View {
                 }
             } header: {
                 Text("Message an agent")
-            } footer: {
-                Text("To DM a person, add them in Friends first.")
             }
             if let errorText {
                 Text(errorText).font(.subheadline).foregroundStyle(Theme.danger)
             }
         }
         .task {
-            guard bots.isEmpty, let api = app.api else { return }
-            bots = (try? await api.listBots()) ?? []
+            guard bots.isEmpty, friends.isEmpty, let api = app.api else { return }
+            async let loadedBots = api.listBots()
+            async let loadedFriends = api.listFriends()
+            bots = (try? await loadedBots) ?? []
+            friends = (try? await loadedFriends) ?? []
         }
     }
 
@@ -157,6 +181,22 @@ struct NewConversationSheet: View {
         Task {
             do {
                 let channel = try await api.createDM(botId: bot.botId)
+                dismiss()
+                shell.openChat(channel)
+            } catch {
+                errorText = (error as? APIError)?.errorDescription ?? error.localizedDescription
+                busy = false
+            }
+        }
+    }
+
+    private func startDM(with friend: FriendDto) {
+        guard let api = app.api, !busy else { return }
+        busy = true
+        errorText = nil
+        Task {
+            do {
+                let channel = try await api.createDM(userId: friend.friendId)
                 dismiss()
                 shell.openChat(channel)
             } catch {

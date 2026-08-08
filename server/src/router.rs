@@ -321,6 +321,14 @@ fn build_authed_routes(state: AppState) -> Router<AppState> {
             post(api::channels::decline_channel_invite),
         )
         .route(
+            "/api/v1/channels/:channel_id/bot-invites/:bot_id/accept",
+            post(api::channels::accept_bot_channel_invite),
+        )
+        .route(
+            "/api/v1/channels/:channel_id/bot-invites/:bot_id/decline",
+            post(api::channels::decline_bot_channel_invite),
+        )
+        .route(
             "/api/v1/channels/:channel_id/messages",
             post(api::messages::send_message).get(api::messages::list_messages),
         )

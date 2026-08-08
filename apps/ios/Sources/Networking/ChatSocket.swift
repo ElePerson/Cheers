@@ -60,6 +60,9 @@ enum SocketEvent {
     case memberUpdated(channelId: String, memberId: String?)
     case presence(channelId: String, PresencePayload)
     case voiceTranscript(channelId: String, VoiceTranscriptSegment)
+    case notification(NotificationDto)
+    case notificationResolved(id: String)
+    case dmCreated(channelId: String)
     /// A data-free "this board changed" tick; consumers re-pull through their own
     /// authz'd resource read. `board` ∈ plan/cost/commands/files/workspace…
     case boardSignal(channelId: String, board: String)
@@ -362,6 +365,29 @@ final class ChatSocket: NSObject {
         let board: String?
     }
 
+    private struct NotificationResolvedPayload: Decodable {
+        let id: String
+    }
+
+    private struct DMCreatedPayload: Decodable {
+        let channelId: String
+        enum CodingKeys: String, CodingKey { case channelId = "channel_id" }
+    }
+
+    private struct DMNotificationPayload: Decodable {
+        let kind: String
+        let channelId: String
+        enum CodingKeys: String, CodingKey { case kind; case channelId = "channel_id" }
+    }
+
+    static func directMessageChannelId(fromNotificationFrame data: Data) -> String? {
+        guard let payload = try? JSONDecoder().decode(
+            DataEnvelope<DMNotificationPayload>.self,
+            from: data
+        ), payload.data.kind == "dm" else { return nil }
+        return payload.data.channelId
+    }
+
     private func handleFrame(_ text: String) {
         guard let data = text.data(using: .utf8),
               let head = try? JSONDecoder().decode(FrameHead.self, from: data) else { return }
@@ -434,6 +460,20 @@ final class ChatSocket: NSObject {
             if let channelId = head.channelId,
                let payload = try? JSONDecoder().decode(VoiceTranscriptPayload.self, from: data) {
                 onEvent?(.voiceTranscript(channelId: channelId, payload.data))
+            }
+        case "notification":
+            if let payload = try? JSONDecoder().decode(DataEnvelope<NotificationDto>.self, from: data) {
+                onEvent?(.notification(payload.data))
+            } else if let channelId = Self.directMessageChannelId(fromNotificationFrame: data) {
+                onEvent?(.dmCreated(channelId: channelId))
+            }
+        case "notification_resolved":
+            if let payload = try? JSONDecoder().decode(DataEnvelope<NotificationResolvedPayload>.self, from: data) {
+                onEvent?(.notificationResolved(id: payload.data.id))
+            }
+        case "dm_created":
+            if let payload = try? JSONDecoder().decode(DataEnvelope<DMCreatedPayload>.self, from: data) {
+                onEvent?(.dmCreated(channelId: payload.data.channelId))
             }
         case "resource_res":
             if let frame = try? JSONDecoder().decode(ResourceResFrame.self, from: data),

@@ -169,7 +169,11 @@ struct MembersSheet: View {
                 }
                 HStack(spacing: 6) {
                     if member.isPending {
-                        Text("Invited · awaiting reply")
+                        Text(member.status == "pending_owner"
+                             ? "Awaiting bot owner approval"
+                             : member.status == "pending_workspace"
+                               ? "Awaiting workspace acceptance"
+                               : "Invited · awaiting reply")
                             .font(.caption)
                             .foregroundStyle(Theme.warning)
                     } else if let role = member.role, role != "member" {
@@ -382,6 +386,10 @@ struct InviteSheet: View {
                         Text("Already in this channel")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    } else if item.requiresWorkspaceAcceptance == true {
+                        Text("Workspace acceptance required first")
+                            .font(.caption)
+                            .foregroundStyle(Theme.warning)
                     }
                 }
                 Spacer()
@@ -426,8 +434,12 @@ struct InviteSheet: View {
                 memberId: item.memberId,
                 memberType: item.memberType
             )
-            // A bot is bound immediately; a user only gets a pending invite.
-            notice = response.status == "pending" ? "Invited \(item.name)" : "Added \(item.name)"
+            switch response.status {
+            case "pending": notice = "Invited \(item.name)"
+            case "pending_workspace": notice = "Invited \(item.name) to the workspace first"
+            case "pending_owner": notice = "Sent \(item.name)'s owner an approval request"
+            default: notice = "Added \(item.name)"
+            }
             errorText = nil
             onChanged()
             scheduleSearch(query)

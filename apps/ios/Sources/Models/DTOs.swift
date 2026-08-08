@@ -959,8 +959,7 @@ struct BotMonitoringUpdate: Encodable {
 struct ChannelMemberDto: Decodable, Identifiable, Hashable {
     let memberId: String
     let memberType: String
-    /// "active" | "pending" — a *directly invited* user sits here as `pending`
-    /// until they accept; they are not a member yet.
+    /// active | pending | pending_workspace | pending_owner.
     let status: String?
     let role: String?
     let username: String?
@@ -968,9 +967,11 @@ struct ChannelMemberDto: Decodable, Identifiable, Hashable {
     let avatarUrl: String?
     let isOnline: Bool?
     let canReceiveAudio: Bool?
+    let requestedCwd: String?
+    let requestedAdditionalDirs: [String]?
 
     var id: String { memberId }
-    var isPending: Bool { status == "pending" }
+    var isPending: Bool { status != nil && status != "active" }
     var isBot: Bool { memberType == "bot" }
     var name: String {
         if let displayName, !displayName.isEmpty { return displayName }
@@ -987,6 +988,8 @@ struct ChannelMemberDto: Decodable, Identifiable, Hashable {
         case avatarUrl = "avatar_url"
         case isOnline = "is_online"
         case canReceiveAudio = "can_receive_audio"
+        case requestedCwd = "requested_cwd"
+        case requestedAdditionalDirs = "requested_additional_dirs"
     }
 }
 
@@ -1002,6 +1005,8 @@ struct InvitableItem: Decodable, Identifiable, Hashable {
     let avatarUrl: String?
     let isOnline: Bool?
     let alreadyMember: Bool?
+    let workspaceStatus: String?
+    let requiresWorkspaceAcceptance: Bool?
 
     var id: String { memberId }
     var isBot: Bool { memberType == "bot" }
@@ -1018,6 +1023,8 @@ struct InvitableItem: Decodable, Identifiable, Hashable {
         case avatarUrl = "avatar_url"
         case isOnline = "is_online"
         case alreadyMember = "already_member"
+        case workspaceStatus = "workspace_status"
+        case requiresWorkspaceAcceptance = "requires_workspace_acceptance"
     }
 }
 
@@ -1274,24 +1281,36 @@ struct ResourceContextBundle: Codable, Hashable {
 // MARK: - Notifications / invites (server/src/api/notifications.rs)
 
 struct NotificationDto: Decodable, Identifiable {
-    /// "workspace_invite" | "channel_invite".
+    let id: String
+    /// friend_request | workspace_invite | channel_invite | bot_channel_invite.
     let kind: String
-    let workspaceId: String
-    let channelId: String?
     let title: String
-    let invitedBy: String?
-    let invitedAt: String?
-    let role: String
+    let actorId: String?
+    let actorName: String?
+    let createdAt: String?
+    let workspaceId: String?
+    let channelId: String?
+    let requesterUserId: String?
+    let botId: String?
+    let botName: String?
+    let role: String?
+    let requestedCwd: String?
+    let requestedAdditionalDirs: [String]?
 
-    var id: String { "\(kind):\(channelId ?? workspaceId)" }
     var isChannelInvite: Bool { kind == "channel_invite" }
 
     enum CodingKeys: String, CodingKey {
-        case kind, title, role
+        case id, kind, title, role
+        case actorId = "actor_id"
+        case actorName = "actor_name"
+        case createdAt = "created_at"
         case workspaceId = "workspace_id"
         case channelId = "channel_id"
-        case invitedBy = "invited_by"
-        case invitedAt = "invited_at"
+        case requesterUserId = "requester_user_id"
+        case botId = "bot_id"
+        case botName = "bot_name"
+        case requestedCwd = "requested_cwd"
+        case requestedAdditionalDirs = "requested_additional_dirs"
     }
 }
 

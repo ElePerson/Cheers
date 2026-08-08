@@ -63,7 +63,12 @@ export function useUserSocket(onFrame: (type: string, data: unknown) => void) {
       }
       // App-wide user frames: invites and voice occupancy for every visible
       // channel, including voice channels that are not currently open.
-      if (frame.type === "notification" || frame.type === "voice_presence") {
+      if (
+        frame.type === "notification" ||
+        frame.type === "notification_resolved" ||
+        frame.type === "dm_created" ||
+        frame.type === "voice_presence"
+      ) {
         cbRef.current(frame.type, frame.data);
       }
     };

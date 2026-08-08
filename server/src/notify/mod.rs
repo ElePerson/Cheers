@@ -98,8 +98,12 @@ pub enum PushKind {
         bot_name: String,
         channel_name: String,
     },
-    /// A workspace/channel invite (mirrors the in-app notification inbox).
-    Invite { title: String },
+    /// A durable actionable Activity item (friend/workspace/channel/bot invite).
+    Activity {
+        notification_id: String,
+        title: String,
+        body: String,
+    },
 }
 
 impl PushKind {
@@ -108,7 +112,7 @@ impl PushKind {
             Self::DirectMessage { channel_id, .. }
             | Self::Mention { channel_id, .. }
             | Self::BotReply { channel_id, .. } => Some(*channel_id),
-            Self::PermissionRequest { .. } | Self::Invite { .. } => None,
+            Self::PermissionRequest { .. } | Self::Activity { .. } => None,
         }
     }
     /// APNs alert title/body — deliberately generic (payload minimization).
@@ -142,7 +146,7 @@ impl PushKind {
                     (format!("#{channel_name}"), format!("{bot_name} replied"))
                 }
             }
-            Self::Invite { title } => ("Invitation".into(), format!("You're invited to {title}")),
+            Self::Activity { title, body, .. } => (title.clone(), body.clone()),
         }
     }
 
@@ -155,7 +159,22 @@ impl PushKind {
             Self::DirectMessage { channel_id, .. } => format!("dm:{channel_id}"),
             Self::Mention { channel_id, .. } => format!("mention:{channel_id}"),
             Self::BotReply { channel_id, .. } => format!("bot-reply:{channel_id}"),
-            Self::Invite { title } => format!("invite:{title}"),
+            Self::Activity {
+                notification_id, ..
+            } => {
+                let raw = format!("activity:{notification_id}");
+                if raw.len() <= 64 {
+                    raw
+                } else {
+                    // APNs rejects collapse identifiers longer than 64 bytes.
+                    // Keep the full notification id in `custom()` for routing,
+                    // and use a deterministic digest only for transport dedupe.
+                    format!(
+                        "activity:{}",
+                        &crate::infra::crypto::sha256_hex(notification_id)[..48]
+                    )
+                }
+            }
         }
     }
 
@@ -198,7 +217,9 @@ impl PushKind {
             Self::BotReply { channel_id, .. } => {
                 json!({ "type": "bot_reply", "channel_id": channel_id })
             }
-            Self::Invite { .. } => json!({ "type": "invite" }),
+            Self::Activity {
+                notification_id, ..
+            } => json!({ "type": "activity", "notification_id": notification_id }),
         }
     }
 
@@ -217,7 +238,7 @@ impl PushKind {
             | Self::DirectMessage { channel_id, .. }
             | Self::Mention { channel_id, .. }
             | Self::BotReply { channel_id, .. } => Some(channel_id.to_string()),
-            Self::Invite { .. } => None,
+            Self::Activity { .. } => None,
         }
     }
 
@@ -227,7 +248,7 @@ impl PushKind {
             Self::DirectMessage { .. } => "dm",
             Self::Mention { .. } => "mention",
             Self::BotReply { .. } => "bot_reply",
-            Self::Invite { .. } => "invite",
+            Self::Activity { .. } => "activity",
         }
     }
 }
@@ -668,5 +689,36 @@ mod tests {
         assert_eq!(custom["approve_option_id"], "allow_once");
         assert!(custom.get("reject_option_id").is_none());
         assert_eq!(kind.category(), Some("ACP_APPROVAL"));
+    }
+
+    #[test]
+    fn activity_uses_notification_identity_not_display_title() {
+        let first = PushKind::Activity {
+            notification_id: "friend:one".into(),
+            title: "New invitation".into(),
+            body: "Open Activity".into(),
+        };
+        let second = PushKind::Activity {
+            notification_id: "friend:two".into(),
+            title: "New invitation".into(),
+            body: "Open Activity".into(),
+        };
+        assert_ne!(first.collapse_id(), second.collapse_id());
+        assert_eq!(first.custom()["type"], "activity");
+        assert_eq!(first.custom()["notification_id"], "friend:one");
+        assert_eq!(first.kind_label(), "activity");
+    }
+
+    #[test]
+    fn long_activity_identity_uses_apns_safe_collapse_id() {
+        let notification_id = format!("bot-channel:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+        let kind = PushKind::Activity {
+            notification_id: notification_id.clone(),
+            title: "Bot invitation".into(),
+            body: "Open Activity".into(),
+        };
+
+        assert!(kind.collapse_id().len() <= 64);
+        assert_eq!(kind.custom()["notification_id"], notification_id);
     }
 }

@@ -328,6 +328,14 @@ fn build_resource_call(
                 params,
             })
         }
+        "open_direct_message" => {
+            let mut params = Map::new();
+            copy_required(args, &mut params, "target_user_id", "target_user_id")?;
+            Ok(ResourceCall {
+                resource: "dm.open",
+                params,
+            })
+        }
         // A bot records its proactive-task decision through the resource path.
         // The gateway validates that the evaluation belongs to this bot before
         // it can create a claim or confirmation message.
@@ -653,6 +661,9 @@ fn tool_definitions() -> Vec<Value> {
         tool("read_sessions", "List channel agent sessions", "List the bot sessions active in this channel (id, bot, mode). Use this to resolve a \"sessions\" context reference.", object_schema(vec![channel_id_prop()], vec!["channel_id"]), true, false),
         tool("read_cost", "Read channel usage / cost", "Read token-usage / cost totals for this channel. Use this to resolve a \"cost\" context reference.", object_schema(vec![channel_id_prop()], vec!["channel_id"]), true, false),
         tool("leave_channel", "Leave a channel", "Remove yourself from a channel you are a member of (like a human member leaving). Not allowed for DMs. You stop receiving that channel's tasks immediately; a human has to re-invite you to get you back, so only leave when you are sure your work there is done.", object_schema(vec![channel_id_prop()], vec!["channel_id"]), false, true),
+        tool("open_direct_message", "Open a direct message", "Find or create your one-to-one DM with an eligible user. The user must be your owner or currently share a non-DM channel with you. Returns channel_id; send the message with post_message using that channel_id.", object_schema(vec![
+            string_prop("target_user_id", "User UUID for your owner or a user who shares a channel with you."),
+        ], vec!["target_user_id"]), false, true),
         tool("inbox_list", "List chat attachments (inbox)", "List files people UPLOADED to this channel's chat (pdf/csv/images/docx). Each has a FILE_ID (uuid); open one with inbox_open. Read-only; these are NOT your workspace files — save your own work with desk_* instead.", object_schema(vec![channel_id_prop()], vec!["channel_id"]), true, false),
         tool("inbox_open", "Open a chat attachment by file_id", "Open a channel attachment by its FILE_ID (from inbox_list). Text files (csv/txt/md/json) return content directly. Binaries (image/pdf/zip/docx) first return kind:\"binary\"; re-open with as_base64:true to get the raw bytes as base64 (<=8MB) through THIS tool, then decode them locally (e.g. write to a file and unzip). Do NOT try to fetch download_url yourself — it is an authenticated human-UI endpoint and you have no gateway session for it (you would just get 401). Attachments are read-only — to edit, copy the content into your workspace with desk_write.", object_schema(vec![
             channel_id_prop(),
@@ -902,5 +913,32 @@ mod tests {
                 .unwrap();
         let call = build_resource_call(&client, "post_message", &args).unwrap();
         assert!(call.params.get("context_bundle").is_none());
+    }
+
+    #[test]
+    fn open_direct_message_maps_to_dm_open() {
+        let client = test_client();
+        let args: Map<String, Value> = serde_json::from_value(json!({
+            "target_user_id": "11111111-1111-1111-1111-111111111111"
+        }))
+        .unwrap();
+        let call = build_resource_call(&client, "open_direct_message", &args).unwrap();
+        assert_eq!(call.resource, "dm.open");
+        assert_eq!(
+            call.params["target_user_id"],
+            json!("11111111-1111-1111-1111-111111111111")
+        );
+    }
+
+    #[test]
+    fn open_direct_message_schema_requires_target_user() {
+        let definition = tool_definitions()
+            .into_iter()
+            .find(|tool| tool["name"] == "open_direct_message")
+            .expect("open_direct_message tool");
+        assert_eq!(
+            definition["inputSchema"]["required"],
+            json!(["target_user_id"])
+        );
     }
 }

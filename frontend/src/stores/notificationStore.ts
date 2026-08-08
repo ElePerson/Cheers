@@ -12,6 +12,7 @@ interface NotificationState {
   upsert: (item: NotificationItem) => void;
   /** Drop one item after it's been accepted/declined. */
   remove: (item: NotificationItem) => void;
+  removeById: (id: string) => void;
   /** (Re)hydrate from the server. */
   refresh: () => Promise<void>;
 }
@@ -30,6 +31,8 @@ export const useNotificationStore = create<NotificationState>((set) => ({
     set((s) => ({
       items: s.items.filter((i) => notificationKey(i) !== notificationKey(item)),
     })),
+  removeById: (id) =>
+    set((s) => ({ items: s.items.filter((item) => item.id !== id) })),
   refresh: async () => {
     try {
       const items = await listNotifications();

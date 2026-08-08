@@ -24,8 +24,9 @@ struct ActivityView: View {
     private var filteredInvites: [NotificationDto] {
         guard !searchText.isEmpty else { return activity.invites }
         return activity.invites.filter { invite in
-            invite.title.localizedCaseInsensitiveContains(searchText)
-                || (invite.invitedBy?.localizedCaseInsensitiveContains(searchText) ?? false)
+                invite.title.localizedCaseInsensitiveContains(searchText)
+                || (invite.actorName?.localizedCaseInsensitiveContains(searchText) ?? false)
+                || (invite.botName?.localizedCaseInsensitiveContains(searchText) ?? false)
         }
     }
 
@@ -135,7 +136,7 @@ struct ActivityView: View {
     private func inviteCard(_ invite: NotificationDto) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 9) {
-                Image(systemName: invite.isChannelInvite ? "number" : "square.grid.2x2")
+                Image(systemName: activityIcon(invite))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.textSecondary)
                     .frame(width: 30, height: 30)
@@ -146,10 +147,18 @@ struct ActivityView: View {
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
             }
-            if let by = invite.invitedBy {
-                Text("\(by) invited you to join")
+            if let by = invite.actorName {
+                Text("\(by) · \(activityLabel(invite))")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
+            }
+            if let botName = invite.botName {
+                Text("Bot: \(botName)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            if let cwd = invite.requestedCwd {
+                Text(cwd).font(.caption.monospaced()).foregroundStyle(Theme.textSecondary)
             }
             HStack(spacing: 8) {
                 Button { Task { await activity.acceptInvite(invite) } } label: {
@@ -175,5 +184,22 @@ struct ActivityView: View {
         .padding(12)
         .background(Theme.bgSurface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func activityIcon(_ invite: NotificationDto) -> String {
+        switch invite.kind {
+        case "friend_request": return "person.badge.plus"
+        case "channel_invite": return "number"
+        case "bot_channel_invite": return "cpu"
+        default: return "square.grid.2x2"
+        }
+    }
+
+    private func activityLabel(_ invite: NotificationDto) -> String {
+        switch invite.kind {
+        case "friend_request": return "sent a friend request"
+        case "bot_channel_invite": return "asked to add a bot"
+        default: return "invited you to join"
+        }
     }
 }

@@ -31,12 +31,13 @@ registerRoute(
 
 /** Payload shape produced by the gateway (server/src/infra/web_push.rs callers). */
 interface PushPayload {
-  kind?: "permission_request" | "mention";
+  kind?: "permission_request" | "mention" | "activity" | "dm";
   channel_id?: string;
   msg_id?: string;
   title?: string;
   body?: string;
   sender_name?: string | null;
+  notification_id?: string;
 }
 
 self.addEventListener("push", (event) => {
@@ -66,7 +67,7 @@ async function showPushNotification(payload: PushPayload): Promise<void> {
     icon: "/pwa-192.png",
     badge: "/pwa-192.png",
     // One notification per message: a re-delivered push replaces, not stacks.
-    tag: payload.msg_id || undefined,
+    tag: payload.notification_id || payload.msg_id || undefined,
     data: payload,
   });
 }
@@ -127,7 +128,9 @@ async function openFromNotification(payload: PushPayload): Promise<void> {
     } catch {
       /* focus can be refused; still deliver the target */
     }
-    if (payload.channel_id) {
+    if (payload.kind === "activity") {
+      win.postMessage({ type: "cheers:open-activity" });
+    } else if (payload.channel_id) {
       win.postMessage({
         type: "cheers:open-channel",
         channelId: payload.channel_id,
@@ -138,10 +141,12 @@ async function openFromNotification(payload: PushPayload): Promise<void> {
   }
   // Cold start: carry the target in query params; the push bridge consumes
   // them on boot (and strips them from the URL).
-  const url = payload.channel_id
+  const url = payload.kind === "activity"
+    ? "/chat?activity=1"
+    : payload.channel_id
     ? `/chat?push_channel=${encodeURIComponent(payload.channel_id)}${
         payload.msg_id ? `&push_msg=${encodeURIComponent(payload.msg_id)}` : ""
       }`
-    : "/";
+    : "/chat";
   await self.clients.openWindow(url);
 }
